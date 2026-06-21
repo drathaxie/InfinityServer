@@ -1,0 +1,102 @@
+{
+ "Dragonslayer": {
+  "ID": 582,
+  "Bundle": {
+   "ID": 25160,
+   "Name": "Dragonslayer",
+   "Filename": "armors/25160_dragonslayer_skin.unity3d",
+   "VersionStage": 3,
+   "VersionLive": 3
+  },
+  "ClassParticleBundle": {
+   "ID": 78052,
+   "Name": "classDragonSlayer_Default",
+   "Filename": "gameassets/classes/78052_classdragonslayer_default.unity3d",
+   "VersionStage": 2,
+   "VersionLive": 2
+  },
+  "PrefabName": "ArmorSlots",
+  "EquipSpot": 6,
+  "ItemType": 21
+ },
+ "Mage": {
+  "ID": 15653,
+  "Bundle": {
+   "ID": 15774,
+   "Name": "Mage",
+   "Filename": "armors/15774_BaseMageRedesign3R2.unity3d",
+   "VersionStage": 3,
+   "VersionLive": 3
+  },
+  "ClassParticleBundle": {
+   "ID": 78048,
+   "Name": "classMage_Default",
+   "Filename": "gameassets/classes/78048_classmage_default.unity3d",
+   "VersionStage": 2,
+   "VersionLive": 2
+  },
+  "PrefabName": "ArmorSlots",
+  "EquipSpot": 6,
+  "ItemType": 21
+ },
+ "Healer": {
+  "ID": 15651,
+  "Bundle": {
+   "ID": 15772,
+   "Name": "Healer",
+   "Filename": "armors/15772_NewHealerR2.unity3d",
+   "VersionStage": 3,
+   "VersionLive": 3
+  },
+  "ClassParticleBundle": {
+   "ID": 78051,
+   "Name": "classHealer_Default",
+   "Filename": "gameassets/classes/78051_classhealer_default.unity3d",
+   "VersionStage": 1,
+   "VersionLive": 1
+  },
+  "PrefabName": "ArmorSlots",
+  "EquipSpot": 6,
+  "ItemType": 21
+ },
+ "Warrior": {
+  "ID": 15654,
+  "Bundle": {
+   "ID": 15775,
+   "Name": "Warrior",
+   "Filename": "armors/15775_NewWarriorB2.unity3d",
+   "VersionStage": 3,
+   "VersionLive": 3
+  },
+  "ClassParticleBundle": {
+   "ID": 78047,
+   "Name": "classWarrior_Default",
+   "Filename": "gameassets/classes/78047_classwarrior_default.unity3d",
+   "VersionStage": 1,
+   "VersionLive": 1
+  },
+  "PrefabName": "ArmorSlots",
+  "EquipSpot": 6,
+  "ItemType": 21
+ },
+ "Rogue": {
+  "ID": 15652,
+  "Bundle": {
+   "ID": 15773,
+   "Name": "Rogue",
+   "Filename": "armors/15773_BaseRogue2xx.unity3d",
+   "VersionStage": 3,
+   "VersionLive": 3
+  },
+  "ClassParticleBundle": {
+   "ID": 78050,
+   "Name": "classRogue_Default",
+   "Filename": "gameassets/classes/78050_classrogue_default.unity3d",
+   "VersionStage": 1,
+   "VersionLive": 1
+  },
+  "PrefabName": "ArmorSlots",
+  "EquipSpot": 6,
+  "ItemType": 21
+ }
+}

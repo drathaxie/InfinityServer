@@ -1,0 +1,90 @@
+{
+  "ID": 148,
+  "nextElementId": 32,
+  "name": "Almanac",
+  "bgImage": "",
+  "bgImageScale": 1,
+  "startingPanels": [
+    1,
+    2
+  ],
+  "panels": [
+    {
+      "PID": 2,
+      "name": "Right Panel Start",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": []
+    },
+    {
+      "PID": 1,
+      "name": "Middle Panel Start",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 29,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Congratulations! You defeated the Boss monster. \n\nIf you want to battle them again, you'll have to return in a little while.  They need to recover their strength, and they will not come back while you are still here.\n\nWhy not take the time to continue on your quests?",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": []
+        },
+        {
+          "ID": 31,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": "",
+          "icon": "",
+          "reqCondition": "AND"
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 311,
+      "name": "Almanac",
+      "subtitle": "",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 1
+}

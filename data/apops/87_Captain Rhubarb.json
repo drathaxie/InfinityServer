@@ -1,0 +1,121 @@
+{
+  "ID": 87,
+  "nextElementId": 31,
+  "name": "Captain Rhubarb",
+  "bgImage": "",
+  "bgImageScale": 1,
+  "startingPanels": [
+    1,
+    2
+  ],
+  "panels": [
+    {
+      "PID": 1,
+      "name": "Buttons",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": []
+    },
+    {
+      "PID": 2,
+      "name": "Speach Bubble",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 28,
+          "type": "Header",
+          "text": "Captain Rhubarb",
+          "subtitle": "",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "requirements": []
+        },
+        {
+          "ID": 29,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Avast me matey! Welcome to the \"War Tent.\" We be work'n on a plan to conquer the bugs infestin' these parts.\n\nKeep yer eyes peeled and report any unsavory sights to the crew in the Discord server.",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": []
+        }
+      ]
+    },
+    {
+      "PID": 3,
+      "name": "New Panel",
+      "panelPosition": 1,
+      "hidePanelBG": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "changeApopBG": "",
+      "changeApopBGScale": 1,
+      "restoreBGOnClose": false,
+      "elements": [
+        {
+          "ID": 14,
+          "type": "Header",
+          "text": "Header Title",
+          "subtitle": "",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "requirements": []
+        },
+        {
+          "ID": 15,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Hello World",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": []
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 32,
+      "name": "Captain Rhubarb",
+      "subtitle": "Pirate",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 1,
+  "IsSingleAction": false
+}

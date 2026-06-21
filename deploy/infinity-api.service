@@ -1,0 +1,17 @@
+[Unit]
+Description=InfinityServer Web API (HTTP 8182)
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/infinity/server
+EnvironmentFile=/opt/infinity/server/.pg.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/infinity/.venv/bin/python webapi.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

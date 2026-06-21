@@ -1,0 +1,81 @@
+{
+  "ID": 20,
+  "nextElementId": 7,
+  "name": "Stryche",
+  "bgImage": "",
+  "bgImageScale": 1.3,
+  "startingPanels": [
+    2,
+    1
+  ],
+  "panels": [
+    {
+      "PID": 1,
+      "name": "First Choices",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": []
+    },
+    {
+      "PID": 2,
+      "name": "Bubble Info",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "text": "Stryche",
+          "subtitle": "HeroMart Knight",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "ID": 4,
+          "type": "Header",
+          "requirements": []
+        },
+        {
+          "text": "My duty is to guard this outhouse until the King has finished his unholy quest within. ",
+          "color": "#1d075a",
+          "changeBoxColor": "#f6eaea",
+          "nameplateTextColor": "#ecf74a",
+          "nameplateBoxColor": "#2321ba",
+          "hideLead": false,
+          "borderless": true,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "ID": 5,
+          "type": "Bubble",
+          "requirements": []
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 43,
+      "name": "Stryche",
+      "subtitle": "",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 1
+}

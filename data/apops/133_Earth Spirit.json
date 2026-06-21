@@ -1,0 +1,133 @@
+{
+  "ID": 133,
+  "nextElementId": 33,
+  "name": "Earth Spirit",
+  "bgImage": "",
+  "bgImageScale": 1,
+  "startingPanels": [
+    1,
+    2
+  ],
+  "panels": [
+    {
+      "PID": 2,
+      "name": "Right Panel Start",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": []
+    },
+    {
+      "PID": 1,
+      "name": "Middle Panel Start",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 29,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "I have been waiting an eternity for someone to break my curse and restore peace to my troubled soul. The two of you working together may be just the ticket.",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": []
+        },
+        {
+          "ID": 32,
+          "type": "Button",
+          "targets": [
+            122,
+            119,
+            121
+          ],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "ShowQuests",
+          "label": "Quest",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [
+            {
+              "RID": 2,
+              "Type": "Quest",
+              "ID": 121,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            },
+            {
+              "RID": 3,
+              "Type": "QNC",
+              "ID": 119,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 262,
+      "name": "Earth Thief",
+      "subtitle": "",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": "Idle"
+    }
+  ],
+  "freezeClient": 1
+}

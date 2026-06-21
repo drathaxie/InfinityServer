@@ -1,0 +1,145 @@
+{
+  "ID": 97,
+  "nextElementId": 32,
+  "name": "Aria",
+  "bgImage": "",
+  "bgImageScale": 1,
+  "startingPanels": [
+    1,
+    2
+  ],
+  "panels": [
+    {
+      "PID": 1,
+      "name": "Buttons",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": []
+    },
+    {
+      "PID": 2,
+      "name": "Speach Bubble",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 28,
+          "type": "Header",
+          "text": "Aria",
+          "subtitle": "",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "requirements": []
+        },
+        {
+          "ID": 29,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Welcome to my pet shop! Sorry that everything's a mess right now. I'm still setting up. It's pretty wild that the Kickstarter Backer's have more pets than I do currently!",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": []
+        },
+        {
+          "ID": 31,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        }
+      ]
+    },
+    {
+      "PID": 3,
+      "name": "New Panel",
+      "panelPosition": 1,
+      "hidePanelBG": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "changeApopBG": "",
+      "changeApopBGScale": 1,
+      "restoreBGOnClose": false,
+      "elements": [
+        {
+          "ID": 14,
+          "type": "Header",
+          "text": "Header Title",
+          "subtitle": "",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "requirements": []
+        },
+        {
+          "ID": 15,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Hello World",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": []
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 60,
+      "name": "Aria",
+      "subtitle": "Pet Shop Owner",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 1,
+  "IsSingleAction": false
+}

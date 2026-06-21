@@ -1,0 +1,52 @@
+# ─── Secrets (NEVER commit) ───────────────────────────────────────────────
+.env
+.pg.env
+server/.pg.env
+server/.r2.env
+.r2.env
+*.key
+*.pem
+id_rsa*
+id_ed25519*
+
+# ─── Packet captures (raw payloads contain PII — never commit) ─────────────
+# The server is fully generative now and replays NO capture. capture/ keeps only
+# the extract/import tooling that built the data/ catalog; raw captured payloads
+# (which carry account PII) stay out of the repo entirely.
+capture/*.json
+capture/*.jsonl
+capture/samples/
+server/unhandled.jsonl
+server/webapi_unhandled.jsonl
+
+# ─── Decompiled client (Artix's copyrighted code — reference only) ────────
+docs/decomp/
+
+# ─── Local database / per-deployment state ────────────────────────────────
+data/*.db
+data/*.db-journal
+*.sqlite
+*.sqlite3
+
+# ─── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# ─── C# / .NET build output (mod) ─────────────────────────────────────────
+[Bb]in/
+[Oo]bj/
+*.zip
+mod/doorstop_extract/
+
+# ─── Build / dist ─────────────────────────────────────────────────────────
+dist/
+
+# ─── OS cruft ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini

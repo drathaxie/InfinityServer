@@ -1,0 +1,1566 @@
+{
+  "responses": {
+    "sAct": {
+      "type": "ResponseActions",
+      "cmd": "sAct",
+      "fields": {
+        "id": "int",
+        "nam": "string",
+        "icon": "string",
+        "act": "Skill.ActionType",
+        "desc": "string",
+        "autoHRange": "float",
+        "autoVRange": "float",
+        "regMana": "int",
+        "particleList": "List<string>"
+      }
+    },
+    "addGoldXP": {
+      "type": "ResponseAddGoldXP",
+      "cmd": "addGoldXP",
+      "fields": {
+        "val": "int",
+        "bonus": "int",
+        "CP": "Vals",
+        "Exp": "Vals",
+        "ExpTotal": "int",
+        "Rep": "Vals",
+        "Gold": "Vals"
+      }
+    },
+    "addItems": {
+      "type": "ResponseAddOrUpdateItems",
+      "cmd": "addItems",
+      "fields": {
+        "items": "List<InventoryItem>",
+        "patternItems": "List<PatternItem>",
+        "bankedItems": "List<InventoryItem>"
+      }
+    },
+    "AFK": {
+      "type": "ResponseAFK",
+      "cmd": "AFK",
+      "fields": {
+        "unm": "string",
+        "isAFK": "bool"
+      }
+    },
+    "AreaAdd": {
+      "type": "ResponseAreaAdd",
+      "cmd": "AreaAdd",
+      "fields": {
+        "userData": "ComUserData"
+      }
+    },
+    "AreaJoin": {
+      "type": "ResponseAreaJoin",
+      "cmd": "AreaJoin",
+      "fields": {
+        "areaName": "string",
+        "strMapName": "string",
+        "DisplayName": "string",
+        "Bundle": "AssetBundleData",
+        "PrefabName": "string",
+        "SoundtrackBundle": "AssetBundleData",
+        "SoundtrackPrefabName": "string",
+        "SoundtrackID": "int",
+        "intType": "int",
+        "sExtra": "string",
+        "areaId": "int",
+        "Frame": "string",
+        "Pad": "string",
+        "x": "float",
+        "y": "float",
+        "isGoTo": "bool",
+        "mapHasGeometry": "bool",
+        "serverSpawn": "bool",
+        "pvpTeam": "int",
+        "monBranch": "Monbranch[]",
+        "uoBranch": "List<ComUserData>",
+        "QuestIDs": "List<int>",
+        "houseData": "mapHouseData"
+      }
+    },
+    "AreaRemove": {
+      "type": "ResponseAreaRemove",
+      "cmd": "AreaRemove",
+      "fields": {
+        "uid": "int",
+        "unm": "string"
+      }
+    },
+    "Attack": {
+      "type": "ResponseAttack",
+      "cmd": "Attack",
+      "fields": {
+        "CasterEntity": "Entity",
+        "Nodes": "JArray",
+        "Slot": "int",
+        "Wait": "bool",
+        "StatusCode": "NodeStatusCode",
+        "Error": "string"
+      }
+    },
+    "igai": {
+      "type": "ResponseAttackInput",
+      "cmd": "igai",
+      "fields": {
+        "CasterEntity": "Entity",
+        "Response": "JObject",
+        "ReturnType": "ReturnTypes",
+        "ContextId": "string"
+      }
+    },
+    "AuraChange": {
+      "type": "ResponseAuraChange",
+      "cmd": "AuraChange",
+      "fields": {
+        "uniquenessType": "byte",
+        "casterTS": "string",
+        "Icon": "string",
+        "auraCmd": "auraAction",
+        "nam": "string",
+        "Target": "string"
+      }
+    },
+    "BankSwap": {
+      "type": "ResponseBankSwap",
+      "cmd": "BankSwap",
+      "fields": {
+        "invID": "int",
+        "bankID": "int"
+      }
+    },
+    "BankToInv": {
+      "type": "ResponseBankToInv",
+      "cmd": "BankToInv",
+      "fields": {
+        "bankID": "int"
+      }
+    },
+    "bulkOperation": {
+      "type": "ResponseBulkOperation",
+      "cmd": "bulkOperation",
+      "fields": {
+        "Success": "bool",
+        "IsLootAll": "bool",
+        "Message": "string",
+        "consumedLoot": "List<InventoryItem>"
+      }
+    },
+    "buyItem": {
+      "type": "ResponseBuyItem",
+      "cmd": "buyItem",
+      "fields": {
+        "item": "InventoryItem",
+        "houseItem": "houseItem",
+        "IsDrop": "bool",
+        "Cost": "int",
+        "Success": "bool",
+        "Show": "bool",
+        "Message": "string"
+      }
+    },
+    "buyPattern": {
+      "type": "ResponseBuyPattern",
+      "cmd": "buyPattern",
+      "fields": {
+        "patternItem": "PatternItem",
+        "Success": "bool"
+      }
+    },
+    "CellMove": {
+      "type": "ResponseCellMove",
+      "cmd": "CellMove",
+      "fields": {
+        "unm": "string",
+        "x": "float",
+        "y": "float",
+        "Frame": "string",
+        "Pad": "string"
+      }
+    },
+    "changeColor": {
+      "type": "ResponseChangeColor",
+      "cmd": "changeColor",
+      "fields": {
+        "SkinColor": "int",
+        "HairColor": "int",
+        "EyeColor": "int",
+        "BaseColor": "int",
+        "TrimColor": "int",
+        "AccessoryColor": "int",
+        "ID": "int"
+      }
+    },
+    "ChangeState": {
+      "type": "ResponseChangeState",
+      "cmd": "ChangeState",
+      "fields": {
+        "unm": "string",
+        "State": "Entity.State"
+      }
+    },
+    "chatm": {
+      "type": "ResponseChat",
+      "cmd": "chatm",
+      "fields": {
+        "tName": "string",
+        "msg": "string",
+        "Name": "string",
+        "channel": "string",
+        "ID": "int",
+        "isStaff": "bool"
+      }
+    },
+    "updateClass": {
+      "type": "ResponseClass",
+      "cmd": "updateClass",
+      "fields": {
+        "uid": "int",
+        "ResourceColor": "int",
+        "RP": "int",
+        "MaxRP": "int",
+        "Threshold": "int",
+        "ThresholdColor": "int"
+      }
+    },
+    "defaultclasses": {
+      "type": "ResponseDefaultClasses",
+      "cmd": "defaultclasses",
+      "fields": {
+        "Rogue": "string",
+        "Warrior": "string",
+        "Mage": "string",
+        "Healer": "string"
+      }
+    },
+    "discardDrop": {
+      "type": "ResponseDiscardDrop",
+      "cmd": "discardDrop",
+      "fields": {
+        "bSuccess": "bool",
+        "message": "string",
+        "ItemID": "int",
+        "LootID": "int"
+      }
+    },
+    "emotea": {
+      "type": "ResponseEmote",
+      "cmd": "emotea",
+      "fields": {
+        "strEmote": "string",
+        "userID": "int"
+      }
+    },
+    "sEAct": {
+      "type": "ResponseEquipActions",
+      "cmd": "sEAct",
+      "fields": {
+        "particleList": "List<string>"
+      }
+    },
+    "equipHouse": {
+      "type": "ResponseEquipHouse",
+      "cmd": "equipHouse",
+      "fields": {
+        "ItemID": "int",
+        "Msg": "string"
+      }
+    },
+    "equipItem": {
+      "type": "ResponseEquipItem",
+      "cmd": "equipItem",
+      "fields": {
+        "equippedItem": "EquipItem",
+        "player": "string",
+        "equipSpot": "EquipSpots",
+        "sClass": "string"
+      }
+    },
+    "firstLogin": {
+      "type": "ResponseFirstLogin",
+      "cmd": "firstLogin",
+      "fields": {}
+    },
+    "addFriend": {
+      "type": "ResponseFriendAdd",
+      "cmd": "addFriend",
+      "fields": {
+        "friend": "FriendObject"
+      }
+    },
+    "deleteFriend": {
+      "type": "ResponseFriendDelete",
+      "cmd": "deleteFriend",
+      "fields": {
+        "ID": "int"
+      }
+    },
+    "requestFriend": {
+      "type": "ResponseFriendRequest",
+      "cmd": "requestFriend",
+      "fields": {
+        "unm": "string"
+      }
+    },
+    "genderSwap": {
+      "type": "ResponseGenderSwap",
+      "cmd": "genderSwap",
+      "fields": {
+        "success": "bool",
+        "uid": "int",
+        "gender": "string",
+        "HairID": "int",
+        "strHairName": "string"
+      }
+    },
+    "getApop": {
+      "type": "ResponseGetApop",
+      "cmd": "getApop",
+      "fields": {}
+    },
+    "getCutscene": {
+      "type": "ResponseGetCutscene",
+      "cmd": "getCutscene",
+      "fields": {
+        "cutsceneData": "CellData"
+      }
+    },
+    "getDialog": {
+      "type": "ResponseGetDialog",
+      "cmd": "getDialog",
+      "fields": {
+        "data": "DialogData"
+      }
+    },
+    "getEquip": {
+      "type": "ResponseGetEquip",
+      "cmd": "getEquip",
+      "fields": {}
+    },
+    "getLoot": {
+      "type": "ResponseGetLoot",
+      "cmd": "getLoot",
+      "fields": {
+        "bSuccess": "bool",
+        "message": "string",
+        "ItemID": "int",
+        "LootID": "int"
+      }
+    },
+    "getQuests": {
+      "type": "ResponseGetQuests",
+      "cmd": "getQuests",
+      "fields": {}
+    },
+    "gAddMem": {
+      "type": "ResponseGuildAddMember",
+      "cmd": "gAddMem",
+      "fields": {
+        "player": "GuildPlayer"
+      }
+    },
+    "guildDemote": {
+      "type": "ResponseGuildDemote",
+      "cmd": "guildDemote",
+      "fields": {
+        "rank": "int",
+        "userID": "int"
+      }
+    },
+    "guildinvite": {
+      "type": "ResponseGuildInvite",
+      "cmd": "guildinvite",
+      "fields": {
+        "guildID": "int",
+        "owner": "string",
+        "gName": "string"
+      }
+    },
+    "gMOTD": {
+      "type": "ResponseGuildMOTD",
+      "cmd": "gMOTD",
+      "fields": {
+        "MOTD": "string"
+      }
+    },
+    "guildPromote": {
+      "type": "ResponseGuildPromote",
+      "cmd": "guildPromote",
+      "fields": {
+        "rank": "int",
+        "userID": "int"
+      }
+    },
+    "guildRemove": {
+      "type": "ResponseGuildRemove",
+      "cmd": "guildRemove",
+      "fields": {
+        "UserID": "int"
+      }
+    },
+    "hitboxes": {
+      "type": "ResponseHitboxes",
+      "cmd": "hitboxes",
+      "fields": {
+        "entries": "List<HitboxEntry>"
+      }
+    },
+    "houseSave": {
+      "type": "ResponseHouseSave",
+      "cmd": "houseSave",
+      "fields": {
+        "success": "bool",
+        "reason": "string"
+      }
+    },
+    "hpmp": {
+      "type": "ResponseHPMP",
+      "cmd": "hpmp",
+      "fields": {
+        "unm": "string",
+        "HP": "int",
+        "RP": "int",
+        "State": "Entity.State",
+        "Resting": "bool"
+      }
+    },
+    "ignoreLoad": {
+      "type": "ResponseIgnoreLoad",
+      "cmd": "ignoreLoad",
+      "fields": {}
+    },
+    "initPlayer": {
+      "type": "ResponseInitPlayer",
+      "cmd": "initPlayer",
+      "fields": {
+        "factionID": "int",
+        "charFactionID": "int",
+        "factionName": "string",
+        "val": "int",
+        "ItemID": "int",
+        "CharItemID": "int",
+        "Quantity": "int",
+        "Banked": "bool",
+        "Equipped": "bool",
+        "purchaseDate": "DateTime?",
+        "ItemPattern": "Pattern",
+        "enhCount": "byte",
+        "ProcID": "int",
+        "Meta": "string",
+        "user": "ComUserData",
+        "userPrefs": "UserPrefData",
+        "playerInfo": "PlayerInfo",
+        "items": "List<InventoryItem>",
+        "loot": "List<InventoryItem>",
+        "patterns": "List<PatternItem>",
+        "houseItems": "List<houseItem>",
+        "friends": "List<FriendObject>",
+        "Actions": "ResponseEquipActions"
+      }
+    },
+    "inspectPlayer": {
+      "type": "ResponseInspectPlayer",
+      "cmd": "inspectPlayer",
+      "fields": {
+        "items": "List<InventoryItem>"
+      }
+    },
+    "InvToBank": {
+      "type": "ResponseInvToBank",
+      "cmd": "InvToBank",
+      "fields": {
+        "invID": "int"
+      }
+    },
+    "itemQuery": {
+      "type": "ResponseItemQuery",
+      "cmd": "itemQuery",
+      "fields": {
+        "item": "Item"
+      }
+    },
+    "joinGuild": {
+      "type": "ResponsejoinGuildBroadcast",
+      "cmd": "joinGuild",
+      "fields": {
+        "UserID": "int",
+        "guildName": "string"
+      }
+    },
+    "kicked": {
+      "type": "ResponseKick",
+      "cmd": "kicked",
+      "fields": {
+        "message": "string"
+      }
+    },
+    "LevelUp": {
+      "type": "ResponseLevelUp",
+      "cmd": "LevelUp",
+      "fields": {
+        "unm": "string",
+        "Level": "int",
+        "HPMax": "int",
+        "ExpToLevel": "int",
+        "Exp": "int"
+      }
+    },
+    "LoadBank": {
+      "type": "ResponseLoadBank",
+      "cmd": "LoadBank",
+      "fields": {
+        "items": "List<InventoryItem>"
+      }
+    },
+    "loadHairShop": {
+      "type": "ResponseLoadHairShop",
+      "cmd": "loadHairShop",
+      "fields": {
+        "HairShopID": "int"
+      }
+    },
+    "loadShop": {
+      "type": "ResponseLoadShop",
+      "cmd": "loadShop",
+      "fields": {
+        "shop": "shopData"
+      }
+    },
+    "loginResponse": {
+      "type": "ResponseLogin",
+      "cmd": "loginResponse",
+      "fields": {
+        "sNews": "string",
+        "sMap": "string",
+        "sBook": "string",
+        "sFBC": "string",
+        "sAssets": "string",
+        "sWTSandbox": "string",
+        "gMenu": "string",
+        "sVideo": "string",
+        "Success": "bool",
+        "UserID": "int",
+        "Username": "string",
+        "serverTime": "DateTime?",
+        "MOTD": "string",
+        "info": "string",
+        "failMessage": "string",
+        "infoData": "ResponseLoginInfoData"
+      }
+    },
+    "loginQueue": {
+      "type": "ResponseLoginQueue",
+      "cmd": "loginQueue",
+      "fields": {
+        "ahead": "int"
+      }
+    },
+    "machineInteract": {
+      "type": "ResponseMachineInteraction",
+      "cmd": "machineInteract",
+      "fields": {
+        "machineID": "int"
+      }
+    },
+    "ResponseMachines": {
+      "type": "ResponseMachines",
+      "cmd": null,
+      "fields": {}
+    },
+    "EditResponse": {
+      "type": "ResponseMapEdit",
+      "cmd": "EditResponse",
+      "fields": {
+        "success": "bool",
+        "msg": "string"
+      }
+    },
+    "mapGen": {
+      "type": "ResponseMapGen",
+      "cmd": "mapGen",
+      "fields": {}
+    },
+    "mapGeometry": {
+      "type": "ResponseMapGeometry",
+      "cmd": "mapGeometry",
+      "fields": {
+        "hasGeometry": "bool"
+      }
+    },
+    "MapPadData": {
+      "type": "ResponseMapPadData",
+      "cmd": "MapPadData",
+      "fields": {}
+    },
+    "getMonBranch": {
+      "type": "ResponseMonBranch",
+      "cmd": "getMonBranch",
+      "fields": {
+        "template": "Monbranch"
+      }
+    },
+    "MonReq": {
+      "type": "ResponseMonReq",
+      "cmd": "MonReq",
+      "fields": {
+        "TargetString": "string",
+        "ReqTS": "long",
+        "Response": "JObject"
+      }
+    },
+    "movement": {
+      "type": "ResponseMovement",
+      "cmd": "movement",
+      "fields": {
+        "PlayerID": "int",
+        "position": "ComVector2",
+        "direction": "ComVector2"
+      }
+    },
+    "mtls": {
+      "type": "ResponseMtls",
+      "cmd": "mtls",
+      "fields": {
+        "monMapID": "int",
+        "HP": "int"
+      }
+    },
+    "newGuild": {
+      "type": "ResponseNewGuild",
+      "cmd": "newGuild",
+      "fields": {
+        "guild": "Guild"
+      }
+    },
+    "rNotify": {
+      "type": "ResponseNotify",
+      "cmd": "rNotify",
+      "fields": {
+        "msg": "string"
+      }
+    },
+    "OpenApop": {
+      "type": "ResponseOpenApop",
+      "cmd": "OpenApop",
+      "fields": {
+        "ApopID": "int",
+        "MonMapID": "int"
+      }
+    },
+    "pc": {
+      "type": "ResponsePartyClose",
+      "cmd": "pc",
+      "fields": {
+        "pid": "int"
+      }
+    },
+    "pa": {
+      "type": "ResponsePartyData",
+      "cmd": "pa",
+      "fields": {
+        "members": "List<PartyMemberData>",
+        "owner": "string",
+        "pid": "int"
+      }
+    },
+    "pi": {
+      "type": "ResponsePartyInvite",
+      "cmd": "pi",
+      "fields": {
+        "leaderName": "string",
+        "ownerID": "int"
+      }
+    },
+    "pp": {
+      "type": "ResponsePartyPromote",
+      "cmd": "pp",
+      "fields": {
+        "Owner": "string"
+      }
+    },
+    "pr": {
+      "type": "ResponsePartyRemove",
+      "cmd": "pr",
+      "fields": {
+        "pid": "int",
+        "typ": "string",
+        "unm": "string"
+      }
+    },
+    "pickupClear": {
+      "type": "ResponsePickupClear",
+      "cmd": "pickupClear",
+      "fields": {}
+    },
+    "pickupCollect": {
+      "type": "ResponsePickupCollect",
+      "cmd": "pickupCollect",
+      "fields": {
+        "PickupId": "int",
+        "Auras": "List<string>"
+      }
+    },
+    "PlayerDeath": {
+      "type": "ResponsePlayerDeath",
+      "cmd": "PlayerDeath",
+      "fields": {
+        "userID": "int",
+        "monPad": "int",
+        "entType": "int"
+      }
+    },
+    "QuestAccept": {
+      "type": "ResponseQuestAccept",
+      "cmd": "QuestAccept",
+      "fields": {
+        "QuestID": "int"
+      }
+    },
+    "QComp": {
+      "type": "ResponseQuestComplete",
+      "cmd": "QComp",
+      "fields": {
+        "ID": "int",
+        "Success": "bool",
+        "Title": "string",
+        "Message": "string",
+        "IndexType": "int",
+        "NotificationType": "int"
+      }
+    },
+    "questData": {
+      "type": "ResponseQuestData",
+      "cmd": "questData",
+      "fields": {
+        "questObjectives": "List<QuestObj>",
+        "questsAccepted": "List<int>",
+        "questsCopmlete": "List<byte>",
+        "TrackedID": "int",
+        "quests": "List<QuestData>"
+      }
+    },
+    "QuestObjective": {
+      "type": "ResponseQuestObjective",
+      "cmd": "QuestObjective",
+      "fields": {
+        "QuestID": "int",
+        "QOID": "int",
+        "Qty": "int"
+      }
+    },
+    "QuestRemove": {
+      "type": "ResponseQuestRemove",
+      "cmd": "QuestRemove",
+      "fields": {
+        "ID": "int"
+      }
+    },
+    "removePattern": {
+      "type": "ResponseRemovePattern",
+      "cmd": "removePattern",
+      "fields": {
+        "CharPatternID": "int"
+      }
+    },
+    "updateQuestBits": {
+      "type": "ResponseResetQuestBits",
+      "cmd": "updateQuestBits",
+      "fields": {
+        "qComplete": "List<byte>"
+      }
+    },
+    "RespawnMon": {
+      "type": "ResponseRespawnMon",
+      "cmd": "RespawnMon",
+      "fields": {
+        "monID": "int",
+        "monMapID": "int",
+        "Frame": "string"
+      }
+    },
+    "playerRes": {
+      "type": "ResponseResPlayer",
+      "cmd": "playerRes",
+      "fields": {
+        "unm": "string",
+        "HP": "int",
+        "MaxHP": "int"
+      }
+    },
+    "rewardPlayer": {
+      "type": "ResponseRewardPlayer",
+      "cmd": "rewardPlayer",
+      "fields": {
+        "questObjectives": "List<QuestObj>",
+        "showDropWindow": "bool",
+        "Exp": "Exp",
+        "ExpTotal": "int",
+        "CP": "Exp",
+        "typ": "string",
+        "monID": "string",
+        "factionID": "int",
+        "Gold": "Gold",
+        "items": "InventoryItem[]",
+        "autoDiscarded": "List<InventoryItem>"
+      }
+    },
+    "sellItem": {
+      "type": "ResponseSellItem",
+      "cmd": "sellItem",
+      "fields": {
+        "CharItemID": "int",
+        "Coins": "bool",
+        "Amount": "int",
+        "Success": "bool",
+        "Message": "string"
+      }
+    },
+    "srvhitbox": {
+      "type": "ResponseServerHitbox",
+      "cmd": "srvhitbox",
+      "fields": {
+        "cx": "float",
+        "cy": "float",
+        "bhw": "float",
+        "bhh": "float"
+      }
+    },
+    "srvrange": {
+      "type": "ResponseServerRange",
+      "cmd": "srvrange",
+      "fields": {
+        "cx": "float",
+        "cy": "float",
+        "hw": "float",
+        "hh": "float",
+        "targets": "string[]"
+      }
+    },
+    "sfClone": {
+      "type": "ResponseSfClone",
+      "cmd": "sfClone",
+      "fields": {
+        "Name": "string",
+        "Slot": "int",
+        "Skill": "int",
+        "Copy": "int"
+      }
+    },
+    "sfEdit": {
+      "type": "ResponseSfEdit",
+      "cmd": "sfEdit",
+      "fields": {
+        "Skill": "int",
+        "Data": "JObject"
+      }
+    },
+    "sfError": {
+      "type": "ResponseSfError",
+      "cmd": "sfError",
+      "fields": {
+        "msg": "string"
+      }
+    },
+    "sfInit": {
+      "type": "ResponseSfInit",
+      "cmd": "sfInit",
+      "fields": {
+        "headers": "JObject",
+        "nodes": "JObject",
+        "helpers": "JObject",
+        "conditionals": "JObject",
+        "activators": "JObject",
+        "classes": "JObject",
+        "skills": "JObject"
+      }
+    },
+    "sfLink": {
+      "type": "ResponseSfLink",
+      "cmd": "sfLink",
+      "fields": {
+        "Name": "string",
+        "Slot": "int",
+        "Skill": "int"
+      }
+    },
+    "sfNew": {
+      "type": "ResponseSfNew",
+      "cmd": "sfNew",
+      "fields": {
+        "Name": "string",
+        "Slot": "int",
+        "Skill": "int",
+        "Data": "JObject"
+      }
+    },
+    "sfNewLib": {
+      "type": "ResponseSfNewLib",
+      "cmd": "sfNewLib",
+      "fields": {
+        "Skill": "int",
+        "Data": "JObject"
+      }
+    },
+    "sfRemove": {
+      "type": "ResponseSfRemove",
+      "cmd": "sfRemove",
+      "fields": {
+        "Name": "string",
+        "Slot": "int"
+      }
+    },
+    "sfUpdate": {
+      "type": "ResponseSfUpdate",
+      "cmd": "sfUpdate",
+      "fields": {
+        "Name": "string",
+        "OldSlot": "int",
+        "Slot": "int",
+        "Skill": "int",
+        "Data": "JObject"
+      }
+    },
+    "spawnMob": {
+      "type": "ResponseSpawnMob",
+      "cmd": "spawnMob",
+      "fields": {
+        "monBranch": "Monbranch",
+        "x": "float",
+        "y": "float",
+        "reload": "bool"
+      }
+    },
+    "statUpdate": {
+      "type": "ResponseStatUpdate",
+      "cmd": "statUpdate",
+      "fields": {
+        "player": "string",
+        "DmgMin": "int",
+        "DmgMax": "int",
+        "HP": "int",
+        "MaxHP": "int",
+        "sta": "TotalStats"
+      }
+    },
+    "stopWalk": {
+      "type": "ResponseStopWalk",
+      "cmd": "stopWalk",
+      "fields": {
+        "uid": "int"
+      }
+    },
+    "summonInvite": {
+      "type": "ResponseSummonInvite",
+      "cmd": "summonInvite",
+      "fields": {
+        "summonerName": "string",
+        "summonerID": "int"
+      }
+    },
+    "turnIn": {
+      "type": "ResponseTurnIn",
+      "cmd": "turnIn",
+      "fields": {
+        "items": "List<TurnInItem>",
+        "questObjectives": "List<TurnInItem>",
+        "clearAll": "bool"
+      }
+    },
+    "UpdateAllPatterns": {
+      "type": "ResponseUpdateAllPatterns",
+      "cmd": "UpdateAllPatterns",
+      "fields": {
+        "patterns": "List<ResponseUpdatePattern>"
+      }
+    },
+    "UpdatePattern": {
+      "type": "ResponseUpdatePattern",
+      "cmd": "UpdatePattern",
+      "fields": {
+        "Success": "bool",
+        "errorMessage": "string",
+        "ItemID": "int",
+        "pattern": "Pattern",
+        "stats": "TotalStats"
+      }
+    },
+    "upgradeSync": {
+      "type": "ResponseUpgradeSync",
+      "cmd": "upgradeSync",
+      "fields": {
+        "Coins": "int",
+        "UpgradeDays": "int",
+        "UpgradeExpires": "DateTime"
+      }
+    },
+    "visChange": {
+      "type": "ResponseVisibilityChange",
+      "cmd": "visChange",
+      "fields": {
+        "showHelm": "bool",
+        "showCloak": "bool",
+        "uid": "int"
+      }
+    }
+  },
+  "requests": {
+    "qabandon": {
+      "type": "RequestAbandonQuest",
+      "cmd": "qabandon",
+      "fields": {}
+    },
+    "RequestAddMonToPad": {
+      "type": "RequestAddMonToPad",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestAddNewPad": {
+      "type": "RequestAddNewPad",
+      "cmd": null,
+      "fields": {}
+    },
+    "gai": {
+      "type": "RequestAttackInput",
+      "cmd": "gai",
+      "fields": {}
+    },
+    "gas": {
+      "type": "RequestAttackStream",
+      "cmd": "gas",
+      "fields": {}
+    },
+    "bankSwapInv": {
+      "type": "RequestBankSwap",
+      "cmd": "bankSwapInv",
+      "fields": {}
+    },
+    "bankToInv": {
+      "type": "RequestBankToInv",
+      "cmd": "bankToInv",
+      "fields": {}
+    },
+    "bulkOperation": {
+      "type": "RequestBulkOperation",
+      "cmd": "bulkOperation",
+      "fields": {
+        "IsLootAll": "bool"
+      }
+    },
+    "buyItem": {
+      "type": "RequestBuyItem",
+      "cmd": "buyItem",
+      "fields": {}
+    },
+    "cancelCharge": {
+      "type": "RequestCancelCharge",
+      "cmd": "cancelCharge",
+      "fields": {}
+    },
+    "RequestChangeColor": {
+      "type": "RequestChangeColor",
+      "cmd": null,
+      "fields": {}
+    },
+    "message": {
+      "type": "RequestChat",
+      "cmd": "message",
+      "fields": {}
+    },
+    "c": {
+      "type": "RequestClear",
+      "cmd": "c",
+      "fields": {}
+    },
+    "cmd": {
+      "type": "RequestJoin",
+      "cmd": "cmd",
+      "fields": {}
+    },
+    "discardDrop": {
+      "type": "RequestDiscardDrop",
+      "cmd": "discardDrop",
+      "fields": {
+        "ItemID": "int",
+        "LootID": "int"
+      }
+    },
+    "dustenhloot": {
+      "type": "RequestDustEnh",
+      "cmd": "dustenhloot",
+      "fields": {}
+    },
+    "emotea": {
+      "type": "RequestEmote",
+      "cmd": "emotea",
+      "fields": {}
+    },
+    "equipEnh": {
+      "type": "RequestEquipEnh",
+      "cmd": "equipEnh",
+      "fields": {}
+    },
+    "equipItem": {
+      "type": "RequestEquipItem",
+      "cmd": "equipItem",
+      "fields": {}
+    },
+    "equipPattern": {
+      "type": "RequestEquipPattern",
+      "cmd": "equipPattern",
+      "fields": {}
+    },
+    "firstJoin": {
+      "type": "RequestFirstJoin",
+      "cmd": "firstJoin",
+      "fields": {}
+    },
+    "RequestFriendAccept": {
+      "type": "RequestFriendAccept",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestFriendDecline": {
+      "type": "RequestFriendDecline",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestFriendDelete": {
+      "type": "RequestFriendDelete",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestFriendInvite": {
+      "type": "RequestFriendInvite",
+      "cmd": null,
+      "fields": {}
+    },
+    "gar": {
+      "type": "RequestGar",
+      "cmd": "gar",
+      "fields": {}
+    },
+    "RequestGenderSwap": {
+      "type": "RequestGenderSwap",
+      "cmd": null,
+      "fields": {}
+    },
+    "getApop": {
+      "type": "RequestGetApop",
+      "cmd": "getApop",
+      "fields": {}
+    },
+    "getCutscene": {
+      "type": "RequestGetCutscene",
+      "cmd": "getCutscene",
+      "fields": {}
+    },
+    "getDialog": {
+      "type": "RequestGetDialog",
+      "cmd": "getDialog",
+      "fields": {}
+    },
+    "getDrop": {
+      "type": "RequestGetDrop",
+      "cmd": "getDrop",
+      "fields": {
+        "ItemID": "int",
+        "LootID": "int"
+      }
+    },
+    "getEquip": {
+      "type": "RequestGetEquip",
+      "cmd": "getEquip",
+      "fields": {}
+    },
+    "RequestGetMapSapwns": {
+      "type": "RequestGetMapSapwns",
+      "cmd": null,
+      "fields": {}
+    },
+    "getQuests": {
+      "type": "RequestGetQuests",
+      "cmd": "getQuests",
+      "fields": {}
+    },
+    "RequestGoToPlayer": {
+      "type": "RequestGoToPlayer",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestGuildCreate": {
+      "type": "RequestGuildCreate",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestGuildDemote": {
+      "type": "RequestGuildDemote",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestGuildInvite": {
+      "type": "RequestGuildInvite",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestGuildKick": {
+      "type": "RequestGuildKick",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestGuildMOTD": {
+      "type": "RequestGuildMOTD",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestGuildPromote": {
+      "type": "RequestGuildPromote",
+      "cmd": null,
+      "fields": {}
+    },
+    "hitboxes": {
+      "type": "RequestHitboxes",
+      "cmd": "hitboxes",
+      "fields": {}
+    },
+    "house": {
+      "type": "RequestHouse",
+      "cmd": "house",
+      "fields": {}
+    },
+    "housesave": {
+      "type": "RequestHouseSave",
+      "cmd": "housesave",
+      "fields": {}
+    },
+    "gimp": {
+      "type": "RequestImpact",
+      "cmd": "gimp",
+      "fields": {}
+    },
+    "inspectPlayer": {
+      "type": "RequestInspectPlayer",
+      "cmd": "inspectPlayer",
+      "fields": {}
+    },
+    "bankFromInv": {
+      "type": "RequestInvToBank",
+      "cmd": "bankFromInv",
+      "fields": {}
+    },
+    "itemdefaultpattern": {
+      "type": "RequestItemDefaultPattern",
+      "cmd": "itemdefaultpattern",
+      "fields": {}
+    },
+    "itemQuery": {
+      "type": "RequestItemQuery",
+      "cmd": "itemQuery",
+      "fields": {}
+    },
+    "tKill": {
+      "type": "RequestKillTarget",
+      "cmd": "tKill",
+      "fields": {}
+    },
+    "loadBank": {
+      "type": "RequestLoadBank",
+      "cmd": "loadBank",
+      "fields": {}
+    },
+    "loadHairShop": {
+      "type": "RequestLoadHairShop",
+      "cmd": "loadHairShop",
+      "fields": {}
+    },
+    "loadShop": {
+      "type": "RequestLoadShop",
+      "cmd": "loadShop",
+      "fields": {}
+    },
+    "LoadUser": {
+      "type": "RequestLoadUser",
+      "cmd": "LoadUser",
+      "fields": {}
+    },
+    "Login": {
+      "type": "RequestLogin",
+      "cmd": "Login",
+      "fields": {}
+    },
+    "getenhloot": {
+      "type": "RequestLootEnh",
+      "cmd": "getenhloot",
+      "fields": {}
+    },
+    "machineInteract": {
+      "type": "RequestMachineInteraction",
+      "cmd": "machineInteract",
+      "fields": {}
+    },
+    "mapCapture": {
+      "type": "RequestMapCapture",
+      "cmd": "mapCapture",
+      "fields": {}
+    },
+    "getMonBranch": {
+      "type": "RequestMonBranch",
+      "cmd": "getMonBranch",
+      "fields": {}
+    },
+    "monDelete": {
+      "type": "RequestMonDelete",
+      "cmd": "monDelete",
+      "fields": {}
+    },
+    "gmah": {
+      "type": "RequestMonHit",
+      "cmd": "gmah",
+      "fields": {}
+    },
+    "gmai": {
+      "type": "RequestMonReq",
+      "cmd": "gmai",
+      "fields": {}
+    },
+    "RequestMonSpawn": {
+      "type": "RequestMonSpawn",
+      "cmd": null,
+      "fields": {}
+    },
+    "mv": {
+      "type": "RequestMovement",
+      "cmd": "mv",
+      "fields": {}
+    },
+    "MoveOK": {
+      "type": "RequestMoveOK",
+      "cmd": "MoveOK",
+      "fields": {}
+    },
+    "mvtgt": {
+      "type": "RequestMoveTargets",
+      "cmd": "mvtgt",
+      "fields": {}
+    },
+    "tfer": {
+      "type": "RequestMoveToArea",
+      "cmd": "tfer",
+      "fields": {}
+    },
+    "moveToCell": {
+      "type": "RequestMoveToCell",
+      "cmd": "moveToCell",
+      "fields": {}
+    },
+    "RequestObjective": {
+      "type": "RequestObjective",
+      "cmd": null,
+      "fields": {}
+    },
+    "openApopQO": {
+      "type": "RequestOpenApopQO",
+      "cmd": "openApopQO",
+      "fields": {
+        "ApopID": "int",
+        "MonMapID": "int"
+      }
+    },
+    "RequestParty": {
+      "type": "RequestParty",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestPartyAccept": {
+      "type": "RequestPartyAccept",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestPartyDecline": {
+      "type": "RequestPartyDecline",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestPartyInvite": {
+      "type": "RequestPartyInvite",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestPartyLeave": {
+      "type": "RequestPartyLeave",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestPickupCollect": {
+      "type": "RequestPickupCollect",
+      "cmd": null,
+      "fields": {}
+    },
+    "pmah": {
+      "type": "RequestPlayerHit",
+      "cmd": "pmah",
+      "fields": {}
+    },
+    "acceptQuest": {
+      "type": "RequestQuestAccept",
+      "cmd": "acceptQuest",
+      "fields": {}
+    },
+    "removeEnh": {
+      "type": "RequestRemoveEnh",
+      "cmd": "removeEnh",
+      "fields": {}
+    },
+    "removeItem": {
+      "type": "RequestRemoveItem",
+      "cmd": "removeItem",
+      "fields": {}
+    },
+    "removePattern": {
+      "type": "RequestRemovePattern",
+      "cmd": "removePattern",
+      "fields": {}
+    },
+    "resetsaga": {
+      "type": "RequestResetSaga",
+      "cmd": "resetsaga",
+      "fields": {}
+    },
+    "resPlayerTimed": {
+      "type": "RequestResPlayerTimed",
+      "cmd": "resPlayerTimed",
+      "fields": {}
+    },
+    "RequestSaveCustomization": {
+      "type": "RequestSaveCustomization",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestSavePad": {
+      "type": "RequestSavePad",
+      "cmd": null,
+      "fields": {}
+    },
+    "savePrefs": {
+      "type": "RequestSavePrefs",
+      "cmd": "savePrefs",
+      "fields": {}
+    },
+    "sellItem": {
+      "type": "RequestSellItem",
+      "cmd": "sellItem",
+      "fields": {}
+    },
+    "sfClone": {
+      "type": "RequestSkillForgeClone",
+      "cmd": "sfClone",
+      "fields": {}
+    },
+    "sfDel": {
+      "type": "RequestSkillForgeDelete",
+      "cmd": "sfDel",
+      "fields": {}
+    },
+    "sfEdit": {
+      "type": "RequestSkillForgeEdit",
+      "cmd": "sfEdit",
+      "fields": {}
+    },
+    "sfInit": {
+      "type": "RequestSkillForgeInit",
+      "cmd": "sfInit",
+      "fields": {}
+    },
+    "sfLink": {
+      "type": "RequestSkillForgeLink",
+      "cmd": "sfLink",
+      "fields": {}
+    },
+    "sfNew": {
+      "type": "RequestSkillForgeNew",
+      "cmd": "sfNew",
+      "fields": {}
+    },
+    "sfNewLib": {
+      "type": "RequestSkillForgeNewLib",
+      "cmd": "sfNewLib",
+      "fields": {}
+    },
+    "sfSave": {
+      "type": "RequestSkillForgeSave",
+      "cmd": "sfSave",
+      "fields": {}
+    },
+    "spawnMapMob": {
+      "type": "RequestSpawnMapMob",
+      "cmd": "spawnMapMob",
+      "fields": {}
+    },
+    "spawnMob": {
+      "type": "RequestSpawnMob",
+      "cmd": "spawnMob",
+      "fields": {}
+    },
+    "startCharge": {
+      "type": "RequestStartCharge",
+      "cmd": "startCharge",
+      "fields": {}
+    },
+    "stopWalk": {
+      "type": "RequestStopWalk",
+      "cmd": "stopWalk",
+      "fields": {}
+    },
+    "RequestSummon": {
+      "type": "RequestSummon",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestSummonAccept": {
+      "type": "RequestSummonAccept",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestSummonDecline": {
+      "type": "RequestSummonDecline",
+      "cmd": null,
+      "fields": {}
+    },
+    "RequestSummonInvite": {
+      "type": "RequestSummonInvite",
+      "cmd": null,
+      "fields": {}
+    },
+    "trackQuest": {
+      "type": "RequestTrackQuest",
+      "cmd": "trackQuest",
+      "fields": {}
+    },
+    "tryQuestComplete": {
+      "type": "RequestTryQuestComplete",
+      "cmd": "tryQuestComplete",
+      "fields": {}
+    },
+    "unequipItem": {
+      "type": "RequestUnequipItem",
+      "cmd": "unequipItem",
+      "fields": {}
+    },
+    "upgradeSync": {
+      "type": "RequestUpgradeSync",
+      "cmd": "upgradeSync",
+      "fields": {}
+    },
+    "useSpellstone": {
+      "type": "RequestUseSpellstone",
+      "cmd": "useSpellstone",
+      "fields": {}
+    },
+    "watchCutscene": {
+      "type": "RequestWatchCutscene",
+      "cmd": "watchCutscene",
+      "fields": {}
+    }
+  }
+}

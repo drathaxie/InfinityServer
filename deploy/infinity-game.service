@@ -1,0 +1,17 @@
+[Unit]
+Description=InfinityServer Game Server (TCP 5588)
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/infinity/server
+EnvironmentFile=/opt/infinity/server/.pg.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/infinity/.venv/bin/python server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

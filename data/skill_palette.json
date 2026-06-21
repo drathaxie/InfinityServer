@@ -1,0 +1,84 @@
+{
+ "_comment": "Skill Forge node palette served by sfInit -> CharacterClass.SkillNodes. Each node is a List<NodeLayout>. ComponentType: 0=InputButton 1=InputField 2=Label 3=Helper 4=Conditional 5=Activator 6=BranchOutput 7=System. ReturnType: 0=String 1=Float 2=Integer 3=Boolean. A header's first element may carry HeaderColor (#rrggbb) on a Label (ComponentType 2, renders nothing). This palette is OURS (AE never replied to sfInit) modelled on the runtime Node* combat executors; server/combat.py is the matching interpreter. Nodes/fields combat understands: Damage(DamageType,Multiplier,Targets), Cooldown(Slot,CD,Animation), Resource(Amount), Range(HRange,VRange,Targets), PlayerAnimation, SoundFX, Particle, Aura(AuraName,Duration,Targets), Restrict(Movement,Skills,Duration,Targets), MoveTargets(Mode,Distance,Targets). Helpers resolve Targets: Self=caster, Target=cast target, AllEnemies=every monster in the area (server-side AoE).",
+
+ "headers": {
+  "OnRequest": [
+   {"HeaderColor": "#3a2a5a", "Name": "_header", "ComponentType": 2, "ReturnType": 0, "Tooltip": "Skill entry point — execution begins here."}
+  ]
+ },
+
+ "nodes": {
+  "Range": [
+   {"Name": "HRange", "NameOverride": "H Range", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Horizontal reach used to find targets.", "AllowNulls": true, "NullDisplay": "5"},
+   {"Name": "VRange", "NameOverride": "V Range", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Vertical reach used to find targets.", "AllowNulls": true, "NullDisplay": "1"},
+   {"Name": "Targets", "NameOverride": "Targets", "ComponentType": 3, "ReturnType": 0, "Tooltip": "Resolved targets in range."}
+  ],
+  "Damage": [
+   {"Name": "DamageType", "NameOverride": "Damage Type", "ComponentType": 0, "ReturnType": 0, "Options": ["Physical", "Magical", "Health"], "Tooltip": "Element/category of the damage dealt.", "AllowNulls": false},
+   {"Name": "Multiplier", "NameOverride": "Multiplier", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Damage as a multiple of a normal hit. Leave blank for normal (1x).", "AllowNulls": true, "NullDisplay": "1"},
+   {"Name": "Targets", "NameOverride": "Targets", "ComponentType": 3, "ReturnType": 0, "Tooltip": "Which targets take the damage (wire a Self / Target / AllEnemies helper)."}
+  ],
+  "Aura": [
+   {"Name": "AuraName", "NameOverride": "Aura Name", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Name of the buff/debuff applied.", "AllowNulls": false},
+   {"Name": "Duration", "NameOverride": "Duration (s)", "ComponentType": 1, "ReturnType": 1, "Tooltip": "How long the aura lasts, in seconds.", "AllowNulls": true, "NullDisplay": "permanent"},
+   {"Name": "Targets", "NameOverride": "Targets", "ComponentType": 3, "ReturnType": 0, "Tooltip": "Who receives the aura."}
+  ],
+  "Restrict": [
+   {"Name": "Movement", "NameOverride": "Stop Movement", "ComponentType": 0, "ReturnType": 3, "Tooltip": "Root the target (no movement).", "AllowNulls": true, "NullDisplay": "no"},
+   {"Name": "Skills", "NameOverride": "Stop Skills", "ComponentType": 0, "ReturnType": 3, "Tooltip": "Silence the target (no skills).", "AllowNulls": true, "NullDisplay": "no"},
+   {"Name": "Duration", "NameOverride": "Duration (s)", "ComponentType": 1, "ReturnType": 1, "Tooltip": "How long the restriction lasts.", "AllowNulls": true, "NullDisplay": "0.3"},
+   {"Name": "Targets", "NameOverride": "Targets", "ComponentType": 3, "ReturnType": 0, "Tooltip": "Who is restricted."}
+  ],
+  "MoveTargets": [
+   {"Name": "Mode", "NameOverride": "Mode", "ComponentType": 0, "ReturnType": 0, "Options": ["Pull", "Push"], "Tooltip": "Pull targets toward you or push them away.", "AllowNulls": false},
+   {"Name": "Distance", "NameOverride": "Distance", "ComponentType": 1, "ReturnType": 1, "Tooltip": "How far to move the targets.", "AllowNulls": true, "NullDisplay": "2"},
+   {"Name": "Targets", "NameOverride": "Targets", "ComponentType": 3, "ReturnType": 0, "Tooltip": "Who is moved."}
+  ],
+  "AnimationHitbox": [
+   {"Name": "X", "NameOverride": "X", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Hitbox centre X offset from the caster.", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "Y", "NameOverride": "Y", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Hitbox centre Y offset.", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "Width", "NameOverride": "Width", "ComponentType": 1, "ReturnType": 2, "Tooltip": "Hitbox width.", "AllowNulls": true, "NullDisplay": "12"},
+   {"Name": "Height", "NameOverride": "Height", "ComponentType": 1, "ReturnType": 2, "Tooltip": "Hitbox height.", "AllowNulls": true, "NullDisplay": "2"},
+   {"Name": "Animation", "NameOverride": "Animation", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Animation the hitbox is tied to.", "AllowNulls": false},
+   {"Name": "Time", "NameOverride": "Time", "ComponentType": 1, "ReturnType": 1, "Tooltip": "When in the animation the hitbox fires (seconds).", "AllowNulls": true, "NullDisplay": "0.1"},
+   {"Name": "Targets", "NameOverride": "Hit Targets", "ComponentType": 3, "ReturnType": 0, "Tooltip": "Entities the client reports the swing hit (resolved via igai/gai)."}
+  ],
+  "Hitbox": [
+   {"Name": "X", "NameOverride": "X", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Hitbox centre X offset.", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "Y", "NameOverride": "Y", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Hitbox centre Y offset.", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "Width", "NameOverride": "Width", "ComponentType": 1, "ReturnType": 2, "Tooltip": "Hitbox width.", "AllowNulls": true, "NullDisplay": "12"},
+   {"Name": "Height", "NameOverride": "Height", "ComponentType": 1, "ReturnType": 2, "Tooltip": "Hitbox height.", "AllowNulls": true, "NullDisplay": "2"},
+   {"Name": "Targets", "NameOverride": "Hit Targets", "ComponentType": 3, "ReturnType": 0, "Tooltip": "Entities the client reports inside the box (igai/gai)."}
+  ],
+  "Resource": [
+   {"Name": "Amount", "NameOverride": "Amount", "ComponentType": 1, "ReturnType": 2, "Tooltip": "Resource (RP/mana) value set after the skill.", "AllowNulls": false}
+  ],
+  "Cooldown": [
+   {"Name": "Slot", "NameOverride": "Slot", "ComponentType": 1, "ReturnType": 2, "Tooltip": "Skill slot to put on cooldown (1-based in editor). Leave blank for this skill's slot.", "AllowNulls": true, "NullDisplay": "this skill"},
+   {"Name": "CD", "NameOverride": "Cooldown (ms)", "ComponentType": 1, "ReturnType": 2, "Tooltip": "Cooldown duration in milliseconds.", "AllowNulls": true, "NullDisplay": "1500"},
+   {"Name": "Animation", "NameOverride": "On Animation", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Animation event that starts the cooldown (blank = immediate).", "AllowNulls": true, "NullDisplay": "immediate"}
+  ],
+  "PlayerAnimation": [
+   {"Name": "Animation", "NameOverride": "Animation", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Caster animation clip to play.", "AllowNulls": false}
+  ],
+  "SoundFX": [
+   {"Name": "Sound", "NameOverride": "Sound", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Sound effect id to play.", "AllowNulls": false}
+  ],
+  "Particle": [
+   {"Name": "Particle", "NameOverride": "Particle", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Particle effect id to spawn.", "AllowNulls": false}
+  ],
+  "Interruptable": [
+   {"Name": "Value", "NameOverride": "Interruptable", "ComponentType": 0, "ReturnType": 3, "Tooltip": "Whether the skill can be interrupted while casting.", "AllowNulls": false}
+  ]
+ },
+
+ "helpers": {
+  "Self": [],
+  "Target": [],
+  "AllEnemies": []
+ },
+
+ "conditionals": {},
+
+ "activators": {}
+}

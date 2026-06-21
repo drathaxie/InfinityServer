@@ -1,0 +1,246 @@
+{
+  "ID": 146,
+  "nextElementId": 55,
+  "name": "Veddrian",
+  "bgImage": "",
+  "bgImageScale": 1,
+  "startingPanels": [
+    2,
+    4
+  ],
+  "panels": [
+    {
+      "PID": 2,
+      "name": "Introduction",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 34,
+          "type": "Header",
+          "text": "Veddrian",
+          "subtitle": "SpiritHunter\n",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "requirements": []
+        },
+        {
+          "ID": 46,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "This final floor will be the most difficult.  Let's get to it!",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "QNC",
+              "ID": 148,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "OR",
+          "lockedMode": "Hide"
+        },
+        {
+          "ID": 54,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Even with the defeat of the Groglurk, its spirit remains, and more will be drawn into its depths.",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "Quest",
+              "ID": 148,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "OR",
+          "lockedMode": "Hide",
+          "label": "undefined*"
+        },
+        {
+          "ID": 48,
+          "type": "Button",
+          "targets": [
+            153,
+            154,
+            139,
+            140,
+            166,
+            142,
+            143,
+            144,
+            146,
+            148
+          ],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "ShowQuests",
+          "label": "Quests",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "QNC",
+              "ID": 148,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        }
+      ]
+    },
+    {
+      "PID": 3,
+      "name": "About Enhancements",
+      "panelPosition": 1,
+      "hidePanelBG": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "elements": [
+        {
+          "ID": 24,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "You never know what kind of dragon you'll be facing. As a Dragonslayer you'll need to be ready for anything. Strength, Endurance and Dexterity are key abilities for a Dragonslayer! My Enhancements should help improve those stats.",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false
+        }
+      ]
+    },
+    {
+      "PID": 4,
+      "name": "New Panel",
+      "panelPosition": 2,
+      "hidePanelBG": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "changeApopBG": "",
+      "changeApopBGScale": 1,
+      "restoreBGOnClose": false,
+      "elements": []
+    },
+    {
+      "PID": 5,
+      "name": "Alternate Text",
+      "panelPosition": "1",
+      "hidePanelBG": false,
+      "addVerticalSpacing": 0,
+      "noTween": true,
+      "tweenFrom": "Bottom",
+      "changeApopBG": "",
+      "changeApopBGScale": 1,
+      "restoreBGOnClose": false,
+      "elements": [
+        {
+          "ID": 33,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Hello World",
+          "hideLead": false,
+          "borderless": true,
+          "addNameplate": true,
+          "changeNameplate": "Galanoth Test",
+          "changeSubtitle": "test",
+          "compactMode": false,
+          "requirements": []
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 261,
+      "name": "Veddrian",
+      "subtitle": "SpiritHunter",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": "Idle"
+    }
+  ],
+  "freezeClient": "1"
+}

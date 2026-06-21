@@ -1,0 +1,289 @@
+{
+  "ID": 131,
+  "nextElementId": 55,
+  "name": "Veddrian",
+  "bgImage": "",
+  "bgImageScale": 1,
+  "startingPanels": [
+    2,
+    4
+  ],
+  "panels": [
+    {
+      "PID": 2,
+      "name": "Introduction",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 34,
+          "type": "Header",
+          "text": "Veddrian",
+          "subtitle": "SpiritHunter\n",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "requirements": []
+        },
+        {
+          "ID": 46,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Greetings, Hero. I must say, I'm surprised to meet anyone here. Bludrut is not a place for the living. ",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "QNC",
+              "ID": 158,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "OR",
+          "lockedMode": "Hide"
+        },
+        {
+          "ID": 51,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "You've found the entrance to the next level! Meet me there!",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "Quest",
+              "ID": 158,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "AND",
+          "lockedMode": "Hide",
+          "label": "undefined**"
+        },
+        {
+          "ID": 48,
+          "type": "Button",
+          "targets": [
+            157,
+            120,
+            149,
+            121,
+            129,
+            119,
+            123,
+            124,
+            125,
+            164,
+            127,
+            158
+          ],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "ShowQuests",
+          "label": "Quests",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "QNC",
+              "ID": 158,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        },
+        {
+          "ID": 54,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "Join",
+          "label": "Bludrut Level 2",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "bludrut2,Enter,Spawn",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "Quest",
+              "ID": 158,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        }
+      ]
+    },
+    {
+      "PID": 3,
+      "name": "About Enhancements",
+      "panelPosition": 1,
+      "hidePanelBG": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "elements": [
+        {
+          "ID": 24,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "You never know what kind of dragon you'll be facing. As a Dragonslayer you'll need to be ready for anything. Strength, Endurance and Dexterity are key abilities for a Dragonslayer! My Enhancements should help improve those stats.",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false
+        }
+      ]
+    },
+    {
+      "PID": 4,
+      "name": "New Panel",
+      "panelPosition": 2,
+      "hidePanelBG": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "changeApopBG": "",
+      "changeApopBGScale": 1,
+      "restoreBGOnClose": false,
+      "elements": []
+    },
+    {
+      "PID": 5,
+      "name": "Alternate Text",
+      "panelPosition": "1",
+      "hidePanelBG": false,
+      "addVerticalSpacing": 0,
+      "noTween": true,
+      "tweenFrom": "Bottom",
+      "changeApopBG": "",
+      "changeApopBGScale": 1,
+      "restoreBGOnClose": false,
+      "elements": [
+        {
+          "ID": 33,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Hello World",
+          "hideLead": false,
+          "borderless": true,
+          "addNameplate": true,
+          "changeNameplate": "Galanoth Test",
+          "changeSubtitle": "test",
+          "compactMode": false,
+          "requirements": []
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 261,
+      "name": "Veddrian",
+      "subtitle": "SpiritHunter",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": "Idle"
+    }
+  ],
+  "freezeClient": "1"
+}

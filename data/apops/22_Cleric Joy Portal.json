@@ -1,0 +1,121 @@
+{
+  "ID": 22,
+  "nextElementId": 9,
+  "name": "Cleric Joy Portal",
+  "bgImage": "",
+  "bgImageScale": 1.3,
+  "startingPanels": [
+    2,
+    1
+  ],
+  "panels": [
+    {
+      "PID": 1,
+      "name": "First Choices",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": []
+    },
+    {
+      "PID": 2,
+      "name": "Bubble Info",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "text": "Cleric Joy",
+          "subtitle": "Sisterhood of the Dishpan Hands",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "ID": 4,
+          "type": "Header",
+          "requirements": []
+        },
+        {
+          "text": "The portal is activated! From here you can magically teleport to the next step in the world's main story. \n\nWhich means, right now... you can teleport back to the Intro.\n\nOr perhaps I could interest you in visiting the intro?\n\nIn Alpha, the options of teleporting to the intro are virtually unlimited! ",
+          "color": "#1d075a",
+          "changeBoxColor": "#f6eaea",
+          "nameplateTextColor": "#ecf74a",
+          "nameplateBoxColor": "#2321ba",
+          "hideLead": false,
+          "borderless": true,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "ID": 5,
+          "type": "Bubble",
+          "requirements": []
+        },
+        {
+          "ID": 8,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "Join",
+          "label": "Travel to the Intro",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "intro,Enter,Spawn",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        },
+        {
+          "ID": 7,
+          "type": "Button",
+          "targets": [],
+          "action": "MapPanel",
+          "label": "World Map",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "lai",
+          "text": "",
+          "iconOverride": "none"
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 29,
+      "name": "Cleric Joy",
+      "subtitle": "",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 1,
+  "IsSingleAction": false
+}

@@ -1,0 +1,282 @@
+{
+ "Dragonslayer": {
+  "ID": 1932,
+  "Bundle": "",
+  "Skills": {
+   "0": 165,
+   "1": 167,
+   "2": 103,
+   "3": 104,
+   "4": 105
+  },
+  "_skilldefs": {
+   "165": {
+    "id": 165,
+    "act": 1,
+    "nam": "Auto Attack",
+    "icon": "Dragonslayer/ds1",
+    "desc": "<color=#fc7f49>2s</color> Cooldown\n\nPassive: Your skills grant you <color=#b6b6b6>Determination</color>. At 50 Determination you become Determined, empowering your next skill with an additional effect.\n\nDouble click a monster to start Auto Attacking it. Damages 1 target and grants <color=#b6b6b6>5 Determination</color>.",
+    "autoHRange": 5.0,
+    "autoVRange": 1.0,
+    "regMana": 0
+   },
+   "167": {
+    "id": 167,
+    "act": 0,
+    "nam": "Scorched Steel",
+    "icon": "Dragonslayer/ds4",
+    "desc": "<color=#fc7f49>3s</color> Cooldown\n\nIgnite your weapon, striking nearby targets with a flaming slash and gaining <color=#7e7e7e>10 Determination</color>.\r\n\r\nDetermined: Strike 3 times in quick succession.",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": 0
+   },
+   "103": {
+    "id": 103,
+    "act": 0,
+    "nam": "Impale",
+    "icon": "Dragonslayer/ds3",
+    "desc": "<color=#fc7f49>6s</color> Cooldown\n\nThrust forward, pulling hit targets towards you and inflicting them with Bleeding, a 3 second DoT. Gain <color=#b6b6b6>10 Determination</color> upon striking an enemy.\r\n\r\nDetermined: Heals you for 15% of your max HP, plus an amount based on your END.\n",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": -50
+   },
+   "104": {
+    "id": 104,
+    "act": 0,
+    "nam": "Incapacitate",
+    "icon": "Dragonslayer/ds2",
+    "desc": "<color=#fc7f49>10s</color> Cooldown\n\nLeap towards your target, striking them and nearby targets upon landing and gaining <color=#b6b6b6>10 Determination</color>. Applies Weakened, reducing your target's physical and magical damage by 10% for 5 seconds.\r\n\r\nDetermined: Stun your target for 3 seconds.\n ",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": 0
+   },
+   "105": {
+    "id": 105,
+    "act": 0,
+    "nam": "Dragon's Bane",
+    "icon": "Dragonslayer/ds5",
+    "desc": "<color=#fc7f49>25s</color> Cooldown\nPassive: Your skills deal 20% more damage to Dragonkin.\r\n\nUnleash the power of your Dragon Blade. Instantly grants you <color=#b6b6b6>50 Determination</color> and applies Dragonbane for 10 seconds, doubling your skills' Determination gain and increasing your bonus damage against Dragonkin to 50%.\r\n",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": 50
+   }
+  },
+  "Resource": {
+   "model": "determination",
+   "ResourceColor": 16777215,
+   "MaxRP": 100,
+   "Threshold": 50,
+   "ThresholdColor": 16745728
+  }
+ },
+ "Warrior": {
+  "ID": 33,
+  "Bundle": "armors/15775_NewWarriorB2.unity3d",
+  "Skills": {
+   "0": 114,
+   "1": 115,
+   "2": 116,
+   "3": 117,
+   "4": 118
+  },
+  "_skilldefs": {
+   "114": {
+    "id": 114,
+    "act": 1,
+    "nam": "Auto Attack",
+    "icon": "Warrior/autoattack",
+    "desc": "<color=#fc7f49>2s</color> Cooldown\n\nDouble click a monster to start Auto Attacking it. This is a basic attack, taught to all adventurers.",
+    "autoHRange": 5.0,
+    "autoVRange": 1.0,
+    "regMana": 0
+   },
+   "115": {
+    "id": 115,
+    "act": 0,
+    "nam": "Decisive Strike",
+    "icon": "Warrior/decisivestrike",
+    "desc": "<color=#9880FF>5</color> Mana, <color=#fc7f49>2s</color> Cooldown\n\nLeap in the air and strike nearby targets upon landing. Deals 50% increased damage to Off Balance targets and inflicts them with Armor Shred for 5 seconds, increasing your damage dealt to them by 10%.",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": -5
+   },
+   "116": {
+    "id": 116,
+    "act": 0,
+    "nam": "Imbalancing Strike",
+    "icon": "Warrior/stun",
+    "desc": "<color=#9880FF>20</color> Mana, <color=#fc7f49>10s</color> Cooldown\n\nBash nearby targets with your shield, stunning and knocking them Off Balance for 2 seconds.",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": -20
+   },
+   "117": {
+    "id": 117,
+    "act": 2,
+    "nam": "Prepared Strike",
+    "icon": "Warrior/powerup,Warr",
+    "desc": "<color=#9880FF>10</color> Mana, <color=#fc7f49>6s</color> Cooldown\n\nSwing your weapon at everything around you. Applies Prepared Strike, causing your next Auto Attack to deal double damage and critically strike.",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": 0
+   },
+   "118": {
+    "id": 118,
+    "act": 2,
+    "nam": "On Guard",
+    "icon": "Warrior/shield",
+    "desc": "<color=#9880FF>15</color> Mana, <color=#fc7f49>15s</color> Cooldown\n\nTake a defensive stance. Applies On Guard, increasing your Damage Resistance by 50% for 5 seconds.\r\n",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": 0
+   }
+  },
+  "Resource": {
+   "model": "mana",
+   "ResourceColor": 255,
+   "MaxRP": 100,
+   "Threshold": -1,
+   "ThresholdColor": -1
+  }
+ },
+ "Healer": {
+  "ID": 17,
+  "Bundle": "armors/15772_NewHealerR2.unity3d",
+  "Skills": {
+   "0": 140,
+   "1": 141,
+   "2": 142,
+   "3": 143,
+   "4": 144
+  },
+  "_skilldefs": {
+   "140": {
+    "id": 140,
+    "act": 1,
+    "nam": "Auto Attack",
+    "icon": "Healer\\autoattack",
+    "desc": "<color=#fc7f49>2s</color> Cooldown\n\nDouble click a monster to start Auto Attacking it. This is a basic attack, taught to all adventurers.",
+    "autoHRange": 31.0,
+    "autoVRange": 31.0,
+    "regMana": 0
+   },
+   "141": {
+    "id": 141,
+    "act": 0,
+    "nam": "Heartbeat",
+    "icon": "Healer\\heartbeat",
+    "desc": "<color=#9880FF>10</color> Mana, <color=#fc7f49>2s</color> Cooldown\n\nA pulsating magical spell. Deals damage, plus additional damage equal to 3.5% of your current HP, increased to 10% if Energy Flow is active.",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": -10
+   },
+   "142": {
+    "id": 142,
+    "act": 2,
+    "nam": "Healing Word",
+    "icon": "Healer\\heal",
+    "desc": "<color=#9880FF>20</color> Mana, <color=#fc7f49>8s</color> Cooldown\n\nHeals you and up to 3 additional nearby targets while applying Radiance, a heal over time effect for 5 seconds.",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": 0
+   },
+   "143": {
+    "id": 143,
+    "act": 0,
+    "nam": "Energy Flow",
+    "icon": "Healer\\energyflow",
+    "desc": "<color=#9880FF>5</color> Mana, <color=#fc7f49>8s</color> Cooldown\n\nApplies Energy Flow to yourself, causing your Auto Attack to restore 10 additional mana while empowering the next use of either Heartbeat or Holy. Also applies Inhibition, reducing your target's physical and magical damage by 10% for 8 seconds.\r\n\r\n",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": -5
+   },
+   "144": {
+    "id": 144,
+    "act": 0,
+    "nam": "Holy",
+    "icon": "Healer\\holy",
+    "desc": "<color=#9880FF>20</color> Mana, <color=#fc7f49>5s</color> Cooldown\n\nSummon a beam of light that smites your target. Hits up to 4 targets if Energy Flow is active. Deals 25% more damage to Undead.",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": -20
+   }
+  },
+  "Resource": {
+   "model": "mana",
+   "ResourceColor": 255,
+   "MaxRP": 100,
+   "Threshold": -1,
+   "ThresholdColor": -1
+  }
+ },
+ "Mage": {
+  "ID": 2,
+  "Bundle": "armors/15774_BaseMageRedesign3R2.unity3d",
+  "Skills": {
+   "0": 135,
+   "1": 136,
+   "2": 137,
+   "3": 138,
+   "4": 139
+  },
+  "_skilldefs": {
+   "135": {
+    "id": 135,
+    "act": 1,
+    "nam": "Magic Missile",
+    "icon": "Mage/autoattack",
+    "desc": "<color=#fc7f49>2s</color> Cooldown\n\nDouble click a monster to start Auto Attacking it with magic missiles.\n\nPassive: Your Magic Missiles restore 10 mana, increased to 20 while below 30 mana.",
+    "autoHRange": 31.0,
+    "autoVRange": 31.0,
+    "regMana": 0
+   },
+   "136": {
+    "id": 136,
+    "act": 0,
+    "nam": "Fireball",
+    "icon": "Mage/fireball",
+    "desc": "<color=#9880FF>15</color> Mana, <color=#fc7f49>6s</color> Cooldown\n\nHurls flame at your opponent, dealing damage and applying Scorched, a damage over time effect for 6 seconds. Deals double damage if Frozen Blood is active on the target, but consumes Frozen Blood.\r",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": -15
+   },
+   "137": {
+    "id": 137,
+    "act": 0,
+    "nam": "Ice Shard",
+    "icon": "Mage/ice",
+    "desc": "<color=#9880FF>15</color> Mana, <color=#fc7f49>6s</color> Cooldown\n\nLaunches a freezing shard at your target, dealing damage and applying Frozen Blood, reducing your target's Haste by 10% for 6 seconds, but consuming Scorched. Also stuns for 3 seconds the first time used against a target.\r\n\r\n",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": -15
+   },
+   "138": {
+    "id": 138,
+    "act": 0,
+    "nam": "Explosion",
+    "icon": "Mage/explosion",
+    "desc": "<color=#9880FF>10</color> Mana, <color=#fc7f49>3s</color> Cooldown\n\nCauses energies within your target to become unstable and burst forth, damaging up to 4 targets. If Scorched is active on a target, it Detonates, dealing damage over 1 second. If Frozen Blood is active on a target, applies Shattered, reducing your target's Physical Damage by 10% for 4 seconds.",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": -10
+   },
+   "139": {
+    "id": 139,
+    "act": 2,
+    "nam": "Arcane Shield",
+    "icon": "Mage/shield",
+    "desc": "<color=#9880FF>0</color> Mana, <color=#fc7f49>20s</color> Cooldown\n\nShield yourself, increasing Damage Resistance by 20% + 5% of your Intellect for 6 seconds. Taking damage while Arcane Shield is active removes 5 mana, and removing the effect if your mana is reduced to 0.",
+    "autoHRange": 0.0,
+    "autoVRange": 0.0,
+    "regMana": 0
+   }
+  },
+  "Resource": {
+   "model": "mana",
+   "ResourceColor": 255,
+   "MaxRP": 100,
+   "Threshold": -1,
+   "ThresholdColor": -1
+  }
+ }
+}

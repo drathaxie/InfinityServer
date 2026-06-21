@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    InfinityLoader — our OWN minimal client mod, self-contained in InfinityServer (no
+    dependency on the external Beyond project, and no MelonLoader).
+
+    AE:I ships its own HarmonyLib (0Harmony 2.4.2.0) in Managed/ and that collides with
+    MelonLoader's bootstrap Harmony — which is why MelonLoader can't load on this build.
+    So instead of MelonLoader we inject via Unity Doorstop and patch with AE's OWN Harmony.
+
+    Doorstop calls `Doorstop.Entrypoint.Start()` at process start; we apply a few Harmony
+    patches there: redirect Main.WebApiURL -> our local web API (so login + the server list
+    come from us), and re-add the always-on c2s/s2c packet logger (our capture ground truth).
+  -->
+  <PropertyGroup>
+    <AssemblyName>InfinityLoader</AssemblyName>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <!-- Silence assembly-version conflict noise (Mono resolves against its own copies). -->
+    <MSBuildWarningsAsMessages>MSB3277</MSBuildWarningsAsMessages>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <AqwiGameDir Condition="'$(AQWI_GAME_DIR)' != ''">$(AQWI_GAME_DIR)</AqwiGameDir>
+    <AqwiGameDir Condition="'$(AqwiGameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\AdventureQuest Worlds Unity Playtest</AqwiGameDir>
+    <AqwiManaged>$(AqwiGameDir)\AdventureQuest Worlds Infinity_Data\Managed</AqwiManaged>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(AqwiManaged)\Assembly-CSharp.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <!-- AE's OWN Harmony (2.4.2.0) — the same instance the game has loaded, so no conflict. -->
+      <HintPath>$(AqwiManaged)\0Harmony.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(AqwiManaged)\Newtonsoft.Json.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <!-- AEC is a Singleton<MonoBehaviour>, so its type graph pulls in UnityEngine. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

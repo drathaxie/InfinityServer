@@ -1,0 +1,204 @@
+{
+  "ID": 7,
+  "nextElementId": 19,
+  "name": "Twilly",
+  "bgImage": "",
+  "bgImageScale": 1.3,
+  "startingPanels": [
+    2
+  ],
+  "panels": [
+    {
+      "PID": 1,
+      "name": "First Choices",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 12,
+          "type": "Button",
+          "targets": [],
+          "action": "Chat",
+          "label": "Reset Dragon's Lair Quests",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "/qreset 87",
+          "requirements": [],
+          "link": "",
+          "text": ""
+        },
+        {
+          "ID": 13,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#0ae931",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Use the button above to reset your quests for a fresh raid of the Dragon's Lair!",
+          "hideLead": false,
+          "borderless": true,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": true,
+          "requirements": []
+        },
+        {
+          "ID": 11,
+          "type": "Button",
+          "targets": [],
+          "action": "ItemShop",
+          "label": "Shop",
+          "subtitle": "",
+          "intMin": 1,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": ""
+        },
+        {
+          "ID": 10,
+          "type": "Button",
+          "targets": [],
+          "action": "MapPanel",
+          "label": "World Map",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": ""
+        },
+        {
+          "ID": 9,
+          "type": "Button",
+          "targets": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "PID": 2,
+      "name": "Bubble Info",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "text": "Twilly",
+          "subtitle": "The Red Moglin",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "ID": 4,
+          "type": "Header",
+          "requirements": []
+        },
+        {
+          "text": "Oh wow! I'm so happy you're here to help us test. \n\nThe team is rebuilding the entire world. Start by exploring town and help us find things to improve. You can use WASD keys to walk now too! Oooh, and maps scroll! Be sure to walk all the way right and left so you don't miss secrets. \n",
+          "color": "#1d075a",
+          "changeBoxColor": "#f6eaea",
+          "nameplateTextColor": "#ecf74a",
+          "nameplateBoxColor": "#2321ba",
+          "hideLead": false,
+          "borderless": true,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "ID": 5,
+          "type": "Bubble",
+          "requirements": []
+        },
+        {
+          "ID": 18,
+          "type": "Button",
+          "targets": [
+            51
+          ],
+          "action": "ItemShop",
+          "label": "Widdle Shop",
+          "subtitle": "",
+          "intMin": 1,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": ""
+        },
+        {
+          "ID": 15,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "MapPanel",
+          "label": "World Map",
+          "subtitle": "",
+          "intMin": 1,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": "",
+          "icon": ""
+        },
+        {
+          "ID": 17,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "See you later!",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": "",
+          "icon": ""
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 167,
+      "name": "Twilly",
+      "subtitle": "Red Moglin",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 2,
+      "yOffset": 0,
+      "scale": 0.8,
+      "animation": "Idle"
+    }
+  ],
+  "freezeClient": 1,
+  "IsSingleAction": false
+}

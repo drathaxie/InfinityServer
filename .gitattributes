@@ -1,0 +1,12 @@
+# Binary blobs tracked via Git LFS to keep the git object store lean.
+*.dll      filter=lfs diff=lfs merge=lfs -text
+*.unity3d  filter=lfs diff=lfs merge=lfs -text
+*.png      filter=lfs diff=lfs merge=lfs -text
+
+# Normalize line endings for text sources (Windows checkouts stay LF in-repo).
+*.py    text eol=lf
+*.cs    text eol=lf
+*.sh    text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.ps1   text eol=crlf

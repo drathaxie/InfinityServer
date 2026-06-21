@@ -1,0 +1,98 @@
+{
+  "ID": 21,
+  "nextElementId": 11,
+  "name": "King Outhouse",
+  "bgImage": "",
+  "bgImageScale": 1.3,
+  "startingPanels": [
+    2,
+    1
+  ],
+  "panels": [
+    {
+      "PID": 1,
+      "name": "First Choices",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 7,
+          "type": "Header",
+          "text": "King Alteon",
+          "subtitle": "The Disposed King",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "requirements": []
+        },
+        {
+          "ID": 8,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Oh no! It is everywhere! It is on the walls... on my royal robes... in my battle wounds! May the fates have mercy. ",
+          "hideLead": true,
+          "borderless": true,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": []
+        },
+        {
+          "ID": 10,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Walk away... slowly.",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": "",
+          "icon": ""
+        }
+      ]
+    },
+    {
+      "PID": 2,
+      "name": "Bubble Info",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": []
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 58,
+      "name": "K",
+      "subtitle": "",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 1
+}

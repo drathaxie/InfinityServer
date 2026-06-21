@@ -1,0 +1,7 @@
+# InfinityServer runtime deps.
+#
+# SQLite (the default backend, INFINITY_DB=sqlite) needs nothing here — it's stdlib.
+# Postgres (INFINITY_DB=postgres, the hosted path) needs psycopg 3. The [binary] extra
+# pulls a prebuilt libpq wheel (incl. aarch64, matching the OCI ARM VM) so there's no
+# system libpq/build toolchain requirement.
+psycopg[binary]>=3.1
