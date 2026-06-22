@@ -49,5 +49,20 @@
       <HintPath>$(AqwiManaged)\UnityEngine.CoreModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <!-- AssetBundle.LoadFromFile for the chat-emoji TMP sprite-asset bundle. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Unity.TextMeshPro">
+      <!-- TMP_SpriteAsset / TMP_Settings / TMP_Text for chat emoji. -->
+      <HintPath>$(AqwiManaged)\Unity.TextMeshPro.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <!-- TMP_Text : MaskableGraphic (UnityEngine.UI) — needed to touch UIChat.textField. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.UI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
   </ItemGroup>
 </Project>

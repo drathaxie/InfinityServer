@@ -1,9 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using HarmonyLib;
+using TMPro;
+using UnityEngine;
 
 // Doorstop invokes Doorstop.Entrypoint.Start() at process startup (before the game's first
 // scene). We apply our Harmony patches there using AE's OWN HarmonyLib.
@@ -81,6 +85,12 @@ public static class InfinityLoaderMod
         TryPatch(h, "insecure-http API (GET)",
             AccessTools.Method(typeof(WebCom), "Send"),
             prefix: nameof(WebCom_Send_Prefix));
+
+        // 4) Chat emoji: expand :shortcodes: -> <sprite name="..."> and point the chat log's TMP
+        //    field at our emoji sprite-asset bundle. Cosmetic; failure never affects login/chat text.
+        TryPatch(h, "chat emoji",
+            AccessTools.Method(typeof(UIChat), "SetText"),
+            prefix: nameof(UIChat_SetText_Prefix));
 
         SafeLog("[InfinityLoader] booted; WebApiURL -> " + (ReadWebApiUrl() ?? "(live AE, no marker)")
             + "; BaseURL -> " + (ReadContentUrl() ?? "(live AE, no marker)")
@@ -207,6 +217,72 @@ public static class InfinityLoaderMod
         SafeLog("[InfinityLoader] WebCom http error: " + msg);
         var d = Traverse.Create(inst).Field("onError").GetValue<Action<string>>();
         d?.Invoke(msg);
+    }
+
+    // ---- chat emoji ----------------------------------------------------------
+    // Load emoji.unity3d (shipped next to the loader, in UserData/Beyond) once, register its
+    // TMP_SpriteAsset as the TMP default + on the chat log field, and expand :shortcodes: in every
+    // chat line to <sprite name="..."> tags TMP renders inline. Lazy so TMP is initialized.
+    private static bool _emojiTried;
+    private static TMP_SpriteAsset _emojiAsset;
+    private static HashSet<string> _emojiNames;
+    private static readonly Regex _emojiRe = new Regex(":([A-Za-z0-9_]+):", RegexOptions.Compiled);
+
+    private static void EnsureEmoji()
+    {
+        if (_emojiTried) return;
+        _emojiTried = true;
+        try
+        {
+            string path = Path.Combine(_beyondDir, "emoji.unity3d");
+            if (!File.Exists(path)) { SafeLog("[emoji] bundle missing: " + path); return; }
+            AssetBundle bundle = AssetBundle.LoadFromFile(path);
+            if (bundle == null) { SafeLog("[emoji] LoadFromFile returned null"); return; }
+            _emojiAsset = bundle.LoadAsset<TMP_SpriteAsset>("Emoji");
+            if (_emojiAsset == null) { SafeLog("[emoji] 'Emoji' asset not in bundle"); return; }
+            _emojiNames = new HashSet<string>();
+            foreach (var c in _emojiAsset.spriteCharacterTable)
+                if (!string.IsNullOrEmpty(c.name)) _emojiNames.Add(c.name);
+            // Global default so any TMP field (chat log, preview) resolves <sprite name="...">.
+            try
+            {
+                var inst = TMP_Settings.instance;
+                if (inst != null)
+                {
+                    var f = typeof(TMP_Settings).GetField("m_defaultSpriteAsset",
+                        BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (f != null) f.SetValue(inst, _emojiAsset);
+                }
+            }
+            catch (Exception ex) { SafeLog("[emoji] default-set warn: " + ex.Message); }
+            SafeLog("[emoji] loaded " + _emojiNames.Count + " emoji");
+        }
+        catch (Exception ex) { SafeLog("[emoji] load FAILED: " + ex); }
+    }
+
+    private static string ExpandEmoji(string s)
+    {
+        if (_emojiNames == null || _emojiNames.Count == 0 || s.IndexOf(':') < 0) return s;
+        return _emojiRe.Replace(s, m =>
+        {
+            string n = m.Groups[1].Value.ToLowerInvariant();
+            return _emojiNames.Contains(n) ? "<sprite name=\"" + n + "\">" : m.Value;
+        });
+    }
+
+    public static void UIChat_SetText_Prefix(UIChat __instance, ref string s)
+    {
+        EnsureEmoji();
+        if (_emojiAsset != null && __instance != null)
+        {
+            try
+            {
+                var tf = __instance.textField;                 // public TMP_Text on UIChat
+                if (tf != null && tf.spriteAsset != _emojiAsset) tf.spriteAsset = _emojiAsset;
+            }
+            catch { }
+        }
+        if (!string.IsNullOrEmpty(s)) s = ExpandEmoji(s);
     }
 
     // ---- packet logger -------------------------------------------------------

@@ -31,6 +31,9 @@ cp "$HERE/InfinityLoader/bin/Release/InfinityLoader.dll" "$G/InfinityLoader.dll"
 # ship 0Harmony.dll, so it MUST be installed alongside the loader or it FATALs at startup
 # with "Could not load 0Harmony, Version=2.4.2.0".
 cp "$HERE/doorstop/0Harmony.dll"       "$G/0Harmony.dll"
+# Chat-emoji TMP sprite-asset bundle — the loader reads it from UserData/Beyond at first chat.
+mkdir -p "$G/UserData/Beyond"
+cp "$HERE/assets/emoji.unity3d"        "$G/UserData/Beyond/emoji.unity3d"
 
 echo "[4/4] activate the API redirect (opt-in marker)"
 mkdir -p "$G/UserData"
