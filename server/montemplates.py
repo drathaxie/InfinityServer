@@ -14,6 +14,8 @@ import json
 import pathlib
 import urllib.request
 
+import monrecord
+
 MAPS_DIR = pathlib.Path(__file__).resolve().parent.parent / "data" / "maps"
 MONSTERS_DIR = pathlib.Path(__file__).resolve().parent.parent / "data" / "monsters"
 UPSTREAM_MON = "https://infinity.aq.com/game/api/data/GetMonsterData?ids="
@@ -156,19 +158,18 @@ def resolve_upstream(conn, ids):
 
 
 def catalog(conn, mon_id):
-    """The GetMonsterData CATALOG def for a MonID — AE's crawled def, served 1=1 from the
-    monsters.catalog column; falls back to deriving one from the stored monBranch. None if we
-    have no row at all."""
+    """The GetMonsterData CATALOG def for a MonID — GENERATED from the canonical record
+    (monrecord.to_catalog) so it can't drift from the spawn monBranch the way the old stored
+    `catalog` column did (that drift served stale element/apopID/Bundle and broke NPC apop
+    portraits). `raw` is authoritative; the stored catalog contributes only its avatar-
+    customization fields (colours/hair). None if we have no row at all."""
     row = conn.execute("SELECT catalog, raw FROM monsters WHERE mon_id=?",
                        (int(mon_id),)).fetchone()
     if row is None:
         return None
-    if row["catalog"]:
-        return json.loads(row["catalog"])
-    mb = json.loads(row["raw"])
-    return {"ID": int(mon_id), "Name": mb.get("strMonName"), "Level": mb.get("Level"),
-            "strLinkage": mb.get("strLinkage"), "strElement": mb.get("strElement"),
-            "sRace": mb.get("sRace"), "Class": mb.get("Class"), "Bundle": mb.get("Bundle")}
+    raw = json.loads(row["raw"])
+    cat = json.loads(row["catalog"]) if row["catalog"] else {}
+    return monrecord.to_catalog(monrecord.from_dicts(raw, cat))
 
 
 def get(conn, mon_id):
