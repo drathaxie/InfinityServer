@@ -120,3 +120,34 @@ def row_to_cols(row):
         if v is not None:
             cols[c] = json.loads(v)
     return cols
+
+
+# ---- schema -----------------------------------------------------------------
+# SQL type per column, validated by a DB round-trip type-fidelity check against all live rows
+# (BIGINT/TEXT round-trip exactly; the DOUBLE fields accept the occasional integer JSON value as
+# 1 -> 1.0, which the client's `double`/`float` Monbranch fields parse identically).
+COL_TYPES = {
+    "mon_id": "BIGINT", "id_legacy": "BIGINT", "name": "TEXT", "subtitle": "TEXT",
+    "linkage": "TEXT", "hp": "BIGINT", "hp_max": "BIGINT", "race": "TEXT", "element": "TEXT",
+    "level": "BIGINT", "gender": "TEXT", "class_id": "BIGINT", "behave": "TEXT", "frame": "TEXT",
+    "scale": "DOUBLE PRECISION", "apop_id": "BIGINT", "mon_map_id": "BIGINT",
+    "x": "DOUBLE PRECISION", "y": "DOUBLE PRECISION", "fx": "DOUBLE PRECISION",
+    "fy": "DOUBLE PRECISION", "state": "BIGINT", "reaction_type": "BIGINT", "direction": "BIGINT",
+    "no_move": "BOOLEAN", "disable_hit_flash": "BOOLEAN", "npc_req": "TEXT", "pvp_team": "BIGINT",
+    "b_red": "BIGINT", "int_rss": "BIGINT", "scale_min": "DOUBLE PRECISION",
+    "scale_max": "DOUBLE PRECISION", "name_override": "TEXT", "level_override": "BIGINT",
+    "skin_color": "BIGINT", "hair_color": "BIGINT", "eye_color": "BIGINT", "base_color": "BIGINT",
+    "trim_color": "BIGINT", "accessory_color": "BIGINT", "hair_id": "BIGINT",
+    "hp_scale": "DOUBLE PRECISION", "mp_max": "BIGINT", "hair_filename": "TEXT", "hair_name": "TEXT",
+    "bundle": "TEXT", "equipped_items": "TEXT", "_raw_extra": "TEXT", "_cat_extra": "TEXT",
+}
+# every column, mon_id first (PK), in a stable order for CREATE TABLE / INSERT.
+ALL_COLS = SCALAR_COLS + ["bundle", "equipped_items", "_raw_extra", "_cat_extra"]
+
+
+def monsters_columns_ddl():
+    """The column body for `CREATE TABLE monsters (...)`, generated so the schema can never drift
+    from the (de)composition logic above."""
+    return ",\n".join(
+        f'    "{c}" {COL_TYPES[c]}' + (" PRIMARY KEY" if c == "mon_id" else "")
+        for c in ALL_COLS)

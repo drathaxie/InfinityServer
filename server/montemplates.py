@@ -16,6 +16,26 @@ import urllib.request
 
 import monrecord
 
+_MONCOLS = ",".join(f'"{c}"' for c in monrecord.ALL_COLS)   # SELECT list for the canonical record
+
+
+def store(conn, mon_id, raw, cat=None, replace=False):
+    """Decompose a monBranch (+ optional crawled catalog def) into the canonical columns and
+    upsert. The two wire shapes are regenerated from these columns on read (get/catalog)."""
+    rec = monrecord.from_dicts(raw or {}, cat or {})
+    rec["mon_id"] = int(mon_id)
+    row = monrecord.cols_to_row(rec)
+    qc = ",".join(f'"{c}"' for c in monrecord.ALL_COLS)
+    ph = ",".join("?" for _ in monrecord.ALL_COLS)
+    if replace:
+        action = "DO UPDATE SET " + ", ".join(
+            f'"{c}"=excluded."{c}"' for c in monrecord.ALL_COLS if c != "mon_id")
+    else:
+        action = "DO NOTHING"
+    conn.execute(f"INSERT INTO monsters ({qc}) VALUES ({ph}) ON CONFLICT(mon_id) {action}",
+                 tuple(row[c] for c in monrecord.ALL_COLS))
+
+
 MAPS_DIR = pathlib.Path(__file__).resolve().parent.parent / "data" / "maps"
 MONSTERS_DIR = pathlib.Path(__file__).resolve().parent.parent / "data" / "monsters"
 UPSTREAM_MON = "https://infinity.aq.com/game/api/data/GetMonsterData?ids="
@@ -87,17 +107,7 @@ def seed_db(conn):
     for mid in set(captured) | set(crawled):
         cat = crawled.get(mid)
         mb = captured.get(mid) or _catalog_to_monbranch(cat)
-        conn.execute(
-            "INSERT INTO monsters(mon_id, name, subtitle, linkage, hp, level, race, "
-            "element, behave, gender, bundle, raw, catalog) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(mon_id) DO NOTHING",
-            (int(mid), mb.get("strMonName"), mb.get("strSubtitle"),
-             mb.get("strLinkage"), mb.get("intHPMax") or mb.get("intHP"), mb.get("Level"),
-             mb.get("sRace"), mb.get("strElement"), mb.get("strBehave"), mb.get("Gender"),
-             json.dumps(mb.get("Bundle"), separators=(",", ":")) if mb.get("Bundle") else None,
-             json.dumps(mb, separators=(",", ":")),
-             json.dumps(cat, separators=(",", ":")) if cat else None),
-        )
+        store(conn, mid, mb, cat)
         n += 1
     return n
 
@@ -140,16 +150,7 @@ def resolve_upstream(conn, ids):
         except (KeyError, TypeError, ValueError):
             continue
         mb = _catalog_to_monbranch(cat)
-        conn.execute(
-            "INSERT INTO monsters(mon_id, name, subtitle, linkage, hp, level, race, "
-            "element, behave, gender, bundle, raw, catalog) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(mon_id) DO NOTHING",
-            (mid, mb.get("strMonName"), mb.get("strSubtitle"), mb.get("strLinkage"),
-             mb.get("intHPMax"), mb.get("Level"), mb.get("sRace"), mb.get("strElement"),
-             mb.get("strBehave"), mb.get("Gender"),
-             json.dumps(mb.get("Bundle"), separators=(",", ":")) if mb.get("Bundle") else None,
-             json.dumps(mb, separators=(",", ":")),
-             json.dumps(cat, separators=(",", ":"))))
+        store(conn, mid, mb, cat)
         n += 1
     if n:
         conn.commit()
@@ -163,21 +164,19 @@ def catalog(conn, mon_id):
     `catalog` column did (that drift served stale element/apopID/Bundle and broke NPC apop
     portraits). `raw` is authoritative; the stored catalog contributes only its avatar-
     customization fields (colours/hair). None if we have no row at all."""
-    row = conn.execute("SELECT catalog, raw FROM monsters WHERE mon_id=?",
+    row = conn.execute(f"SELECT {_MONCOLS} FROM monsters WHERE mon_id=?",
                        (int(mon_id),)).fetchone()
     if row is None:
         return None
-    raw = json.loads(row["raw"])
-    cat = json.loads(row["catalog"]) if row["catalog"] else {}
-    return monrecord.to_catalog(monrecord.from_dicts(raw, cat))
+    return monrecord.to_catalog(monrecord.row_to_cols(row))
 
 
 def get(conn, mon_id):
     """The canonical Monbranch for a MonID (deep copy), or None. The monsters table is the
     authoritative store — captured-rich where we have it, derived from the crawled catalog
     otherwise (both seeded at startup), and editable in place."""
-    row = conn.execute("SELECT raw FROM monsters WHERE mon_id=?", (int(mon_id),)).fetchone()
-    return json.loads(row["raw"]) if row else None
+    row = conn.execute(f"SELECT {_MONCOLS} FROM monsters WHERE mon_id=?", (int(mon_id),)).fetchone()
+    return monrecord.to_monbranch(monrecord.row_to_cols(row)) if row else None
 
 
 def template(conn, mon_id):
