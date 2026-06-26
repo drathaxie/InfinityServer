@@ -14,6 +14,7 @@ import json
 import pathlib
 import urllib.request
 
+import db
 import monrecord
 
 _MONCOLS = ",".join(f'"{c}"' for c in monrecord.ALL_COLS)   # SELECT list for the canonical record
@@ -182,20 +183,33 @@ def get(conn, mon_id):
 # Curated canonical columns the monster editor exposes (the rest ride untouched in the columns).
 EDITOR_COLS = ["name", "subtitle", "linkage", "hp", "hp_max", "mp_max", "race", "element",
                "level", "gender", "class_id", "behave", "scale", "apop_id", "no_move", "b_red"]
+# Avatar customization columns (for "equipped" humanoid NPCs built like a player).
+COLOR_COLS = ["skin_color", "hair_color", "eye_color", "base_color", "trim_color",
+              "accessory_color", "hair_id"]
 
 
 def editor_load(conn, mon_id):
-    """{monster:{col:val,...}, drops:[{item_id,rate,quantity}]} for the monster editor, or {}."""
+    """{monster:{cols+colors}, equips:{spot:{item_id,name}}, drops:[...]} for the editor, or {}."""
     row = conn.execute(f"SELECT {_MONCOLS} FROM monsters WHERE mon_id=?", (int(mon_id),)).fetchone()
     if row is None:
         return {}
     cols = monrecord.row_to_cols(row)
-    mon = {c: cols.get(c) for c in EDITOR_COLS}
+    mon = {c: cols.get(c) for c in EDITOR_COLS + COLOR_COLS}
     mon["mon_id"] = int(mon_id)
+    mon["has_bundle"] = bool(cols.get("bundle"))
+    # equipped items: {spot: <item def>} -> {spot: {item_id, name}} for the picker
+    equips = {}
+    eqi = cols.get("equipped_items") or {}
+    if isinstance(eqi, dict):
+        for spot, it in eqi.items():
+            iid = it.get("ID") if isinstance(it, dict) else it
+            nm = (it.get("Name") if isinstance(it, dict) else "") or \
+                 ((db.item(conn, iid) or {}).get("Name") if iid else "")
+            equips[str(spot)] = {"item_id": iid, "name": nm}
     drops = [{"item_id": r["item_id"], "rate": r["rate"], "quantity": r["quantity"]}
              for r in conn.execute("SELECT item_id, rate, quantity FROM monster_drops "
                                    "WHERE mon_id=? ORDER BY item_id", (int(mon_id),))]
-    return {"monster": mon, "drops": drops}
+    return {"monster": mon, "equips": equips, "drops": drops}
 
 
 def editor_save(conn, payload):
@@ -210,10 +224,30 @@ def editor_save(conn, payload):
         conn.execute("INSERT INTO monsters (mon_id, name) VALUES (?, ?)",
                      (mid, mon.get("name") or f"Mon {mid}"))
     sets, vals = [], []
-    for c in EDITOR_COLS:
+    for c in EDITOR_COLS + COLOR_COLS:
         if c in mon:
             sets.append(f'"{c}"=?')
             vals.append(mon[c])
+    # equipped items: the editor sends {spot: item_id}; store {spot: <item def w/ Bundle>} so the
+    # client can dress the humanoid base (an "equipped" NPC, rendered like a player).
+    if "equips" in payload:
+        eqi = {}
+        for spot, iid in (payload.get("equips") or {}).items():
+            try:
+                iid = int(iid)
+            except (TypeError, ValueError):
+                continue
+            if not iid:
+                continue
+            it = db.item(conn, iid)
+            if it is None:
+                return {"ok": False, "msg": f"equip item {iid} isn't in the catalog."}
+            eqi[str(spot)] = it
+        sets.append('"equipped_items"=?')
+        vals.append(json.dumps(eqi, separators=(",", ":")) if eqi else None)
+        if mon.get("humanoid"):       # clear the art bundle so the equipped humanoid renders
+            sets.append('"bundle"=?')
+            vals.append(None)
     if sets:
         conn.execute(f"UPDATE monsters SET {', '.join(sets)} WHERE mon_id=?", tuple(vals) + (mid,))
     conn.execute("DELETE FROM monster_drops WHERE mon_id=?", (mid,))

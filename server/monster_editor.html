@@ -87,6 +87,18 @@ const MFIELDS = [
  ["scale","Scale","number"],["apop_id","Apop ID","number"],["no_move","No Move","number"],["b_red","b_red","number"],
 ];
 
+function colorInp(val, on){
+  const i=document.createElement("input"); i.type="color";
+  const n=(val==null?0:(parseInt(val)||0)) & 0xFFFFFF;
+  i.value="#"+n.toString(16).padStart(6,"0");
+  i.oninput=()=>on(parseInt(i.value.slice(1),16));
+  i.style.cssText="width:100%;height:34px;padding:2px;cursor:pointer;"; return i;
+}
+function chk(val, on, label){
+  const w=document.createElement("label"); w.style.cssText="display:flex;gap:7px;align-items:center;font-size:13px;height:34px;cursor:pointer;";
+  const c=document.createElement("input"); c.type="checkbox"; c.checked=!!val; c.style.width="auto"; c.onchange=()=>on(c.checked);
+  w.append(c, document.createTextNode(label||"yes")); return w;
+}
 function picker(endpoint, placeholder, add){
   const wrap=document.createElement("div"); wrap.className="pick";
   const i=document.createElement("input"); i.type="text"; i.placeholder=placeholder; i.style.width="100%";
@@ -120,13 +132,13 @@ function newRecord(){
   const id = parseInt(v)||0;
   if(!id){ setStatus("invalid id", false); return; }
   if(LIST.some(it=>it.ID===id)){ setStatus("id "+id+" exists — loading it", false); loadMon(id); return; }
-  data = { monster:{ mon_id:id }, drops:[] }; render(); setStatus("new monster "+id+" — fill in + Save");
+  data = { monster:{ mon_id:id }, equips:{}, drops:[] }; render(); setStatus("new monster "+id+" — fill in + Save");
 }
 async function loadMon(id){
   if(!id) return;
   data = await (await fetch("load?ID="+encodeURIComponent(id))).json();
-  if(!data || !data.monster){ data={ monster:{ mon_id:parseInt(id)||0 }, drops:[] }; }
-  data.drops = data.drops || [];
+  if(!data || !data.monster){ data={ monster:{ mon_id:parseInt(id)||0 }, equips:{}, drops:[] }; }
+  data.drops = data.drops || []; data.equips = data.equips || {};
   render(); setStatus("loaded monster "+(data.monster.mon_id));
 }
 function render(){
@@ -139,6 +151,40 @@ function render(){
     r.appendChild(field(lab, el));
   });
   c.appendChild(r); m.appendChild(c);
+
+  // --- Equipped items (build a humanoid NPC from gear, rendered like a player) ---
+  const eqc=card("Equipped Items  (dress a humanoid NPC — no art bundle needed)");
+  const SPOTS=[[2,"Weapon"],[3,"Head"],[4,"Back"],[5,"Pet"],[6,"Class"],[7,"Armor"],[10,"Amulet"]];
+  data.equips = data.equips || {};
+  SPOTS.forEach(([spot,lab])=>{
+    const row=document.createElement("div"); row.className="row"; row.style.alignItems="flex-end";
+    const cur=data.equips[spot]||{};
+    const nmf=document.createElement("div"); nmf.className="field"; nmf.style.flex="2";
+    const l=document.createElement("label"); l.textContent=lab+" (spot "+spot+")";
+    const val=document.createElement("div"); val.textContent=cur.item_id?(cur.item_id+" — "+(cur.name||"")):"(empty)";
+    val.style.cssText="padding:7px 0;font-size:13px;color:"+(cur.item_id?"#8ee0ab":"#9aa4b2");
+    nmf.append(l,val); row.appendChild(nmf);
+    row.appendChild(field("Set "+lab, picker("items","find item…",(id,name)=>{ data.equips[spot]={item_id:id,name:name}; render(); })));
+    if(cur.item_id){ const del=document.createElement("button"); del.className="del"; del.textContent="clear";
+      del.onclick=()=>{ delete data.equips[spot]; render(); };
+      const dw=document.createElement("div"); dw.className="field"; dw.style.flex="0"; dw.style.minWidth="0";
+      const sp=document.createElement("label"); sp.innerHTML="&nbsp;"; dw.append(sp,del); row.appendChild(dw); }
+    eqc.appendChild(row);
+  });
+  const hb=document.createElement("div"); hb.className="row";
+  hb.appendChild(field("Render mode", chk(mon.humanoid || !mon.has_bundle, v=>mon.humanoid=v,
+    mon.has_bundle ? "Humanoid — clear the art bundle so equipped gear shows" : "Humanoid (no art bundle)")));
+  eqc.appendChild(hb);
+  m.appendChild(eqc);
+
+  // --- Customization colors (tint the humanoid) ---
+  const cust=card("Customization colors");
+  const cr=document.createElement("div"); cr.className="row";
+  [["skin_color","Skin"],["hair_color","Hair"],["eye_color","Eyes"],["base_color","Base"],["trim_color","Trim"],["accessory_color","Accessory"]].forEach(([k,lab])=>{
+    cr.appendChild(field(lab, colorInp(mon[k], v=>mon[k]=v)));
+  });
+  cr.appendChild(field("Hair ID", inp(mon.hair_id, v=>mon.hair_id=parseInt(v)||0, "number")));
+  cust.appendChild(cr); m.appendChild(cust);
 
   const d=card("Drops  (rate 0–1 = independent chance per kill)");
   if(!data.drops.length){ const e=document.createElement("div"); e.className="empty"; e.textContent="No drops. Add one below."; d.appendChild(e); }
@@ -165,7 +211,10 @@ async function save(){
   const mon=data.monster||{};
   if(mon.mon_id==null){ setStatus("nothing to save", false); return; }
   setStatus("saving…");
-  const fd=new URLSearchParams(); fd.set("json", JSON.stringify(data));
+  const equips={};
+  for(const [spot,v] of Object.entries(data.equips||{})) if(v && v.item_id) equips[spot]=v.item_id;
+  const payload={ monster:mon, equips, drops:data.drops };
+  const fd=new URLSearchParams(); fd.set("json", JSON.stringify(payload));
   const r=await fetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).then(r=>r.json());
   if(r.ok){ setStatus("saved monster "+r.ID); loadList(); } else setStatus(r.msg||"save failed", false);
 }
