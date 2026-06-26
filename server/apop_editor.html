@@ -233,6 +233,10 @@ function elemEl(p,e,ei){
     // captured action (Goto, OpenApop, OpenCutscene, …) is preserved and stays selectable.
     if(!e.action) e.action="ApopList";
     const ACTS=[["ApopList","Open panel"],["Join","Join a map"],["chat","Run a command"],
+                ["ItemShop","Open item shop"],["EnhanceShop","Open enhancement shop"],
+                ["HairShop","Open hair shop"],["OpenBank","Open bank"],
+                ["ShowQuests","Show this NPC's quests"],["OpenCutscene","Play cutscene"],
+                ["OpenCharEdit","Character editor (staff only)"],
                 ["Link","Open web link"],["CloseApop","Close apop"]];
     if(!ACTS.some(([v])=>v===e.action)) ACTS.push([e.action, e.action+" (advanced — preserved)"]);
     d.appendChild(field("When clicked", sel(e.action, ACTS, v=>{ e.action=v; render(); })));
@@ -250,6 +254,10 @@ function elemEl(p,e,ei){
       d.appendChild(r2);
     } else if(e.action==="chat"){
       d.appendChild(field("Command to run (e.g. /genderswap)", inp(e.strData, v=>{ e.strData=v; })));
+    } else if(e.action==="ItemShop" || e.action==="EnhanceShop"){
+      d.appendChild(field("Shop ID", inp(e.intMin, v=>{ e.intMin=parseInt(v)||0; }, "number")));
+    } else if(e.action==="OpenCutscene"){
+      d.appendChild(field("Cutscene ID", inp(e.intMin, v=>{ e.intMin=parseInt(v)||0; }, "number")));
     } else if(e.action==="Link"){
       d.appendChild(field("Web link (URL — must be http/https)", inp(e.link, v=>{ e.link=v; })));
     }
