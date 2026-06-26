@@ -193,6 +193,18 @@ def _compile_pad(conn, pad_row, npc_rows):
         if pad_row["requirement_data"]:
             mb["NPCRequirementData"] = pad_row["requirement_data"]
         mb.setdefault("equippedItems", {})
+        # Equipped/humanoid NPCs are dressed from equippedItems + avatar customization (colours +
+        # hair). Those live on the monster catalog, not the spawn monBranch — serve them here or the
+        # client renders black skin / no hair. A per-pad colour (npc row) overrides the catalog.
+        cat = montemplates.catalog(conn, mon_id) or {}
+        for jk, col in (("SkinColor", "skin_color"), ("HairColor", "hair_color"),
+                        ("EyeColor", "eye_color"), ("BaseColor", "base_color"),
+                        ("TrimColor", "trim_color"), ("AccessoryColor", "accessory_color"),
+                        ("HairID", "hair_id")):
+            if npc[col]:
+                mb[jk] = npc[col]
+            elif cat.get(jk) is not None:
+                mb[jk] = cat[jk]
         out.append(mb)
     return out
 
