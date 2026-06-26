@@ -206,7 +206,9 @@ def editor_save(conn, payload):
     except (TypeError, ValueError):
         return {"ok": False, "msg": "Monster needs a numeric mon_id."}
     if conn.execute("SELECT 1 FROM monsters WHERE mon_id=?", (mid,)).fetchone() is None:
-        return {"ok": False, "msg": f"monster {mid} not found."}
+        # brand-new monster from the editor's "New" button: seed a minimal canonical row first.
+        conn.execute("INSERT INTO monsters (mon_id, name) VALUES (?, ?)",
+                     (mid, mon.get("name") or f"Mon {mid}"))
     sets, vals = [], []
     for c in EDITOR_COLS:
         if c in mon:

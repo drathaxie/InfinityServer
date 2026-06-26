@@ -27,12 +27,23 @@
   .field { display:flex; flex-direction:column; gap:3px; flex:1; min-width:130px; }
   .field label { font-size:12px; color:var(--muted); }
   .hint { color:var(--muted); font-size:12px; margin-top:6px; }
+  .finder { position:relative; }
+  .finder input { min-width:240px; }
+  .results { position:absolute; z-index:20; left:0; right:0; top:100%; background:var(--panel2);
+             border:1px solid var(--line); border-radius:6px; max-height:320px; overflow:auto; display:none; }
+  .results div { padding:6px 9px; cursor:pointer; }
+  .results div:hover { background:var(--accent); color:#fff; }
+  #btnNew { background:var(--panel2); }
 </style>
 </head>
 <body>
 <header>
   <h1>Item Editor</h1>
-  <select id="picker" title="Choose an item"></select>
+  <div class="finder">
+    <input id="search" placeholder="Search id or name…" autocomplete="off">
+    <div id="results" class="results"></div>
+  </div>
+  <button id="btnNew">+ New</button>
   <button class="go" id="btnSave">Save</button>
   <span class="status" id="status"></span>
 </header>
@@ -71,11 +82,25 @@ const FIELDS = [
 ];
 const KNOWN = new Set(FIELDS.map(f=>f[0]).concat(["ID","Description"]));
 
-async function loadList(sel){
-  const arr = await (await fetch("list")).json();
-  const p = $("#picker"); p.innerHTML="";
-  for(const it of arr){ const o=document.createElement("option"); o.value=it.ID; o.textContent=it.ID+" — "+it.name; p.appendChild(o); }
-  if(sel!=null) p.value=String(sel);
+let LIST = [];
+async function loadList(){ LIST = await (await fetch("list")).json(); }
+function showResults(q){
+  q=(q||"").trim().toLowerCase();
+  const box=$("#results"); box.innerHTML="";
+  let arr = q ? LIST.filter(it => String(it.ID)===q || String(it.ID).includes(q) || (it.name||"").toLowerCase().includes(q)) : LIST;
+  arr = arr.slice(0, 60);
+  for(const it of arr){ const d=document.createElement("div"); d.textContent=it.ID+" — "+it.name;
+    d.onmousedown=()=>{ $("#search").value=it.ID+" — "+it.name; box.style.display="none"; loadItem(it.ID); }; box.appendChild(d); }
+  box.style.display = arr.length ? "block" : "none";
+}
+function newRecord(){
+  const maxId = LIST.reduce((m,it)=>Math.max(m, it.ID||0), 0);
+  const v = prompt("New item ID:", String(maxId+1));
+  if(v==null) return;
+  const id = parseInt(v)||0;
+  if(!id){ setStatus("invalid id", false); return; }
+  if(LIST.some(it=>it.ID===id)){ setStatus("id "+id+" exists — loading it", false); loadItem(id); return; }
+  item = { ID: id }; render(); setStatus("new item "+id+" — fill in + Save");
 }
 async function loadItem(id){
   if(!id) return;
@@ -105,15 +130,18 @@ async function save(){
   setStatus("saving…");
   const fd=new URLSearchParams(); fd.set("json", JSON.stringify(item));
   const r=await fetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).then(r=>r.json());
-  if(r.ok){ setStatus("saved item "+r.ID); loadList(r.ID); } else setStatus(r.msg||"save failed", false);
+  if(r.ok){ setStatus("saved item "+r.ID); loadList(); } else setStatus(r.msg||"save failed", false);
 }
 (async function(){
   try { ENUMS = await (await fetch("/editor/enums.json")).json(); } catch(e){ ENUMS={}; }
   await loadList();
-  $("#picker").onchange = e=>loadItem(e.target.value);
+  $("#search").oninput = e=>showResults(e.target.value);
+  $("#search").onfocus = e=>showResults(e.target.value);
+  $("#search").onblur = ()=>setTimeout(()=>$("#results").style.display="none", 200);
+  $("#btnNew").onclick = newRecord;
   $("#btnSave").onclick = save;
-  const id = new URLSearchParams(location.search).get("ID") || $("#picker").value;
-  if(id){ $("#picker").value=String(id); loadItem(id); }
+  const id = new URLSearchParams(location.search).get("ID");
+  if(id) loadItem(id);
 })();
 </script>
 <script src="/editor/nav.js"></script>
