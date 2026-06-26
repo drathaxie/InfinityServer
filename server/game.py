@@ -1589,15 +1589,26 @@ def _empty_apop(aid):
                       separators=(",", ":"))
 
 
+# A valid cutscene that just fades and completes (~0.6s) — served for cutscenes we don't have so
+# the client's player never HANGS waiting for an empty scene to finish (a soft-lock). The
+# quest/storyline step that triggered it then advances instead.
+_MINIMAL_CUTSCENE = json.dumps({
+    "ID": "", "cutsceneName": "", "cutsceneDescription": "", "idCount": 0, "boxCount": 0,
+    "trackCount": 0, "sfxCount": 0, "completeActions": [],
+    "frames": [["FadeToBlack", "Timer{0.3}"], ["FadeFromBlack", "Timer{0.3}"]]},
+    separators=(",", ":"))
+
+
 def load_dialog(conn, dialog_id):
     """getDialog: the saved cutscene JSON for an id — from the cutscenes store the Dialogger
-    editor writes via DialoggerSave. Empty string if unknown. (ResponseGetDialog reads
+    editor writes via DialoggerSave. A missing/empty one returns a minimal fade-and-complete
+    cutscene (never ""), so the client doesn't hang on an empty scene. (ResponseGetDialog reads
     data.JsonText and HtmlDecodes it, so the stored &lt;/&gt; escaping round-trips.)"""
     try:
         row = conn.execute("SELECT raw FROM cutscenes WHERE id=?", (int(dialog_id),)).fetchone()
     except (TypeError, ValueError):
-        return ""
-    return row["raw"] if row else ""
+        return _MINIMAL_CUTSCENE
+    return row["raw"] if (row and row["raw"]) else _MINIMAL_CUTSCENE
 
 
 def remove_item(conn, char, params):
