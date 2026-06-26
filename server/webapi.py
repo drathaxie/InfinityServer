@@ -40,6 +40,7 @@ import urllib.request
 import db
 import game
 import montemplates
+import placements
 import editor_enums
 
 HOST = "0.0.0.0"
@@ -628,6 +629,47 @@ def shop_save(conn, form):
         return {"ok": False, "msg": f"save failed: {ex}"}
 
 
+def map_list(conn, qs):
+    """map/list -> [{ID,name}] of maps (ID = the map name string used everywhere as the key)."""
+    return [{"ID": r["str_map_name"], "name": r["str_map_name"]}
+            for r in conn.execute("SELECT str_map_name FROM maps ORDER BY str_map_name")]
+
+
+def map_load(conn, qs):
+    """map/load?map=X -> {map, authored, pads:[PadData...]}. pad_dict seeds the pads from the
+    captured monBranch on first open (take_over), so the editor starts from the current NPCs."""
+    mp = (urllib.parse.parse_qs(qs).get("map", [""])[0] or "").strip().lower()
+    if not mp:
+        return {}
+    pads = placements.pad_dict(conn, mp)            # {pad_id: PadData} (auto-seeds + authors)
+    return {"map": mp, "authored": placements.is_authored(conn, mp),
+            "pads": [pads[k] for k in sorted(pads)]}
+
+
+def map_save(conn, form):
+    """map/save {json:{map, pads:[PadData...]}} -> {ok,ID}. Full-replace the map's pads+NPCs and
+    keep it authored (so the served monBranch is compiled from these). Mirrors the in-game editor."""
+    try:
+        payload = json.loads(form.get("json", ["{}"])[0])
+    except Exception:
+        return {"ok": False, "msg": "Invalid map payload."}
+    mp = (payload.get("map") or "").strip().lower()
+    if not mp:
+        return {"ok": False, "msg": "Map name required."}
+    pads = payload.get("pads") or []
+    try:
+        conn.execute("DELETE FROM pad_npcs WHERE map=?", (mp,))
+        conn.execute("DELETE FROM map_pads WHERE map=?", (mp,))
+        for pad in pads:
+            placements.write_pad(conn, mp, pad)
+        conn.execute("INSERT INTO map_state(map, authored) VALUES(?,1) "
+                     "ON CONFLICT(map) DO UPDATE SET authored=1", (mp,))
+        conn.commit()
+        return {"ok": True, "ID": mp, "msg": f"{len(pads)} pad(s) saved"}
+    except Exception as ex:
+        return {"ok": False, "msg": f"save failed: {ex}"}
+
+
 def get_base_classes(conn, qs):
     """Data/GetBaseClasses -> {items, hairs, character_bundle}. Feeds char-create AND the /charedit
     hair list (CharacterCustomizationController.BuildHairLists fetches this and reads .hairs). Served
@@ -673,6 +715,10 @@ ROUTES = {
     "shop/load":             ("GET",  shop_load),
     "shop/items":            ("GET",  quest_items),   # item picker for the listing
     "shop/save":             ("POST", shop_save),
+    "map/list":              ("GET",  map_list),
+    "map/load":              ("GET",  map_load),
+    "map/monsters":          ("GET",  apop_npcs),     # monster picker for placing NPCs
+    "map/save":              ("POST", map_save),
 }
 
 # Editor pages (staff-gated) -> the HTML file served for each. The in-game pencil opens apop;
@@ -681,8 +727,9 @@ EDITOR_PAGES = {"apop/edit.aspx": "apop_editor.html", "apop/edit": "apop_editor.
                 "quest/edit.aspx": "quest_editor.html", "quest/edit": "quest_editor.html",
                 "item/edit.aspx": "item_editor.html", "item/edit": "item_editor.html",
                 "monster/edit.aspx": "monster_editor.html", "monster/edit": "monster_editor.html",
-                "shop/edit.aspx": "shop_editor.html", "shop/edit": "shop_editor.html"}
-EDITOR_PREFIXES = ("apop/", "quest/", "item/", "monster/", "shop/")
+                "shop/edit.aspx": "shop_editor.html", "shop/edit": "shop_editor.html",
+                "map/edit.aspx": "map_editor.html", "map/edit": "map_editor.html"}
+EDITOR_PREFIXES = ("apop/", "quest/", "item/", "monster/", "shop/", "map/")
 
 # The DB-manager menu (the hamburger nav shared by every editor page via /editor/nav.js). Add a
 # new editor here and it appears in the menu everywhere. soon=True renders it greyed/disabled.
@@ -692,6 +739,7 @@ EDITOR_MENU = [
     {"label": "Items", "url": "/item/Edit.aspx"},
     {"label": "Monsters & Drops", "url": "/monster/Edit.aspx"},
     {"label": "Shops", "url": "/shop/Edit.aspx"},
+    {"label": "Maps & NPCs", "url": "/map/Edit.aspx"},
 ]
 
 def _login_html(nxt, error):

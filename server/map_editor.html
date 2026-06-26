@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Map Editor</title>
+<style>
+  :root { --bg:#1d2127; --panel:#272c34; --panel2:#2f3640; --line:#3a4150; --ink:#e6e9ef;
+          --muted:#9aa4b2; --accent:#5b8cff; --accent2:#3fa46a; --danger:#c0504d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; gap:8px; align-items:center; padding:10px 14px; background:var(--panel);
+           border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0 10px 0 0; font-weight:600; }
+  select, input, button { font:inherit; color:var(--ink); background:var(--panel2);
+           border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  input[type=text], input[type=number] { width:100%; }
+  button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  button.go { background:var(--accent2); border-color:var(--accent2); color:#fff; }
+  button.del { background:transparent; border-color:var(--line); color:var(--muted); padding:4px 9px; }
+  button.del:hover { color:#fff; border-color:var(--danger); background:var(--danger); }
+  button.add { background:var(--panel2); margin-top:6px; }
+  .status { margin-left:auto; color:var(--muted); font-size:13px; }
+  main { max-width:1080px; margin:0 auto; padding:16px; }
+  .pad { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:14px; }
+  .pad > h2 { margin:0 0 8px; font-size:13px; color:var(--accent); text-transform:uppercase; letter-spacing:.04em;
+              display:flex; align-items:center; gap:10px; }
+  .padpos { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px; }
+  .npc { display:flex; gap:8px; align-items:flex-end; background:var(--panel2); border:1px solid var(--line);
+         border-radius:8px; padding:9px; margin-bottom:7px; flex-wrap:wrap; }
+  .field { display:flex; flex-direction:column; gap:3px; flex:1; min-width:88px; }
+  .field.wide { flex:2; min-width:150px; }
+  .field label { font-size:12px; color:var(--muted); }
+  .pick { position:relative; min-width:170px; flex:2; }
+  .pickres { position:absolute; z-index:10; left:0; right:0; top:100%; background:var(--panel2);
+             border:1px solid var(--line); border-radius:6px; max-height:220px; overflow:auto; display:none; }
+  .pickres div { padding:5px 8px; cursor:pointer; } .pickres div:hover { background:var(--accent); color:#fff; }
+  .finder { position:relative; } .finder input { min-width:240px; }
+  .results { position:absolute; z-index:20; left:0; right:0; top:100%; background:var(--panel2);
+             border:1px solid var(--line); border-radius:6px; max-height:320px; overflow:auto; display:none; }
+  .results div { padding:6px 9px; cursor:pointer; } .results div:hover { background:var(--accent); color:#fff; }
+  .empty { color:var(--muted); font-style:italic; padding:6px 0; }
+  .hint { color:var(--muted); font-size:12px; }
+  .npcname { flex:2; min-width:130px; font-size:13px; padding-bottom:8px; color:var(--ink); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Map Editor</h1>
+  <div class="finder">
+    <input id="search" placeholder="Search a map…" autocomplete="off">
+    <div id="results" class="results"></div>
+  </div>
+  <button class="go" id="btnSave">Save</button>
+  <span class="status" id="status"></span>
+</header>
+<main id="main"></main>
+
+<script>
+const $ = s => document.querySelector(s);
+let data = null, LIST = [], ENUMS = {};
+function setStatus(m, ok=true){ const s=$("#status"); s.textContent=m; s.style.color=ok?"#9aa4b2":"#e08585"; }
+function field(label, el, cls=""){ const f=document.createElement("div"); f.className="field "+cls; const l=document.createElement("label"); l.textContent=label; f.append(l, el); return f; }
+function inp(val, on, type="text"){ const i=document.createElement("input"); i.type=type; i.value=(val??""); i.oninput=()=>on(type==="number"?(i.value===""?0:(parseFloat(i.value)||0)):i.value); return i; }
+function selEnum(name, val, on){
+  const s=document.createElement("select"); const opts=ENUMS[name]||{};
+  const keys=Object.keys(opts).sort((a,b)=>(a-b)||a.localeCompare(b));
+  const cur=(val==null?"":String(val)); let has=false;
+  for(const k of keys){ const o=document.createElement("option"); o.value=k; o.textContent=opts[k]+" ("+k+")"; s.appendChild(o); if(k===cur)has=true; }
+  if(cur!=="" && !has){ const o=document.createElement("option"); o.value=cur; o.textContent="("+cur+")"; s.appendChild(o); }
+  s.value=cur; s.onchange=()=>{ const v=s.value; on(v===""?null:(v.trim()!=="" && !isNaN(v)?parseInt(v):v)); }; return s;
+}
+function selYN(val, on){ const s=document.createElement("select"); [["0","no"],["1","yes"]].forEach(([v,t])=>{const o=document.createElement("option");o.value=v;o.textContent=t;s.appendChild(o);}); s.value=val?"1":"0"; s.onchange=()=>on(s.value==="1"); return s; }
+function monsterPicker(onPick){
+  const wrap=document.createElement("div"); wrap.className="pick";
+  const i=document.createElement("input"); i.type="text"; i.placeholder="find monster…"; i.style.width="100%";
+  const res=document.createElement("div"); res.className="pickres"; let t=null;
+  i.oninput=()=>{ clearTimeout(t); t=setTimeout(async()=>{
+    const arr=await (await fetch("monsters?q="+encodeURIComponent(i.value.trim()))).json();
+    res.innerHTML=""; res.style.display=arr.length?"block":"none";
+    for(const m of arr){ const d=document.createElement("div"); d.textContent=m.id+" — "+m.name;
+      d.onmousedown=()=>{ onPick(m.id, m.name); i.value=""; res.style.display="none"; }; res.appendChild(d); }
+  }, 180); };
+  i.onblur=()=>setTimeout(()=>res.style.display="none", 200);
+  wrap.append(i, res); return wrap;
+}
+
+async function loadList(){ LIST = await (await fetch("list")).json(); }
+function showResults(q){
+  q=(q||"").trim().toLowerCase(); const box=$("#results"); box.innerHTML="";
+  let arr = q ? LIST.filter(it => (it.name||"").toLowerCase().includes(q)) : LIST;
+  arr = arr.slice(0, 60);
+  for(const it of arr){ const d=document.createElement("div"); d.textContent=it.name;
+    d.onmousedown=()=>{ $("#search").value=it.name; box.style.display="none"; loadMap(it.ID); }; box.appendChild(d); }
+  box.style.display = arr.length ? "block" : "none";
+}
+async function loadMap(name){
+  if(!name) return;
+  data = await (await fetch("load?map="+encodeURIComponent(name))).json();
+  if(!data || !data.map){ data = { map:name, pads:[] }; }
+  data.pads = data.pads || [];
+  render(); setStatus(`loaded ${data.map} — ${data.pads.length} pad(s)`);
+}
+function nextPadId(){ return Math.max(9000, data.pads.reduce((m,p)=>Math.max(m, p.ID||0), 0) + 1); }
+
+function render(){
+  const m=$("#main"); m.innerHTML="";
+  if(!data){ return; }
+  data.pads.forEach((pad, pi)=>{
+    const c=document.createElement("div"); c.className="pad";
+    const h=document.createElement("h2");
+    h.append(document.createTextNode(`Pad #${pad.ID}  ·  ${(pad.NPCData||[]).length} NPC(s)`));
+    const delPad=document.createElement("button"); delPad.className="del"; delPad.textContent="remove pad";
+    delPad.style.marginLeft="auto"; delPad.onclick=()=>{ data.pads.splice(pi,1); render(); };
+    h.appendChild(delPad); c.appendChild(h);
+    const pos=document.createElement("div"); pos.className="padpos";
+    pos.appendChild(field("X", inp(pad.X, v=>pad.X=v, "number")));
+    pos.appendChild(field("Y", inp(pad.Y, v=>pad.Y=v, "number")));
+    pos.appendChild(field("Frame", inp(pad.Frame, v=>pad.Frame=v)));
+    c.appendChild(pos);
+    (pad.NPCData||[]).forEach((npc, ni)=>{
+      const row=document.createElement("div"); row.className="npc";
+      const nm=document.createElement("div"); nm.className="npcname";
+      nm.textContent = `#${npc.ID}` + (npc.Name? "  "+npc.Name : "");
+      row.appendChild(nm);
+      row.appendChild(field("Change monster", monsterPicker((id,name)=>{ npc.ID=id; if(!npc.Name) npc.Name=""; render(); }), "wide"));
+      row.appendChild(field("Name override", inp(npc.Name, v=>npc.Name=v)));
+      row.appendChild(field("Level", inp(npc.Level, v=>npc.Level=parseInt(v)||1, "number")));
+      row.appendChild(field("Apop ID", inp(npc.apopID, v=>npc.apopID=parseInt(v)||-1, "number")));
+      row.appendChild(field("Max HP", inp(npc.MaxHP, v=>npc.MaxHP=parseInt(v)||1, "number")));
+      row.appendChild(field("Element", selEnum("Element", npc.Element, v=>npc.Element=v)));
+      row.appendChild(field("Race", selEnum("Race", npc.Race, v=>npc.Race=v)));
+      row.appendChild(field("Boss", selYN(npc.Boss, v=>npc.Boss=v)));
+      const del=document.createElement("button"); del.className="del"; del.textContent="✕";
+      del.onclick=()=>{ pad.NPCData.splice(ni,1); render(); };
+      const dw=document.createElement("div"); dw.className="field"; dw.style.flex="0"; dw.style.minWidth="0";
+      const sp=document.createElement("label"); sp.innerHTML="&nbsp;"; dw.append(sp, del); row.appendChild(dw);
+      c.appendChild(row);
+    });
+    const addNpc=field("Add an NPC to this pad", monsterPicker((id,name)=>{
+      (pad.NPCData = pad.NPCData||[]).push({ ID:id, Name:"", Level:1, apopID:-1, MaxHP:100 }); render();
+    }), "wide");
+    c.appendChild(addNpc);
+    m.appendChild(c);
+  });
+  if(!data.pads.length){ const e=document.createElement("div"); e.className="empty"; e.textContent="No pads on this map yet."; m.appendChild(e); }
+  const addPad=document.createElement("button"); addPad.className="add"; addPad.textContent="+ Add pad";
+  addPad.onclick=()=>{ data.pads.push({ ID: nextPadId(), X:0, Y:0, Frame:"Enter", Direction:1, MapID:0, NPCData:[] }); render(); };
+  m.appendChild(addPad);
+  const note=document.createElement("p"); note.className="hint";
+  note.textContent="Editing a map 'takes it over' — the served NPCs become these pads. Players see changes on map reload. Position is x/y (no visual drag).";
+  m.appendChild(note);
+}
+async function save(){
+  if(!data || !data.map){ setStatus("nothing to save", false); return; }
+  setStatus("saving…");
+  const fd=new URLSearchParams(); fd.set("json", JSON.stringify({ map:data.map, pads:data.pads }));
+  const r=await fetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).then(r=>r.json());
+  if(r.ok) setStatus(`saved ${r.ID} (${r.msg||""})`); else setStatus(r.msg||"save failed", false);
+}
+(async function(){
+  try { ENUMS = await (await fetch("/editor/enums.json")).json(); } catch(e){ ENUMS={}; }
+  await loadList();
+  $("#search").oninput = e=>showResults(e.target.value);
+  $("#search").onfocus = e=>showResults(e.target.value);
+  $("#search").onblur = ()=>setTimeout(()=>$("#results").style.display="none", 200);
+  $("#btnSave").onclick = save;
+  const mp = new URLSearchParams(location.search).get("map");
+  if(mp){ $("#search").value=mp; loadMap(mp); }
+})();
+</script>
+<script src="/editor/nav.js"></script>
+</body>
+</html>
