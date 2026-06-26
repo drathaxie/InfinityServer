@@ -1,0 +1,657 @@
+{
+ "9": {
+  "quest": "Defeat the Undead",
+  "objectives": {
+   "145": {
+    "name": "Undead Defeated",
+    "monsters": [],
+    "_hint": "If the Pactagonal Knights want us out of Noobshire, we'll need to be able to use our OWN land! These undead are attackin"
+   }
+  }
+ },
+ "10": {
+  "quest": "One Little Piggie",
+  "objectives": {
+   "147": {
+    "name": "Boar Deflated",
+    "monsters": [],
+    "_hint": "One of the little pigs has broken out of the barn - and it's no longer a little piggie! Go knock some sense back into th"
+   }
+  }
+ },
+ "11": {
+  "quest": "A Boar's Tail",
+  "objectives": {
+   "148": {
+    "name": "Boar's Tail",
+    "monsters": [],
+    "_hint": "Hmm, it looks like that didn't work.  He popped right back up! Maybe if you grab his tail he'll go back to normal size!"
+   }
+  }
+ },
+ "12": {
+  "quest": "Affect or Effect?",
+  "objectives": {
+   "149": {
+    "name": "Monsters Defeated",
+    "monsters": [],
+    "_hint": "It's not just the pigs that have been affected! Go through the fields and find out just what else has happened! You'll p"
+   }
+  }
+ },
+ "13": {
+  "quest": "Scale the Monsters",
+  "objectives": {
+   "150": {
+    "name": "Monster Scales",
+    "monsters": [],
+    "_hint": "All these monsters - except for that poor little piggie - seem to have one thing in common.  They all have scales! Go ge"
+   }
+  }
+ },
+ "16": {
+  "quest": "Bev's Tale",
+  "objectives": {
+   "153": {
+    "name": "Bev's Comb",
+    "monsters": [],
+    "_hint": "I was minding my own business and one of these Wyverns flew into my shop and stole my favorite comb! Once you get it bac"
+   }
+  }
+ },
+ "63": {
+  "quest": "*Keel awl da tings ztest",
+  "objectives": {
+   "66": {
+    "name": "Zardman Killed",
+    "monsters": [],
+    "_hint": "..."
+   }
+  }
+ },
+ "103": {
+  "quest": "Clear the Horcs",
+  "objectives": {
+   "122": {
+    "name": "Horc Warrior Defeated",
+    "monsters": [],
+    "_hint": "There are a lot of Horc Warriors on the path to their fortress. We will need to defeat them in order to gain access!"
+   }
+  }
+ },
+ "107": {
+  "quest": "Get the Key",
+  "objectives": {
+   "125": {
+    "name": "Fortress Key",
+    "monsters": [],
+    "_hint": "So the doors to the Horc's Fortress are locked? Well, don't just stand there, go get the key! I'll bet one of these Horc"
+   }
+  }
+ },
+ "123": {
+  "quest": "Remembering...",
+  "objectives": {
+   "206": {
+    "name": "Missing Journal Page",
+    "monsters": [],
+    "_hint": "There are several pages missing from my childhood diary. I get the eerie feeling something here is trying to keep me in "
+   }
+  }
+ },
+ "124": {
+  "quest": "Stone Cold Dead",
+  "objectives": {
+   "207": {
+    "name": "Rock Essence",
+    "monsters": [],
+    "_hint": "The undead wandering the halls have been denied the bliss of eternal rest.  If you can kill 10 of these creatures and br"
+   }
+  }
+ },
+ "129": {
+  "quest": "Fire Endurance",
+  "objectives": {
+   "209": {
+    "name": "Fire Essence",
+    "monsters": [],
+    "_hint": "This floor is filled with Fire Mages and other Skeletons who serve the bidding of a fiery Master.  If you can slay 15 of"
+   }
+  }
+ },
+ "132": {
+  "quest": "Burning Heart",
+  "objectives": {
+   "222": {
+    "name": "Fire Elemental Defeated",
+    "monsters": [],
+    "_hint": "Defeat the Fire Elemental and bring me his bracelet.  I sense great power in it, just like the Rock Elemental's. They wi"
+   }
+  }
+ },
+ "133": {
+  "quest": "Ice Endurance",
+  "objectives": {
+   "359": {
+    "name": "Ice Essence",
+    "monsters": [],
+    "_hint": "I sense something on this floor boosting the monsters' strength. If you can slay 15 of them and bring me their essences,"
+   }
+  }
+ },
+ "135": {
+  "quest": "A Personal Effect",
+  "objectives": {
+   "227": {
+    "name": "Veddris' Ring",
+    "monsters": [],
+    "_hint": "Veddris was trying to escape on her own this entire time.  The Sirens are attracted to gold -  I'm sure one of them grab"
+   }
+  }
+ },
+ "139": {
+  "quest": "Dark Endurance",
+  "objectives": {
+   "231": {
+    "name": "Dark Essence Retrieved",
+    "monsters": [],
+    "_hint": "Wicked Witches and Shadowy Imps dwell in this dark dungeon, along with some horrible undead. The elementals have become "
+   }
+  }
+ },
+ "142": {
+  "quest": "Heart of Darkness",
+  "objectives": {
+   "236": {
+    "name": "Dark Bracelet",
+    "monsters": [],
+    "_hint": "If you can bring me the Evil Elemental's dark bracelet, I can use its power to free my soul from its eternal imprisonmen"
+   }
+  }
+ },
+ "144": {
+  "quest": "Stop IT",
+  "objectives": {
+   "238": {
+    "name": "IT Defeated",
+    "monsters": [],
+    "_hint": "Veddris\u2026You must defeat IT if we have any hope of freeing her!"
+   }
+  }
+ },
+ "157": {
+  "quest": "Find the Bludrut Key",
+  "objectives": {
+   "363": {
+    "name": "Bludrut Keep Key",
+    "monsters": [],
+    "_hint": "If you can find the key and get us inside the Keep, I'll help you search for the Bludrut Blade. If your hunch is right, "
+   }
+  }
+ },
+ "159": {
+  "quest": "Grim Skullsword of Vengeance!",
+  "objectives": {
+   "308": {
+    "name": "TearRawr's Handle",
+    "monsters": [],
+    "_hint": "Ooooh, you have a STAR SWORD? Pffft. You need a SKULL SWORD! Today just might be your lucky day. You will find everythin"
+   },
+   "306": {
+    "name": "Zoreth's Blade",
+    "monsters": [],
+    "_hint": "Ooooh, you have a STAR SWORD? Pffft. You need a SKULL SWORD! Today just might be your lucky day. You will find everythin"
+   },
+   "309": {
+    "name": "Gem of Undeath",
+    "monsters": [],
+    "_hint": "Ooooh, you have a STAR SWORD? Pffft. You need a SKULL SWORD! Today just might be your lucky day. You will find everythin"
+   },
+   "310": {
+    "name": "Grim Shards",
+    "monsters": [],
+    "_hint": "Ooooh, you have a STAR SWORD? Pffft. You need a SKULL SWORD! Today just might be your lucky day. You will find everythin"
+   },
+   "311": {
+    "name": "Rickoth & Morteth's Hilt",
+    "monsters": [],
+    "_hint": "Ooooh, you have a STAR SWORD? Pffft. You need a SKULL SWORD! Today just might be your lucky day. You will find everythin"
+   }
+  }
+ },
+ "160": {
+  "quest": "Dual Wield Skullswords",
+  "objectives": {
+   "312": {
+    "name": "More Skulls",
+    "monsters": [],
+    "_hint": "Hey! You already got a Skullsword? Well it's Black Friday.... so how about a second one for half off? Then you can duel "
+   }
+  }
+ },
+ "162": {
+  "quest": "Save Maya!",
+  "objectives": {
+   "403": {
+    "name": "Frogzards Defeated",
+    "monsters": [],
+    "_hint": "Oh no! The Frogzards are after Maya's book!\r\n\r\n(Those Frogzards can probably smell that the Book of Lore was inked in bl"
+   }
+  }
+ },
+ "167": {
+  "quest": "Ectoamber",
+  "objectives": {
+   "324": {
+    "name": "Ectoplasm Sample",
+    "monsters": [],
+    "_hint": "I sense a lot of ectoplasm sticking to the Rattlebones... it's as if they are being controlled by a ghost! Bring me 10 s"
+   }
+  }
+ },
+ "171": {
+  "quest": "Defeat the Sneevils",
+  "objectives": {
+   "373": {
+    "name": "Sneevil Defeated",
+    "monsters": [],
+    "_hint": "Please help me! The Sneevils are raiding my bookstore to steal the boxes that the books came in. If I don't get this cle"
+   }
+  }
+ },
+ "184": {
+  "quest": "Zorbak Quest 1 - Shaken Bones",
+  "objectives": {
+   "411": {
+    "name": "Undead Shaken",
+    "monsters": [],
+    "_hint": "I need parts to build a better, stronger Undead to se me free! Or just enough to build a skull key! Those work on any lo"
+   }
+  }
+ },
+ "186": {
+  "quest": "Mourning the Dead",
+  "objectives": {
+   "442": {
+    "name": "Undead Soldier Defeated",
+    "monsters": [],
+    "_hint": "The dead are rising! Our once proud Warriors are being used as foot soldiers for whoever is responsible for this threat."
+   }
+  }
+ },
+ "187": {
+  "quest": "Quibble's Stolen Boxes",
+  "objectives": {
+   "416": {
+    "name": "Rare Boxes",
+    "monsters": [],
+    "_hint": "The nicer the package, the more valuable you think the contents are. Get my expensive rare boxes back from the Sneevils "
+   }
+  }
+ },
+ "188": {
+  "quest": "They Steal Flower Pots Too!?",
+  "objectives": {
+   "417": {
+    "name": "Flower Pots",
+    "monsters": [],
+    "_hint": "Since flower pots hold dirt and succulents, Sneevils count those as boxes. Please catch those Chainsaw Sneevils, and get"
+   }
+  }
+ },
+ "189": {
+  "quest": "Cursed Boxes",
+  "objectives": {
+   "418": {
+    "name": "Cursed Cardboard Box",
+    "monsters": [],
+    "_hint": "Odd question here, but do Sneevils believe in bad luck? I saw Sneevil Axemen emptying boxes, and getting struck by curse"
+   }
+  }
+ },
+ "190": {
+  "quest": "Lost and Found",
+  "objectives": {
+   "419": {
+    "name": "Sneevil Intel",
+    "monsters": [],
+    "_hint": "It just occurred to me that I could make a business out of tracking down and returning lost items. Any Sneevil could kno"
+   }
+  }
+ },
+ "191": {
+  "quest": "Box Master Snod",
+  "objectives": {
+   "420": {
+    "name": "Box Master Snod Defeated",
+    "monsters": [],
+    "_hint": "Can you believe it? These box-crazed goblins managed to fix themselves a hierarchy. If you knock out Box Master Snod, yo"
+   }
+  }
+ },
+ "192": {
+  "quest": "Box-pocolypse",
+  "objectives": {
+   "430": {
+    "name": "Axes broken",
+    "monsters": [],
+    "_hint": "Up for a challenge? This is completely optional. But you're pretty capable. What if you could get all the stolen boxes b"
+   },
+   "429": {
+    "name": "Chainsaws destroyed",
+    "monsters": [],
+    "_hint": "Up for a challenge? This is completely optional. But you're pretty capable. What if you could get all the stolen boxes b"
+   },
+   "421": {
+    "name": "Stolen Box Found!",
+    "monsters": [],
+    "_hint": "Up for a challenge? This is completely optional. But you're pretty capable. What if you could get all the stolen boxes b"
+   },
+   "428": {
+    "name": "Box Masters Defeated",
+    "monsters": [],
+    "_hint": "Up for a challenge? This is completely optional. But you're pretty capable. What if you could get all the stolen boxes b"
+   },
+   "431": {
+    "name": "Daggers destroyed",
+    "monsters": [],
+    "_hint": "Up for a challenge? This is completely optional. But you're pretty capable. What if you could get all the stolen boxes b"
+   }
+  }
+ },
+ "195": {
+  "quest": "Sketchy\u2019 Zard",
+  "objectives": {
+   "426": {
+    "name": "SketchyZard Graphite",
+    "monsters": [],
+    "_hint": "Crikey! Never seen these kinds of Frogzards before, mate. Reckon they ran outta time drawin' this bugger. I'd betcha if "
+   }
+  }
+ },
+ "196": {
+  "quest": "Reckon they zards?",
+  "objectives": {
+   "427": {
+    "name": "Dwakel Defeated",
+    "monsters": [],
+    "_hint": "Dwa-Dwa-Dwa-what now? Dwakels? Are those even zards? That\u2019s way outta my paygrade mate. No clue why they're so bloody cl"
+   }
+  }
+ },
+ "198": {
+  "quest": "The Zard\u2026 men?",
+  "objectives": {
+   "461": {
+    "name": "Frogzards Defeated",
+    "monsters": [],
+    "_hint": "Zardmen, eh?! These blokes usually hang 'round Greenguard Forest. Still bloody Lizards, I reckon... Strewth, I hate it w"
+   }
+  }
+ },
+ "199": {
+  "quest": "The HunterZard",
+  "objectives": {
+   "433": {
+    "name": "HunterZard Defeated",
+    "monsters": [],
+    "_hint": "A bloody massive Zardman?!?! Oi', mate, I'm just here to hunt Zards, the little buggers, that's way outta my paygrade.\r\n"
+   }
+  }
+ },
+ "205": {
+  "quest": "Night of the Undead",
+  "objectives": {
+   "449": {
+    "name": "Undead Berserker",
+    "monsters": [],
+    "_hint": "The risen Undead Berserkers are actively defending key graveyard choke points. Though hollow-skulled, they still retain "
+   }
+  }
+ },
+ "207": {
+  "quest": "Residents of Good",
+  "objectives": {
+   "450": {
+    "name": "Undead Soldier Defeated",
+    "monsters": [],
+    "_hint": "A new wave of Undead Soldiers have been risen by the Lich. Worry not, we will handle him in due time. However, we need m"
+   }
+  }
+ },
+ "208": {
+  "quest": "28 Quests Later",
+  "objectives": {
+   "448": {
+    "name": "Undead Ice Mage",
+    "monsters": [],
+    "_hint": "The resurrected Undead Ice Mages are casting a summoning circle. The Lich seems to be drawing mana from them! Break the "
+   }
+  }
+ },
+ "209": {
+  "quest": "Hero vs the Undead",
+  "objectives": {
+   "456": {
+    "name": "Undead Ice Mage",
+    "monsters": [],
+    "_hint": "The Undead did not like that we interrupted their summoning. They have caught up to us and are gathering together for a "
+   },
+   "455": {
+    "name": "Undead Berserker",
+    "monsters": [],
+    "_hint": "The Undead did not like that we interrupted their summoning. They have caught up to us and are gathering together for a "
+   },
+   "452": {
+    "name": "Undead Soldier",
+    "monsters": [],
+    "_hint": "The Undead did not like that we interrupted their summoning. They have caught up to us and are gathering together for a "
+   }
+  }
+ },
+ "210": {
+  "quest": "Lich-land ",
+  "objectives": {
+   "447": {
+    "name": "Lich Defeated",
+    "monsters": [],
+    "_hint": "No ordinary Necromancer could have done this much damage in so little time. No, this can only be achieved by a powerful "
+   }
+  }
+ },
+ "211": {
+  "quest": "The Walking Undead-Slayer",
+  "objectives": {
+   "453": {
+    "name": "Resurrected DragonSlayer",
+    "monsters": [],
+    "_hint": "One of our bravest warriors, the mighty DragonSlayer has been resurrected by the Lich. Grant the old Hero their well des"
+   }
+  }
+ },
+ "212": {
+  "quest": "Dawn of the Living",
+  "objectives": {
+   "443": {
+    "name": "Find and Face Big Jack Sprat",
+    "monsters": [],
+    "_hint": "Dawn is upon us Adventurer. Not like these Undeads have any weakness to the sun... they ain\u2019t vampires, you know. Just o"
+   }
+  }
+ },
+ "220": {
+  "quest": "The Clan Exodus",
+  "objectives": {
+   "469": {
+    "name": "Horc Scout Defeated",
+    "monsters": [],
+    "_hint": "Allow me to join thine expedition. As we near the Horc's settlement, we will encounter their Scouts. Best to silence the"
+   }
+  }
+ },
+ "223": {
+  "quest": "Busting the gates",
+  "objectives": {
+   "471": {
+    "name": "Horcfort's Key Found",
+    "monsters": [],
+    "_hint": "Despite your victory against Porkon, the rest of his clan locked down their fort. I am indeed impressed. They've prepare"
+   }
+  }
+ },
+ "225": {
+  "quest": "Bear Wrestling",
+  "objectives": {
+   "470": {
+    "name": "Bear Tamed",
+    "monsters": [],
+    "_hint": "Now that we've breached the gate, be wary. The Horcs raise bears. Strength comes in many different forms, so show me how"
+   }
+  }
+ },
+ "226": {
+  "quest": "Bear Witness",
+  "objectives": {
+   "472": {
+    "name": "Bear Tamer Defeated",
+    "monsters": [],
+    "_hint": "The BeastMasters who trained the bears you just wrestled usually fight alongside them. Is it not shameful that they mere"
+   }
+  }
+ },
+ "227": {
+  "quest": "Screams of Agony",
+  "objectives": {
+   "473": {
+    "name": "General InfernalScream Defeated",
+    "monsters": [],
+    "_hint": "This Clan is led by two notable Generals, the pair of brothers, The'hall and Infernal Scream. The latter is more of a lo"
+   }
+  }
+ },
+ "228": {
+  "quest": "DoomAxe\u2019s Followers",
+  "objectives": {
+   "474": {
+    "name": "Follower Defeated",
+    "monsters": [],
+    "_hint": "Ah, I see that Thr'hall DoomAxe is more hospitable than his brother. He has kindly sent his Acolytes and followers to re"
+   },
+   "475": {
+    "name": "Acolyte Defeated",
+    "monsters": [],
+    "_hint": "Ah, I see that Thr'hall DoomAxe is more hospitable than his brother. He has kindly sent his Acolytes and followers to re"
+   }
+  }
+ },
+ "229": {
+  "quest": "Axe of Doom",
+  "objectives": {
+   "476": {
+    "name": "DoomAxe Defeated",
+    "monsters": [],
+    "_hint": "Like all Horcs, General Thr'hall DoomAxe will only speak to us if we prove our might first. It should be entertaining, y"
+   }
+  }
+ },
+ "230": {
+  "quest": "Thrax's Thrashing",
+  "objectives": {
+   "477": {
+    "name": "Thrax Defeated",
+    "monsters": [],
+    "_hint": "Thrax Ironhide is the undisputed leader of this clan. Even Thr'hall and Grum bow to him. I have\u2026 a history with Thrax, b"
+   }
+  }
+ },
+ "232": {
+  "quest": "Enchanted Tyrant's Blade",
+  "objectives": {
+   "483": {
+    "name": "DoomAxe Follower Rune",
+    "monsters": [],
+    "_hint": "Thrax's blade can be further empowered, enchanted if you will, with magical runes. Horcs mark or even tattoo themselves "
+   },
+   "484": {
+    "name": "Grunt Rune",
+    "monsters": [],
+    "_hint": "Thrax's blade can be further empowered, enchanted if you will, with magical runes. Horcs mark or even tattoo themselves "
+   },
+   "480": {
+    "name": "Beastmaster Horc Rune",
+    "monsters": [],
+    "_hint": "Thrax's blade can be further empowered, enchanted if you will, with magical runes. Horcs mark or even tattoo themselves "
+   }
+  }
+ },
+ "233": {
+  "quest": "Bloodthirsty Thr'Hall GreatAxe",
+  "objectives": {
+   "481": {
+    "name": "Horc General Dueled",
+    "monsters": [],
+    "_hint": "Thr'hall's Greataxe resonates with righteous fury. If we can channel the Clan's rage into its steel, its strikes will be"
+   }
+  }
+ },
+ "237": {
+  "quest": "The Many Zardmen",
+  "objectives": {
+   "489": {
+    "name": "Zardman Spearman Defeated",
+    "monsters": [],
+    "_hint": "The Zarmen are lookin' out for their top dog. I told ya these buggers were livin' \u2018round Greenguard forest, didn\u2019t I, eh"
+   }
+  }
+ },
+ "239": {
+  "quest": "Zardmen Spearmen",
+  "objectives": {
+   "496": {
+    "name": "Zardman Spearman Defeated",
+    "monsters": [],
+    "_hint": "The Zardman hunters use 'em spear to hunt for prey for their tribe. Reckon they were taming the Zards as mates, like the"
+   }
+  }
+ },
+ "240": {
+  "quest": "Zard for Breakfast? Ewww",
+  "objectives": {
+   "497": {
+    "name": "BaconZard Rescued? ",
+    "monsters": [],
+    "_hint": "Reckon the Zardmen are on the prowl for them Bacon Zards to... munch 'em... ain't that bloody heinous? Is that cannibali"
+   }
+  }
+ },
+ "242": {
+  "quest": "Find the Lucky Zard",
+  "objectives": {
+   "502": {
+    "name": "Lucky Scale Obtained",
+    "monsters": [],
+    "_hint": "That bloody lucky zard's always dodgin' me, fair dinkum I reckon I saw one runnin\u2019 round\u2019 the forest. \r\n\r\nI spotted it c"
+   }
+  }
+ },
+ "243": {
+  "quest": "The Brutes, the Chief and the Hunter",
+  "objectives": {
+   "500": {
+    "name": "Horc Brute Defeated",
+    "monsters": [],
+    "_hint": "The Orc Brutes reckon they're the ones in the Orc crew closest to the Zard Chief and his boys. You'll gotta sort 'em out"
+   }
+  }
+ },
+ "244": {
+  "quest": "Chief of 'em Zards",
+  "objectives": {
+   "503": {
+    "name": "Zardman Chief",
+    "monsters": [],
+    "_hint": "That bugger, the chief has hid away in the thick of the forest mate, hunt 'im down and show \u2018him a spanking, would ya? T"
+   }
+  }
+ }
+}

@@ -380,11 +380,6 @@ async def dispatch(session, writer, raw):
             return
         # the live class = the character's saved class (falls back to Dragonslayer 1932)
         session.equipped_class = int(session.char["class_id"] or 0) or forge.EQUIPPED_CLASS_ID
-        # normalize the level from accumulated exp (older chars stored cumulative exp before the
-        # leveling curve existed; this catches them up so the XP bar isn't over-full at login)
-        game.grant_xp(session.conn, session.char, 0)
-        session.char = session.conn.execute("SELECT * FROM characters WHERE id=?",
-                                             (session.char["id"],)).fetchone()
         init = game.build_init_player(session.conn, session.char)
         uid = game.uid_for(session.char)
         session.member = world.Member(uid, session.char["name"], init.get("user", {}), writer)
@@ -434,6 +429,16 @@ async def dispatch(session, writer, raw):
     if cmd == "loadShop":
         await send_obj(writer, load_shop(session.conn, params))
         print("  [s2c] loadShop")
+        return
+
+    if cmd == "loadHairShop":                # HairShop apop button -> hair catalog (PUBLIC path to
+        try:                                 # character customization; opens the customize overlay)
+            shop_id = int(params[0]) if params else 0
+        except (ValueError, TypeError):
+            shop_id = 0
+        resp = game.load_hairshop(session.conn, shop_id)
+        await send_obj(writer, resp)
+        print(f"  [s2c] loadHairShop ({shop_id}, {len(resp['hair'])} hairs)")
         return
 
     if cmd == "loadBank":                    # RequestLoadBank (no params) -> the char's banked items.
@@ -1056,8 +1061,10 @@ async def _handle_kills(session, writer, killed):
     # player keeps/discards from the Loot Inventory (capture 2026-06-18).
     items_wire = []
     for target in unique:
-        tmid = target.split(":", 1)[1] if ":" in target else None   # roll THIS monster's drop table
-        drops = loot.roll_drops(session.conn, tmid)
+        # roll THIS monster's drop table, keyed by its CATALOG MonID — NOT the m:<MonMapID>
+        # instance id in the target string (monster_drops.mon_id is the catalog id).
+        cat_id, _ = combat.monster_identity(session.area, target)
+        drops = loot.roll_drops(session.conn, cat_id)
         items_wire += loot.add_pending(session.member.uid, drops)
     mon_id = unique[0].split(":", 1)[1] if ":" in unique[0] else 0
     await send_obj(writer, loot.reward_packet(mon_id, gold_gain, exp_gain, new_exp, items_wire))

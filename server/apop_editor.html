@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apop Editor</title>
+<style>
+  :root { --bg:#1d2127; --panel:#272c34; --panel2:#2f3640; --line:#3a4150; --ink:#e6e9ef;
+          --muted:#9aa4b2; --accent:#5b8cff; --accent2:#3fa46a; --danger:#c0504d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; gap:8px; align-items:center; padding:10px 14px; background:var(--panel);
+           border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0 10px 0 0; font-weight:600; }
+  select, input, textarea, button { font:inherit; color:var(--ink); background:var(--panel2);
+           border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  textarea { width:100%; min-height:54px; resize:vertical; }
+  input[type=text], input[type=number] { width:100%; }
+  button { cursor:pointer; background:var(--panel2); }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.go { background:var(--accent2); border-color:var(--accent2); color:#fff; }
+  button.del { background:transparent; border-color:var(--line); color:var(--muted); padding:4px 8px; }
+  button.del:hover { color:#fff; border-color:var(--danger); background:var(--danger); }
+  .status { margin-left:auto; color:var(--muted); font-size:13px; }
+  main { max-width:980px; margin:0 auto; padding:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:16px; }
+  .card > h2 { margin:0 0 10px; font-size:14px; color:var(--accent); text-transform:uppercase; letter-spacing:.04em; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px; }
+  .field { display:flex; flex-direction:column; gap:3px; flex:1; min-width:130px; }
+  .field label { font-size:12px; color:var(--muted); }
+  .field.grow { flex:3; }
+  .panel { border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; background:var(--panel2); }
+  .panel > .phead { display:flex; gap:10px; align-items:center; margin-bottom:8px; }
+  .elem { border:1px solid var(--line); border-radius:7px; padding:10px; margin:8px 0; background:var(--panel); }
+  .elem .etag { display:inline-block; font-size:11px; font-weight:600; padding:1px 7px; border-radius:10px;
+                margin-bottom:6px; }
+  .etag.Bubble { background:#2b3b56; color:#9cc0ff; }
+  .etag.Button { background:#2b4a39; color:#8ee0ab; }
+  .etag.Header { background:#4a3f2b; color:#e6c98e; }
+  .addbar { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .addbar button { padding:5px 10px; font-size:13px; }
+  .chk { display:flex; align-items:center; gap:6px; }
+  .chk input { width:auto; }
+  .hint { color:var(--muted); font-size:12px; }
+  .npcpick { position:relative; }
+  .npcres { position:absolute; z-index:10; left:0; right:0; top:100%; background:var(--panel2);
+            border:1px solid var(--line); border-radius:6px; max-height:200px; overflow:auto; display:none; }
+  .npcres div { padding:5px 8px; cursor:pointer; }
+  .npcres div:hover { background:var(--accent); color:#fff; }
+  .empty { color:var(--muted); font-style:italic; padding:6px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Apop Editor</h1>
+  <select id="picker" title="Choose an apop"></select>
+  <button id="btnNew">New</button>
+  <button id="btnDup">Duplicate</button>
+  <button class="del" id="btnDel">Delete</button>
+  <button class="go" id="btnSave">Save</button>
+  <span class="status" id="status"></span>
+</header>
+<main id="main"></main>
+
+<script>
+// ---- exact templates (from real apops; new items clone these so output is always client-valid) ----
+const T_BUBBLE = {ID:0,type:"Bubble",color:"#000000",changeBoxColor:"#FFFFFF",nameplateTextColor:"#FFFFFF",
+  nameplateBoxColor:"#000000",text:"",hideLead:false,borderless:false,addNameplate:false,changeNameplate:"",
+  changeSubtitle:"",compactMode:false,requirements:[]};
+const T_BUTTON = {ID:0,type:"Button",targets:[],acceptQuests:[],turninQuests:[],action:"ApopList",label:"",
+  subtitle:"",intMin:0,intMax:0,strData:"",link:"",text:"",icon:"",iconOverride:"none",requirements:[],
+  reqCondition:"AND",lockedIcon:"",lockedLabel:"",lockedMsg:"",lockedMode:"Hide",closePanels:false};
+const T_HEADER = {ID:0,type:"Header",text:"",subtitle:"",canCloseHeader:false,canCloseApop:false,
+  requirements:[],reqCondition:"AND",lockedMode:"Hide"};
+const T_PANEL = {PID:0,name:"",panelPosition:1,hidePanelBG:true,changeApopBG:"",changeApopBGScale:1.3,
+  restoreBGOnClose:false,addVerticalSpacing:0,noTween:false,tweenFrom:"Bottom",overwritable:false,elements:[]};
+const T_ACTOR = {npcid:0,name:"",subtitle:"",targetNode:0,side:"left",xOffset:0,yOffset:0,scale:1,animation:""};
+const T_REQ_ACCESS = {RID:1,Type:"AccessLevel",ID:0,Level:0,Index:0,Percentage:0,Rank:0,Flag:false,Val:"",
+  ObjectiveID:0,Qty:0,Operator:">=",LockType:"Locked",LockMessage:""};
+const POSNAME = {0:"Left",1:"Middle",2:"Right"};
+
+let apop = null;        // the document being edited
+let curId = null;       // its db id (null = unsaved new)
+const $ = (s,r=document)=>r.querySelector(s);
+const clone = o => JSON.parse(JSON.stringify(o));
+function setStatus(m, ok=true){ const s=$("#status"); s.textContent=m; s.style.color=ok?"#9aa4b2":"#e08585"; }
+
+// next element/panel id helpers (unique within the apop)
+function nextElemId(){
+  let mx = apop.nextElementId||0;
+  (apop.panels||[]).forEach(p=>(p.elements||[]).forEach(e=>{ if((e.ID||0)>=mx) mx=(e.ID||0)+1; }));
+  apop.nextElementId = mx+1; return mx;
+}
+function nextPid(){ let mx=1; (apop.panels||[]).forEach(p=>{ if((p.PID||0)>=mx) mx=(p.PID||0)+1; }); return mx; }
+
+function blankApop(){
+  return {ID:0,nextElementId:10,name:"New NPC",bgImage:"",bgImageScale:1,startingPanels:[1],
+          panels:[Object.assign(clone(T_PANEL),{PID:1,name:"Start",panelPosition:1})],
+          actors:[],freezeClient:0};
+}
+
+// ---------- load / list ----------
+async function loadList(selId){
+  const r = await fetch("list"); const arr = await r.json();
+  const pick = $("#picker"); pick.innerHTML="";
+  arr.forEach(a=>{ const o=document.createElement("option"); o.value=a.ID; o.textContent=`${a.ID} — ${a.name}`; pick.appendChild(o); });
+  if(selId!=null){ pick.value=String(selId); }
+  return arr;
+}
+async function loadApop(id){
+  const r = await fetch("load?ID="+encodeURIComponent(id)); const doc = await r.json();
+  if(!doc || !doc.ID){ setStatus("Apop "+id+" not found",false); return; }
+  apop = doc; curId = doc.ID; render(); setStatus("Loaded apop "+doc.ID);
+}
+
+// ---------- render ----------
+function field(label, inputEl){
+  const f=document.createElement("div"); f.className="field";
+  const l=document.createElement("label"); l.textContent=label; f.appendChild(l); f.appendChild(inputEl); return f;
+}
+function inp(val, on, type="text"){ const i=document.createElement("input"); i.type=type; i.value=(val??""); i.oninput=()=>on(type==="number"?(parseFloat(i.value)||0):i.value); return i; }
+function area(val, on){ const t=document.createElement("textarea"); t.value=(val??""); t.oninput=()=>on(t.value); return t; }
+function chk(val, on){ const w=document.createElement("label"); w.className="chk"; const c=document.createElement("input"); c.type="checkbox"; c.checked=!!val; c.onchange=()=>on(c.checked); w.appendChild(c); return {wrap:w,box:c}; }
+function sel(val, opts, on){ const s=document.createElement("select"); opts.forEach(([v,t])=>{ const o=document.createElement("option"); o.value=v; o.textContent=t; s.appendChild(o); }); s.value=String(val); s.onchange=()=>on(s.value); return s; }
+
+function render(){
+  const m=$("#main"); m.innerHTML="";
+  // --- apop card ---
+  const c1=card("Apop");
+  const r1=rowEl();
+  r1.appendChild(field("Name", inp(apop.name, v=>{apop.name=v;})));
+  r1.appendChild(field("Background image (optional)", inp(apop.bgImage, v=>{apop.bgImage=v;})));
+  c1.appendChild(r1);
+  m.appendChild(c1);
+
+  // --- actors ---
+  const c2=card("Actors (NPC portraits)");
+  (apop.actors||[]).forEach((a,i)=>c2.appendChild(actorRow(a,i)));
+  if(!(apop.actors||[]).length) c2.appendChild(emptyEl("No actors. Add the NPC(s) shown beside the dialogue."));
+  const addA=document.createElement("button"); addA.textContent="+ Add actor"; addA.className="";
+  addA.onclick=()=>{ apop.actors=apop.actors||[]; apop.actors.push(clone(T_ACTOR)); render(); };
+  const ab=document.createElement("div"); ab.className="addbar"; ab.appendChild(addA); c2.appendChild(ab);
+  m.appendChild(c2);
+
+  // --- panels ---
+  const c3=card("Panels (dialogue & choices)");
+  (apop.panels||[]).forEach((p,i)=>c3.appendChild(panelEl(p,i)));
+  if(!(apop.panels||[]).length) c3.appendChild(emptyEl("No panels yet."));
+  const addP=document.createElement("button"); addP.textContent="+ Add panel";
+  addP.onclick=()=>{ const p=clone(T_PANEL); p.PID=nextPid(); p.name="Panel "+p.PID; apop.panels.push(p); render(); };
+  const pb=document.createElement("div"); pb.className="addbar"; pb.appendChild(addP); c3.appendChild(pb);
+  m.appendChild(c3);
+}
+function card(title){ const d=document.createElement("div"); d.className="card"; const h=document.createElement("h2"); h.textContent=title; d.appendChild(h); return d; }
+function rowEl(){ const d=document.createElement("div"); d.className="row"; return d; }
+function emptyEl(t){ const d=document.createElement("div"); d.className="empty"; d.textContent=t; return d; }
+
+function actorRow(a,i){
+  const r=rowEl();
+  // NPC search picker
+  const pickWrap=document.createElement("div"); pickWrap.className="field grow npcpick";
+  const lab=document.createElement("label"); lab.textContent="NPC"; pickWrap.appendChild(lab);
+  const box=document.createElement("input"); box.type="text"; box.value=a.name?`${a.npcid} — ${a.name}`:""; box.placeholder="type to search…";
+  const res=document.createElement("div"); res.className="npcres";
+  let tmr=null;
+  box.oninput=()=>{ clearTimeout(tmr); tmr=setTimeout(async()=>{
+      const q=box.value.replace(/^\d+\s*—\s*/,"");
+      const rr=await fetch("npcs?q="+encodeURIComponent(q)); const arr=await rr.json();
+      res.innerHTML=""; arr.forEach(n=>{ const d=document.createElement("div"); d.textContent=`${n.id} — ${n.name}`;
+        d.onclick=()=>{ a.npcid=n.id; a.name=n.name; box.value=`${n.id} — ${n.name}`; res.style.display="none"; }; res.appendChild(d); });
+      res.style.display=arr.length?"block":"none";
+    },180); };
+  box.onblur=()=>setTimeout(()=>res.style.display="none",200);
+  pickWrap.appendChild(box); pickWrap.appendChild(res);
+  r.appendChild(pickWrap);
+  r.appendChild(field("Side", sel(a.side,[["left","Left"],["right","Right"]],v=>{a.side=v;})));
+  r.appendChild(field("Scale", inp(a.scale,v=>{a.scale=v;},"number")));
+  const del=document.createElement("button"); del.className="del"; del.textContent="Remove";
+  del.onclick=()=>{ apop.actors.splice(i,1); render(); };
+  const dw=document.createElement("div"); dw.className="field"; dw.style.flex="0"; dw.appendChild(document.createElement("label")); dw.appendChild(del);
+  r.appendChild(dw);
+  return r;
+}
+
+function panelEl(p,pi){
+  const d=document.createElement("div"); d.className="panel";
+  const head=document.createElement("div"); head.className="phead";
+  head.appendChild(field("Panel name", inp(p.name,v=>{p.name=v;})));
+  head.appendChild(field("Position", sel(p.panelPosition,[[0,"Left"],[1,"Middle"],[2,"Right"]],v=>{p.panelPosition=parseInt(v);})));
+  const start = (apop.startingPanels||[]).includes(p.PID);
+  const sc=chk(start, on=>{ apop.startingPanels=apop.startingPanels||[]; const has=apop.startingPanels.includes(p.PID);
+      if(on&&!has) apop.startingPanels.push(p.PID); if(!on&&has) apop.startingPanels=apop.startingPanels.filter(x=>x!==p.PID); });
+  const scf=field("Shows on open", sc.wrap);
+  head.appendChild(scf);
+  const del=document.createElement("button"); del.className="del"; del.textContent="Delete panel";
+  del.onclick=()=>{ apop.panels.splice(pi,1); render(); };
+  head.appendChild(del);
+  d.appendChild(head);
+
+  (p.elements||[]).forEach((e,ei)=>d.appendChild(elemEl(p,e,ei)));
+  if(!(p.elements||[]).length) d.appendChild(emptyEl("Empty panel — add a bubble (what the NPC says) or a button (a choice)."));
+
+  const bar=document.createElement("div"); bar.className="addbar";
+  [["+ Bubble (dialogue)",T_BUBBLE],["+ Button (choice)",T_BUTTON],["+ Header",T_HEADER]].forEach(([lbl,tmpl])=>{
+    const b=document.createElement("button"); b.textContent=lbl;
+    b.onclick=()=>{ const e=clone(tmpl); e.ID=nextElemId(); p.elements=p.elements||[]; p.elements.push(e); render(); };
+    bar.appendChild(b);
+  });
+  d.appendChild(bar);
+  return d;
+}
+
+function elemEl(p,e,ei){
+  const d=document.createElement("div"); d.className="elem";
+  const tag=document.createElement("span"); tag.className="etag "+e.type; tag.textContent=e.type; d.appendChild(tag);
+  const del=document.createElement("button"); del.className="del"; del.textContent="×"; del.style.float="right";
+  del.title="Remove"; del.onclick=()=>{ p.elements.splice(ei,1); render(); }; d.appendChild(del);
+
+  if(e.type==="Bubble"){
+    const speakers=[["","(narration)"]].concat((apop.actors||[]).map(a=>[a.name, a.name||("NPC "+a.npcid)]));
+    const r=rowEl();
+    r.appendChild(field("Speaker (nameplate)", sel(e.changeNameplate||"", speakers, v=>{ e.changeNameplate=v; e.addNameplate=!!v; })));
+    d.appendChild(r);
+    d.appendChild(field("Text", area(e.text, v=>{e.text=v;})));
+    d.appendChild(field("Subtitle (optional)", inp(e.changeSubtitle, v=>{e.changeSubtitle=v;})));
+  } else if(e.type==="Header"){
+    d.appendChild(field("Header text", inp(e.text, v=>{e.text=v;})));
+    const cc=chk(e.canCloseApop, on=>{e.canCloseApop=on;}); d.appendChild(field("Can close apop", cc.wrap));
+  } else if(e.type==="Button"){
+    d.appendChild(field("Button label", inp(e.label, v=>{e.label=v;})));
+    // what the button DOES (ApopButtonActions). The common three get a tailored field; any other
+    // captured action (Goto, OpenApop, OpenCutscene, …) is preserved and stays selectable.
+    if(!e.action) e.action="ApopList";
+    const ACTS=[["ApopList","Open panel"],["Link","Open web link"],["CloseApop","Close apop"]];
+    if(!ACTS.some(([v])=>v===e.action)) ACTS.push([e.action, e.action+" (advanced — preserved)"]);
+    d.appendChild(field("When clicked", sel(e.action, ACTS, v=>{ e.action=v; render(); })));
+    if(e.action==="ApopList"){
+      const panelOpts=[["", "(none)"]].concat((apop.panels||[]).map(pp=>[String(pp.PID), `${pp.name} (#${pp.PID})`]));
+      const cur = (e.targets&&e.targets.length)? String(e.targets[0]) : "";
+      d.appendChild(field("Opens panel", sel(cur, panelOpts, v=>{ e.targets = v? [parseInt(v)] : []; })));
+    } else if(e.action==="Link"){
+      d.appendChild(field("Web link (URL — must be http/https)", inp(e.link, v=>{ e.link=v; })));
+    }
+    const r=rowEl();
+    r.appendChild(field("Accept quest IDs (comma)", inp((e.acceptQuests||[]).join(","), v=>{ e.acceptQuests=parseIds(v); })));
+    r.appendChild(field("Turn-in quest IDs (comma)", inp((e.turninQuests||[]).join(","), v=>{ e.turninQuests=parseIds(v); })));
+    d.appendChild(r);
+    const cc=chk(e.closePanels, on=>{e.closePanels=on;}); d.appendChild(field("Closes apop", cc.wrap));
+    // simple access-level requirement (preserves any other existing requirements untouched)
+    const acc=(e.requirements||[]).find(q=>q.Type==="AccessLevel");
+    const r2=rowEl();
+    r2.appendChild(field("Min access level (0 = none)", inp(acc?acc.Level:0, v=>{ setAccessReq(e, parseInt(v)||0); }, "number")));
+    const others=(e.requirements||[]).filter(q=>q.Type!=="AccessLevel").length;
+    if(others){ const h=document.createElement("div"); h.className="hint"; h.style.alignSelf="center";
+      h.textContent=others+" other requirement(s) preserved"; r2.appendChild(h); }
+    d.appendChild(r2);
+  }
+  return d;
+}
+
+function parseIds(s){ return (s||"").split(",").map(x=>parseInt(x.trim())).filter(n=>!isNaN(n)); }
+function setAccessReq(e, level){
+  e.requirements = (e.requirements||[]).filter(q=>q.Type!=="AccessLevel");
+  if(level>0){ const r=clone(T_REQ_ACCESS); r.Level=level; r.RID=(e.requirements.length+1); e.requirements.push(r); }
+}
+
+// ---------- save / new / dup / delete ----------
+async function save(){
+  if(!apop){ return; }
+  setStatus("Saving…");
+  const fd=new URLSearchParams();
+  fd.set("id", curId? String(curId) : "");
+  fd.set("json", JSON.stringify(apop));
+  const r=await fetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()});
+  const res=await r.json();
+  if(res.ok){ curId=res.ID; apop.ID=res.ID; await loadList(curId); setStatus("Saved apop "+res.ID); }
+  else setStatus("Save failed: "+(res.msg||"?"), false);
+}
+
+window.addEventListener("DOMContentLoaded", async ()=>{
+  $("#picker").onchange=e=>loadApop(e.target.value);
+  $("#btnNew").onclick=()=>{ apop=blankApop(); curId=null; render(); setStatus("New apop (unsaved)"); };
+  $("#btnDup").onclick=()=>{ if(!apop) return; apop=clone(apop); apop.ID=0; curId=null; apop.name=(apop.name||"")+" (copy)"; render(); setStatus("Duplicated (unsaved)"); };
+  $("#btnDel").onclick=async()=>{ setStatus("Delete is intentionally manual — remove via DB if needed.", false); };
+  $("#btnSave").onclick=save;
+  const arr=await loadList();
+  // open ?ID= from the URL (the in-game WebEditButton passes ?ID=n), else the first apop
+  const want=new URLSearchParams(location.search).get("ID");
+  if(want){ await loadApop(want); $("#picker").value=String(want); }
+  else if(arr.length){ await loadApop(arr[0].ID); }
+  else { apop=blankApop(); curId=null; render(); }
+});
+</script>
+<script src="/editor/nav.js"></script>
+</body>
+</html>

@@ -92,6 +92,14 @@ public static class InfinityLoaderMod
             AccessTools.Method(typeof(UIChat), "SetText"),
             prefix: nameof(UIChat_SetText_Prefix));
 
+        // 5) In-game "web edit" pencil (DevMode): WebEditButton opens _baseURL + AddURL + AddParam
+        //    in a browser, but _baseURL ships empty so the button does nothing. Point it at our API
+        //    (WebApiURL) so apop/Edit.aspx (the structured apop editor served by webapi.py) opens,
+        //    pre-loaded to the clicked apop's ?ID=. IsSafeWebUrl accepts our https sslip host.
+        TryPatch(h, "web-edit button base URL",
+            AccessTools.Method(typeof(WebEditButton), "OnMouseDown"),
+            prefix: nameof(WebEditButton_OnMouseDown_Prefix));
+
         SafeLog("[InfinityLoader] booted; WebApiURL -> " + (ReadWebApiUrl() ?? "(live AE, no marker)")
             + "; BaseURL -> " + (ReadContentUrl() ?? "(live AE, no marker)")
             + "; UserData=" + _beyondDir);
@@ -126,6 +134,13 @@ public static class InfinityLoaderMod
             return s.EndsWith("/") ? s : s + "/";
         }
         catch { return null; }
+    }
+
+    // Set the WebEditButton's base URL to our API at click time, so the in-game pencil opens
+    // OUR apop editor (WebApiURL + "apop/Edit.aspx?ID=n") instead of an empty/relative URL.
+    public static void WebEditButton_OnMouseDown_Prefix()
+    {
+        try { WebEditButton._baseURL = Main.WebApiURL; } catch { }
     }
 
     public static void WebApiPostfix(ref string __result)

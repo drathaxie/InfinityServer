@@ -18,20 +18,13 @@ table was captured, so the table + per-kill chance are OUR design (the MECHANIC 
 import json
 import random
 
+import db
 import game
 
 # LootIDs the client keys drops by — monotonic and above the captured live range so a real
 # pending drop can never collide with a replayed sample's LootID.
 _next_loot = 2_700_000
 _pending = {}               # uid -> [ {loot_id, item_id, quantity, raw} ]
-
-# Flagged loot table: real catalog MATERIAL items (ItemType 4) a kill can drop. The specific
-# per-monster drop table isn't in the capture, so this shared table + chance is a design choice.
-DROP_TABLE = [4770, 4771, 5357, 87479, 6136]    # Dark Crystal Shard, Diamond/Totem of Nulgath,
-                                                # Red Dragon Scales, Gem of Nulgath
-DROP_CHANCE = 0.5           # chance a kill drops anything at all
-MAX_DROPS = 2               # up to this many separate drops per kill
-
 
 def _lid():
     global _next_loot
@@ -40,43 +33,36 @@ def _lid():
 
 
 def _catalog(conn, item_id):
-    row = conn.execute("SELECT raw FROM items WHERE item_id=?", (int(item_id),)).fetchone()
-    return json.loads(row["raw"]) if row else None
+    return db.item(conn, item_id)
 
 
 def roll_drops(conn, mon_id=None):
     """Roll this kill's drops -> a list of catalog item dicts (possibly []).
 
-    If the monster has an authored table in `monster_drops`, each row rolls INDEPENDENTLY
-    (random() < rate -> that item drops, at its quantity), matching AQW's per-item-rate model.
-    A monster with NO authored rows falls back to the shared global pool (DROP_TABLE/DROP_CHANCE),
-    so un-authored monsters still drop something."""
-    rows = []
+    Two independent sources, each row rolling INDEPENDENTLY (random() < rate -> that item drops,
+    at its quantity), matching AQW's per-item-rate model:
+      1. the monster's authored `monster_drops` table (by catalog MonID), and
+      2. the `global_drops` table that EVERY monster rolls (e.g. gems that drop universally).
+    A monster with no authored rows still rolls the global table; both empty -> no drop."""
     try:
         mid = int(mon_id) if mon_id is not None else None
     except (TypeError, ValueError):
         mid = None
+    rows = []
     if mid is not None:
-        rows = conn.execute(
-            "SELECT item_id, rate, quantity FROM monster_drops WHERE mon_id=?", (mid,)).fetchall()
-    if rows:                                            # per-monster table: independent per-item rate
-        out = []
-        for r in rows:
-            if random.random() < float(r["rate"] or 0):
-                item = _catalog(conn, r["item_id"])
-                if item:
-                    item = dict(item)
-                    item["Quantity"] = int(r["quantity"] or 1)
-                    out.append(item)
-        return out
-    # fallback: shared global pool for monsters without an authored drop table
-    if random.random() > DROP_CHANCE:
-        return []
+        rows = list(conn.execute(
+            "SELECT item_id, rate, quantity FROM monster_drops WHERE mon_id=?", (mid,)).fetchall())
+    rows += list(conn.execute("SELECT item_id, rate, quantity FROM global_drops").fetchall())
     out = []
-    for _ in range(random.randint(1, MAX_DROPS)):
-        item = _catalog(conn, random.choice(DROP_TABLE))
-        if item:
-            out.append(item)
+    for r in rows:
+        if random.random() < float(r["rate"] or 0):
+            item = _catalog(conn, r["item_id"])
+            if item:
+                item = dict(item)
+                # `quantity` is the MAX stack — a drop yields a random 1..quantity (e.g. Red Dragon
+                # Scales at quantity 5 drops 1-5). quantity 1 = always exactly 1.
+                item["Quantity"] = random.randint(1, max(1, int(r["quantity"] or 1)))
+                out.append(item)
     return out
 
 

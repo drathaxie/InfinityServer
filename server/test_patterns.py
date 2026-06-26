@@ -1,5 +1,5 @@
 """
-Gems / enhancements (patterns) — the equip gate.
+Gems / enhancements (patterns) - the equip gate.
 
 Enhanceable items (Weapon/Armor/Cape/Helm) need a Pattern before they can be equipped;
 the client sends itemdefaultpattern[itemID] and the server must reply UpdatePattern with
@@ -17,12 +17,8 @@ import patterns
 import combat
 
 
-def _mk_item(conn, item_id, equip_spot, name):
-    conn.execute(
-        "INSERT INTO items(item_id, name, item_type, raw) VALUES(?,?,?,?) "
-        "ON CONFLICT(item_id) DO UPDATE SET raw=excluded.raw",
-        (item_id, name, 0,
-         json.dumps({"ID": item_id, "Name": name, "EquipSpot": equip_spot, "Level": 10})))
+def _mk_item(conn, item_id, equip_spot, name, level=10):
+    db.store_item(conn, {"ID": item_id, "Name": name, "EquipSpot": equip_spot, "Level": level}, replace=True)
 
 
 def main():
@@ -60,7 +56,7 @@ def main():
         assert inv2[90001]["ItemPattern"]["Base"] == rw["pattern"]["Base"]
 
         # equipPattern addresses the item by its CATALOG ID (PatternPreview sends selectedItem.ID,
-        # not a char_item_id) — resolve the owned instance, don't 404. (Regression: the client sent
+        # not a char_item_id) - resolve the owned instance, don't 404. (Regression: the client sent
         # item_id 17585 for a Blade whose char_item_id was 2842 -> "item not found".)
         re = patterns.equip_pattern(c, char["id"], 90001, 555, -1)
         assert re["Cmd"] == "UpdatePattern" and re["Success"], f"equipPattern by item ID must resolve, got {re}"
@@ -83,7 +79,7 @@ def main():
         assert patterns.weapon_range(patterns.COMMON_WEAPON_L5) == (27, 34), \
             "weapon range = Base*(1-+Wild) = 27..34 (the captured tooltip)"
         assert patterns.weapon_range({"Base": 0}) is None, "a gear gem (no Base) has no weapon range"
-        # Power Up mints a FIXED Common gem (Base 31) regardless of item level — capture: items
+        # Power Up mints a FIXED Common gem (Base 31) regardless of item level - capture: items
         # 300/17873/51605 all returned Base 31. (A Lvl-1 item must NOT get a scaled-down Base.)
         for lvl in (1, 5, 50):
             assert patterns.default_pattern({"EquipSpot": patterns.WEAPON, "Level": lvl})["Base"] == 31, \
@@ -91,10 +87,7 @@ def main():
 
         # Equip a Lvl-5 weapon alone, Power it up, and read the gem contribution in ISOLATION:
         # the weapon gem exposes the 27-34 range and its six stats fold in (LUK->LCK), no HP.
-        c.execute("INSERT INTO items(item_id, name, item_type, raw) VALUES(90003,'Keystone Blade',0,?)"
-                  "ON CONFLICT(item_id) DO UPDATE SET raw=excluded.raw",
-                  (json.dumps({"ID": 90003, "Name": "Keystone Blade",
-                               "EquipSpot": patterns.WEAPON, "Level": 5}),))
+        _mk_item(c, 90003, patterns.WEAPON, "Keystone Blade", level=5)
         c.execute("INSERT INTO char_items(char_item_id, char_id, item_id, quantity, equipped) "
                   "VALUES(?,?,90003,1,1)", (game._next_char_item_id(c), char["id"]))
         c.commit()
@@ -106,10 +99,7 @@ def main():
         assert wbonus["hp"] == 0, "a weapon gem grants no flat HP"
 
         # Now add a Lvl-5 helm: it grants flat HEALTH (captured "17 HEALTH") on top of stats.
-        c.execute("INSERT INTO items(item_id, name, item_type, raw) VALUES(90004,'Keystone Helm',0,?)"
-                  "ON CONFLICT(item_id) DO UPDATE SET raw=excluded.raw",
-                  (json.dumps({"ID": 90004, "Name": "Keystone Helm",
-                               "EquipSpot": patterns.HEAD, "Level": 5}),))
+        _mk_item(c, 90004, patterns.HEAD, "Keystone Helm", level=5)
         c.execute("INSERT INTO char_items(char_item_id, char_id, item_id, quantity, equipped) "
                   "VALUES(?,?,90004,1,1)", (game._next_char_item_id(c), char["id"]))
         c.commit()
@@ -154,7 +144,7 @@ def main():
         return min(xs), max(xs)
     glo, ghi = _band(9100, (27, 34))
     assert 28 <= glo and ghi <= 42, f"gem band [{glo},{ghi}] ~= weaponRoll(27-34)*~1.15 (ap 24)"
-    # the no-gem fallback is the (higher) ap-derived band — proves the gem path is in force
+    # the no-gem fallback is the (higher) ap-derived band - proves the gem path is in force
     flo, fhi = _band(9101, None)
     assert flo > ghi, f"ap fallback band (min {flo}) sits above the gem band (max {ghi})"
 
@@ -168,3 +158,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

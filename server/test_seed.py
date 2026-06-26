@@ -5,6 +5,7 @@ baseline. This proves edits to apops / monsters / maps survive a re-seed.
 """
 import db
 import seed
+import montemplates
 
 
 def main():
@@ -19,16 +20,16 @@ def main():
     # edit catalog content in place, the way the in-game editors (CreateNewApop, NPC/pad editor,
     # map authoring) mutate the DB
     conn.execute("UPDATE apops SET raw='{\"edited\":1}' WHERE apop_id=?", (apop_id,))
-    conn.execute("UPDATE monsters SET raw='{\"MonID\":0,\"strMonName\":\"EditedMon\"}' WHERE mon_id=?", (mon_id,))
+    montemplates.store(conn, mon_id, {"MonID": mon_id, "strMonName": "EditedMon"}, replace=True)
     conn.execute("UPDATE maps SET doc='{\"area\":{\"DisplayName\":\"EditedMap\"}}' WHERE str_map_name=?", (map_name,))
     conn.commit()
 
-    seed.run()                                   # re-seed — simulates a service restart
+    seed.run()                                   # re-seed - simulates a service restart
     conn = db.connect()
 
     assert conn.execute("SELECT raw FROM apops WHERE apop_id=?", (apop_id,)).fetchone()["raw"] == '{"edited":1}', \
         "apop edit clobbered by re-seed"
-    assert "EditedMon" in conn.execute("SELECT raw FROM monsters WHERE mon_id=?", (mon_id,)).fetchone()["raw"], \
+    assert montemplates.get(conn, mon_id)["strMonName"] == "EditedMon", \
         "monster edit clobbered by re-seed"
     assert "EditedMap" in conn.execute("SELECT doc FROM maps WHERE str_map_name=?", (map_name,)).fetchone()["doc"], \
         "map edit clobbered by re-seed"
@@ -36,9 +37,10 @@ def main():
     # and the catalog is still fully present (re-seed didn't drop the untouched rows)
     assert conn.execute("SELECT COUNT(*) FROM monsters").fetchone()[0] >= 410, "catalog intact after re-seed"
 
-    print("seed OK: re-run is insert-if-absent — in-game edits to apops/monsters/maps survive a restart")
+    print("seed OK: re-run is insert-if-absent - in-game edits to apops/monsters/maps survive a restart")
     print("ALL SEED TESTS PASSED")
 
 
 if __name__ == "__main__":
     main()
+

@@ -1,9 +1,9 @@
 """
-SQLite persistence for InfinityServer. Stdlib only — no external deps.
+SQLite persistence for InfinityServer. Stdlib only - no external deps.
 
 This is the authoritative store for the private server: accounts, characters,
 inventory, gold, and the seeded shop catalog. It has zero connection to
-Artix Entertainment — accounts live here and here only.
+Artix Entertainment - accounts live here and here only.
 
 SQLite is the pragmatic start (single file, zero-ops). The schema is plain
 SQL, so moving to Postgres later for a hosted/multi-user deployment is a
@@ -16,6 +16,9 @@ import pathlib
 from collections.abc import Mapping
 
 import monrecord
+import shoprecord
+import qturninrecord
+import itemrecord
 
 DB_PATH = pathlib.Path(__file__).resolve().parent.parent / "data" / "infinity.db"
 
@@ -37,7 +40,7 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 
 -- A character mirrors AQ2D's playerInfo + user: identity, currencies, level/exp,
--- class, the six core stats, and customization colours — all real columns.
+-- class, the six core stats, and customization colours - all real columns.
 -- Equipment is the equipped rows in char_items, not columns here.
 CREATE TABLE IF NOT EXISTS characters (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,15 +75,14 @@ CREATE TABLE IF NOT EXISTS characters (
 -- QuantityRemain); a shop listing is rebuilt by re-attaching those from shop_items.
 -- Defined before char_items/shop_items because they FK-reference it (Postgres requires
 -- the referenced table to already exist; SQLite tolerates either order).
+-- Columns are the source of truth; the item wire dict is GENERATED from them (itemrecord).
+-- The column block below is generated from itemrecord (single source of truth for the schema).
 CREATE TABLE IF NOT EXISTS items (
-    item_id   INTEGER PRIMARY KEY,
-    name      TEXT,
-    item_type INTEGER,
-    raw       TEXT NOT NULL
+--ITEMS_COLS--
 );
 
 -- One row per item instance a character owns (inventory AND bank). References
--- the shared items catalog — no per-instance item JSON. char_item_id mirrors the
+-- the shared items catalog - no per-instance item JSON. char_item_id mirrors the
 -- wire "CharItemID"; the wire item is rebuilt from items + these instance fields.
 CREATE TABLE IF NOT EXISTS char_items (
     char_item_id    INTEGER PRIMARY KEY,
@@ -98,9 +100,10 @@ CREATE TABLE IF NOT EXISTS char_items (
 );
 CREATE INDEX IF NOT EXISTS idx_char_items_char ON char_items(char_id);
 
+-- Shop meta (loadShop wrapper minus items). Columns are the source of truth; the loadShop
+-- blob is GENERATED from them (shoprecord). The column block below is generated from shoprecord.
 CREATE TABLE IF NOT EXISTS shops (
-    shop_id INTEGER PRIMARY KEY,
-    raw     TEXT NOT NULL            -- loadShop meta with an empty items array
+--SHOPS_COLS--
 );
 
 -- A shop's offer of an item: references items(item_id) and carries only the
@@ -124,20 +127,31 @@ CREATE TABLE IF NOT EXISTS shop_items (
 -- in-memory montemplates catalog as the source of truth; pad_npcs.mon_id -> here.
 -- Canonical monster/NPC record. Columns are the source of truth; the two wire shapes
 -- (spawn monBranch + GetMonsterData catalog) are GENERATED from them via monrecord, so they
--- can't drift. Column body generated from monrecord (single source) — see --MONSTERS_COLS--.
+-- can't drift. The column block below is generated from monrecord (single source of truth).
 CREATE TABLE IF NOT EXISTS monsters (
 --MONSTERS_COLS--
 );
 
 -- Per-monster drop table: the catalog items a monster can drop, each with its own INDEPENDENT
 -- per-kill rate. Authored server content (seeded from data/monster_drops.json). A monster with no
--- rows here falls back to loot.py's shared global pool, so un-authored monsters still drop.
+-- rows here drops nothing — there is no global fallback pool.
 CREATE TABLE IF NOT EXISTS monster_drops (
     mon_id   INTEGER NOT NULL,
     item_id  INTEGER NOT NULL,
     rate     REAL    NOT NULL DEFAULT 0.1,   -- 0..1 independent chance this item drops on a kill
     quantity INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (mon_id, item_id),
+    FOREIGN KEY (item_id) REFERENCES items(item_id)
+);
+
+-- Global drop table: items EVERY monster can drop, ON TOP OF its own monster_drops (e.g. gems
+-- that drop universally). Each row rolls INDEPENDENTLY per kill, same model as monster_drops.
+-- INTENTIONAL additive pool (seeded from data/global_drops.json) — NOT the removed band-aid
+-- fallback that masked monsters lacking an authored table.
+CREATE TABLE IF NOT EXISTS global_drops (
+    item_id  INTEGER NOT NULL PRIMARY KEY,
+    rate     REAL    NOT NULL DEFAULT 0.05,
+    quantity INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (item_id) REFERENCES items(item_id)
 );
 
@@ -179,18 +193,33 @@ CREATE TABLE IF NOT EXISTS quests (
     raw               TEXT NOT NULL
 );
 
+-- One row per quest objective (the polymorphic `turnin` entries). Columns are the source of
+-- truth; the served `turnin` array is GENERATED from them (qturninrecord). Column block below
+-- is generated from qturninrecord (single source of truth for the objective schema).
 CREATE TABLE IF NOT EXISTS quest_turnins (
-    quest_id INTEGER NOT NULL,
-    idx      INTEGER NOT NULL,
-    type     TEXT,                -- $type subclass (Turnin/itemTurnin/...)
-    qo_type  INTEGER,
-    qo_id    INTEGER,
-    item_id  INTEGER,
-    quantity INTEGER,
-    ref_ids  TEXT,                -- JSON array
-    PRIMARY KEY (quest_id, idx),
-    FOREIGN KEY (quest_id) REFERENCES quests(quest_id) ON DELETE CASCADE
+--QUEST_TURNINS_COLS--
 );
+
+-- Authored objective -> monster mapping for kill-credit: which monster catalog ids credit a
+-- given quest objective. Explicit and self-describing (quest_id, qoid, mon_id), so kill crediting
+-- is a table lookup instead of guessing by RefIDs/name. One row per (objective, monster).
+CREATE TABLE IF NOT EXISTS quest_objective_refs (
+    quest_id INTEGER NOT NULL,
+    qoid     INTEGER NOT NULL,
+    mon_id   INTEGER NOT NULL,
+    PRIMARY KEY (qoid, mon_id)
+);
+
+-- Probabilistic drop roll per quest objective: on a credited kill, the objective drops with
+-- `chance` probability, granting a random `min_qty`..`max_qty` (so a kill can drop all/some/none
+-- of a quest's objectives, in varying amounts). Absent row = deterministic +1 (chance 1, 1..1).
+CREATE TABLE IF NOT EXISTS quest_objective_drops (
+    qoid    INTEGER PRIMARY KEY,
+    chance  DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    min_qty INTEGER NOT NULL DEFAULT 1,
+    max_qty INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_quest_turnins_qoid ON quest_turnins(qo_id);
 
 CREATE TABLE IF NOT EXISTS quest_rewards (
     quest_id INTEGER NOT NULL,
@@ -233,13 +262,13 @@ CREATE TABLE IF NOT EXISTS classes (
                                                  -- authoritative class visual/particle rig
     resource TEXT,                               -- updateClass bar model (ResponseClass):
                                                  -- {model, ResourceColor, MaxRP, Threshold,
-                                                 -- ThresholdColor} — DS=determination,
+                                                 -- ThresholdColor} - DS=determination,
                                                  -- others=mana (per capture)
     raw      TEXT                                -- optional extra class meta
 );
 
 -- A skill occupying a slot on a class. The same skill_id can sit on many
--- classes (sfLink shares; sfClone copies into a new id) — hence a join table.
+-- classes (sfLink shares; sfClone copies into a new id) - hence a join table.
 CREATE TABLE IF NOT EXISTS class_skills (
     class_id INTEGER NOT NULL,
     slot     INTEGER NOT NULL,                   -- 0-based slot (0 = auto-attack)
@@ -309,7 +338,7 @@ CREATE TABLE IF NOT EXISTS map_pads (
     PRIMARY KEY (map, pad_id)
 );
 
--- The NPC(s)/monster(s) on a pad — one row each, every editor NPCEditData field
+-- The NPC(s)/monster(s) on a pad - one row each, every editor NPCEditData field
 -- a column. mon_id is the catalog MonID (art/behaviour come from that template);
 -- the rest are this placement's editable overrides.
 CREATE TABLE IF NOT EXISTS pad_npcs (
@@ -450,7 +479,7 @@ def _pg_row_factory(cursor):
 class _PgConnection:
     """A thin sqlite3.Connection-shaped wrapper over a psycopg connection. Provides
     conn.execute/.executemany/.executescript/.commit/.close and a `with` that commits on a
-    clean exit but does NOT close (sqlite3 semantics — the server holds a long-lived conn)."""
+    clean exit but does NOT close (sqlite3 semantics - the server holds a long-lived conn)."""
     def __init__(self, raw):
         self._raw = raw
 
@@ -523,12 +552,16 @@ def connect():
 def _schema_sql():
     """The SCHEMA in the active dialect. Only difference: the two AUTOINCREMENT surrogate
     keys (accounts.id, characters.id) become GENERATED ... AS IDENTITY on Postgres."""
+    sql = (SCHEMA.replace("--MONSTERS_COLS--", monrecord.monsters_columns_ddl())
+                 .replace("--ITEMS_COLS--", itemrecord.items_columns_ddl())
+                 .replace("--SHOPS_COLS--", shoprecord.shops_columns_ddl())
+                 .replace("--QUEST_TURNINS_COLS--", qturninrecord.columns_ddl()))
     if BACKEND == "postgres":
         # BY DEFAULT (not ALWAYS) so the data migration can insert rows with their original
         # ids preserved; the identity sequence is then advanced past MAX(id) (see migrate_to_pg).
-        return SCHEMA.replace("INTEGER PRIMARY KEY AUTOINCREMENT",
-                              "INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY")
-    return SCHEMA.replace("--MONSTERS_COLS--", monrecord.monsters_columns_ddl())
+        return sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT",
+                           "INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY")
+    return sql
 
 
 def _columns(c, table):
@@ -543,7 +576,7 @@ def _columns(c, table):
 
 
 def use_throwaway():
-    """Point persistence at a fresh, empty store for an isolated test run — the backend-agnostic
+    """Point persistence at a fresh, empty store for an isolated test run - the backend-agnostic
     equivalent of swapping db.DB_PATH to a temp file. On SQLite that's exactly a temp file; on
     Postgres it (re)creates a `throwaway` schema and routes connections there, leaving the real
     `public` data untouched. Call BEFORE db.init()."""
@@ -568,6 +601,10 @@ def init():
         c.executescript(_schema_sql())
         _migrate(c)
         _migrate_monsters(c)        # promote monsters raw/catalog blobs -> canonical columns
+        _migrate_items_columns(c)   # promote items raw blob -> canonical columns
+        _migrate_shops_columns(c)   # promote shops raw blob -> canonical columns
+        _migrate_quest_turnins(c)   # activate + populate the quest_turnins objective table
+        _migrate_quest_objective_refs(c)   # add + backfill quest_objective_refs.quest_id
         _import_legacy_pads(c)      # backfill the normalized pad tables from it
     return DB_PATH
 
@@ -604,10 +641,14 @@ def _import_legacy_pads(c):
     c.execute("DROP TABLE _map_pads_legacy")
 
 
-# Per-owner instance fields — they live on a shop offer (shop_items) or an owned
+# Per-owner instance fields - they live on a shop offer (shop_items) or an owned
 # instance (char_items), never on the shared catalog item.
 _ITEM_INSTANCE_FIELDS = ("ShopItemID", "QuantityRemain", "CharItemID", "LootID",
                          "PurchaseDate", "Equipped", "Banked", "ItemPattern")
+
+# Misc Gem. For a gem ITEM, ItemPattern is the gem's catalog stat definition (STR/END/.../Power),
+# NOT a per-owner applied gem — so it must NOT be stripped on store, or the gem reads as all-zeroes.
+GEM_ITEMTYPE = 43
 
 # Character columns added after the table's first version (additive migration).
 _CHARACTER_COLUMNS = [
@@ -626,8 +667,111 @@ _CHARACTER_COLUMNS = [
 
 
 def item_template(item):
-    """The reusable item definition: an item minus per-owner instance fields."""
-    return {k: v for k, v in item.items() if k not in _ITEM_INSTANCE_FIELDS}
+    """The reusable item definition: an item minus per-owner instance fields. Exception: on a
+    gem item (ItemType 43), ItemPattern IS the catalog definition (its stats), so it's kept."""
+    drop = _ITEM_INSTANCE_FIELDS
+    try:
+        if int(item.get("ItemType", 0) or 0) == GEM_ITEMTYPE:
+            drop = tuple(f for f in drop if f != "ItemPattern")
+    except (TypeError, ValueError):
+        pass
+    return {k: v for k, v in item.items() if k not in drop}
+
+
+_ITEMCOLS = ",".join(f'"{c}"' for c in itemrecord.ALL_COLS)
+
+
+def item(conn, item_id):
+    """The catalog item wire dict for an item_id, GENERATED from the canonical columns. None
+    if the item isn't in the catalog. Replaces `json.loads(SELECT raw FROM items ...)`."""
+    row = conn.execute(f"SELECT {_ITEMCOLS} FROM items WHERE item_id=?", (int(item_id),)).fetchone()
+    return itemrecord.to_item(itemrecord.row_to_cols(row)) if row else None
+
+
+def store_item(conn, it, replace=False):
+    """Decompose an item definition (instance fields stripped) into the canonical columns and
+    upsert. replace=True overwrites an existing row; default is insert-if-absent."""
+    rec = itemrecord.from_dict(item_template(it))
+    rec["item_id"] = int(it.get("ID", 0))
+    row = itemrecord.cols_to_row(rec)
+    qc = ",".join(f'"{c}"' for c in itemrecord.ALL_COLS)
+    ph = ",".join("?" for _ in itemrecord.ALL_COLS)
+    action = ("DO UPDATE SET " + ", ".join(f'"{c}"=excluded."{c}"'
+              for c in itemrecord.ALL_COLS if c != "item_id")) if replace else "DO NOTHING"
+    conn.execute(f"INSERT INTO items ({qc}) VALUES ({ph}) ON CONFLICT(item_id) {action}",
+                 tuple(row[c] for c in itemrecord.ALL_COLS))
+
+
+_SHOPCOLS = ",".join(f'"{c}"' for c in shoprecord.ALL_COLS)
+
+
+def shop_meta(conn, shop_id):
+    """The inner shop meta dict (with items:[]) for a shop_id, generated from the canonical
+    columns. None if the shop isn't in the catalog."""
+    row = conn.execute(f"SELECT {_SHOPCOLS} FROM shops WHERE shop_id=?", (int(shop_id),)).fetchone()
+    return shoprecord.to_meta(shoprecord.row_to_cols(row)) if row else None
+
+
+def shop_blob(conn, shop_id):
+    """The full loadShop wrapper {"Cmd":"loadShop","shop":{...}} for a shop_id, or None.
+    Replaces `json.loads(SELECT raw FROM shops ...)`; the live items are re-attached by the caller."""
+    meta = shop_meta(conn, shop_id)
+    return {"Cmd": "loadShop", "shop": meta} if meta is not None else None
+
+
+def store_shop(conn, blob, shop_id=None, replace=False):
+    """Decompose a loadShop blob (or a bare inner shop dict) into the canonical columns and upsert.
+    shop_id defaults to the meta's own shopID; pass it to key by an external id (seed keys by file).
+    replace=True overwrites an existing row; default is insert-if-absent."""
+    shop = blob.get("shop") if isinstance(blob.get("shop"), dict) else blob
+    rec = shoprecord.from_meta(shop)
+    rec["shop_id"] = int(shop_id if shop_id is not None else shop.get("shopID", 0))
+    row = shoprecord.cols_to_row(rec)
+    qc = ",".join(f'"{c}"' for c in shoprecord.ALL_COLS)
+    ph = ",".join("?" for _ in shoprecord.ALL_COLS)
+    action = ("DO UPDATE SET " + ", ".join(f'"{c}"=excluded."{c}"'
+              for c in shoprecord.ALL_COLS if c != "shop_id")) if replace else "DO NOTHING"
+    conn.execute(f"INSERT INTO shops ({qc}) VALUES ({ph}) ON CONFLICT(shop_id) {action}",
+                 tuple(row[c] for c in shoprecord.ALL_COLS))
+
+
+# --- quest objectives (turnins): the served `turnin` array is generated from these rows --------
+_QT_COLS = ",".join(f'"{c}"' for c in qturninrecord.ALL_COLS)
+
+
+def quest_turnins(conn, quest_id):
+    """A quest's objective list, regenerated from the quest_turnins rows (ordered by idx).
+    Replaces parsing quests.raw['turnin'] — the table is the source of truth."""
+    rows = conn.execute(f"SELECT {_QT_COLS} FROM quest_turnins WHERE quest_id=? ORDER BY idx",
+                        (int(quest_id),)).fetchall()
+    return [qturninrecord.to_turnin(qturninrecord.row_to_cols(r)) for r in rows]
+
+
+def store_quest_turnins(conn, quest_id, turnins):
+    """Replace a quest's objective rows from a turnin array (decomposed into canonical columns)."""
+    conn.execute("DELETE FROM quest_turnins WHERE quest_id=?", (int(quest_id),))
+    qc = ",".join(f'"{c}"' for c in qturninrecord.ALL_COLS)
+    ph = ",".join("?" for _ in qturninrecord.ALL_COLS)
+    for idx, t in enumerate(turnins or []):
+        row = qturninrecord.cols_to_row(qturninrecord.from_turnin(t), int(quest_id), idx)
+        conn.execute(f"INSERT INTO quest_turnins ({qc}) VALUES ({ph})",
+                     tuple(row[c] for c in qturninrecord.ALL_COLS))
+
+
+def objective_monsters(conn, qoid):
+    """The monster catalog ids whose kill credits objective `qoid` (authored quest_objective_refs)."""
+    return {int(r["mon_id"]) for r in conn.execute(
+        "SELECT mon_id FROM quest_objective_refs WHERE qoid=?", (int(qoid),))}
+
+
+def objective_drop(conn, qoid):
+    """(chance, min_qty, max_qty) for an objective's probabilistic drop roll, or the deterministic
+    default (1.0, 1, 1) if no row — so an unconfigured authored objective still credits +1/kill."""
+    r = conn.execute("SELECT chance, min_qty, max_qty FROM quest_objective_drops WHERE qoid=?",
+                     (int(qoid),)).fetchone()
+    if r is None:
+        return (1.0, 1, 1)
+    return (float(r["chance"]), int(r["min_qty"]), int(r["max_qty"]))
 
 
 def _migrate(c):
@@ -758,6 +902,83 @@ def _migrate_monsters(c):
     c.execute("ALTER TABLE monsters DROP COLUMN catalog")
 
 
+def _migrate_items_columns(c):
+    """Promote the items `raw` JSON blob into canonical columns (itemrecord), then drop raw.
+    The item wire dict is generated from the columns thereafter. Idempotent: returns once `raw`
+    is gone. Runs after _migrate()'s legacy item backfills so every catalog row is present first."""
+    cols = _columns(c, "items")
+    if "raw" not in cols:
+        return
+    for col in itemrecord.ALL_COLS:
+        if col not in cols:
+            c.execute(f'ALTER TABLE items ADD COLUMN "{col}" {itemrecord.COL_TYPES[col]}')
+    setcols = [col for col in itemrecord.ALL_COLS if col != "item_id"]
+    sets = ", ".join(f'"{col}"=?' for col in setcols)
+    for r in c.execute("SELECT item_id, raw FROM items").fetchall():
+        row = itemrecord.cols_to_row(itemrecord.from_dict(json.loads(r["raw"])))
+        c.execute(f"UPDATE items SET {sets} WHERE item_id=?",
+                  tuple(row[col] for col in setcols) + (r["item_id"],))
+    c.execute("ALTER TABLE items DROP COLUMN raw")
+
+
+def _migrate_shops_columns(c):
+    """Promote the shops `raw` loadShop blob into canonical columns (shoprecord), then drop raw.
+    The loadShop meta is generated from the columns thereafter. Idempotent: returns once `raw`
+    is gone. Runs after _migrate() so the legacy shop_items normalizer rebuilds raw first."""
+    cols = _columns(c, "shops")
+    if "raw" not in cols:
+        return
+    for col in shoprecord.ALL_COLS:
+        if col not in cols:
+            c.execute(f'ALTER TABLE shops ADD COLUMN "{col}" {shoprecord.COL_TYPES[col]}')
+    setcols = [col for col in shoprecord.ALL_COLS if col != "shop_id"]
+    sets = ", ".join(f'"{col}"=?' for col in setcols)
+    for r in c.execute("SELECT shop_id, raw FROM shops").fetchall():
+        blob = json.loads(r["raw"])
+        shop = blob.get("shop") if isinstance(blob.get("shop"), dict) else blob
+        row = shoprecord.cols_to_row(shoprecord.from_meta(shop))
+        c.execute(f"UPDATE shops SET {sets} WHERE shop_id=?",
+                  tuple(row[col] for col in setcols) + (r["shop_id"],))
+    c.execute("ALTER TABLE shops DROP COLUMN raw")
+
+
+def _migrate_quest_turnins(c):
+    """Activate the quest_turnins table: add any columns added after its first version, then
+    populate it from quests.raw if empty (one lossless row per objective). Idempotent — once
+    populated, the table is the source of truth and the served turnin array is generated from it."""
+    cols = _columns(c, "quest_turnins")
+    upgraded = False
+    for col in qturninrecord.ALL_COLS:
+        if col not in cols:
+            c.execute(f'ALTER TABLE quest_turnins ADD COLUMN "{col}" {qturninrecord.COL_TYPES[col]}')
+            upgraded = True
+    # Re-populate from raw if empty OR just upgraded from the old lossy shape (short $type, no
+    # name/_extra). Idempotent: a fully-populated current-shape table is left alone.
+    n = c.execute("SELECT COUNT(*) AS n FROM quest_turnins").fetchone()["n"]
+    if n and not upgraded:
+        return
+    c.execute("DELETE FROM quest_turnins")
+    qc = ",".join(f'"{x}"' for x in qturninrecord.ALL_COLS)
+    ph = ",".join("?" for _ in qturninrecord.ALL_COLS)
+    for r in c.execute("SELECT quest_id, raw FROM quests").fetchall():
+        for idx, t in enumerate((json.loads(r["raw"]).get("turnin") or [])):
+            row = qturninrecord.cols_to_row(qturninrecord.from_turnin(t), r["quest_id"], idx)
+            c.execute(f"INSERT INTO quest_turnins ({qc}) VALUES ({ph})",
+                      tuple(row[x] for x in qturninrecord.ALL_COLS))
+
+
+def _migrate_quest_objective_refs(c):
+    """Add quest_objective_refs.quest_id (self-describing rows) and backfill it from each
+    objective's quest (quest_turnins.qo_id -> quest_id). Idempotent. Runs after quest_turnins
+    is populated so the backfill can resolve the quest."""
+    if "quest_id" not in _columns(c, "quest_objective_refs"):
+        c.execute("ALTER TABLE quest_objective_refs ADD COLUMN quest_id INTEGER NOT NULL DEFAULT 0")
+    c.execute(
+        "UPDATE quest_objective_refs SET quest_id="
+        "COALESCE((SELECT qt.quest_id FROM quest_turnins qt WHERE qt.qo_id=quest_objective_refs.qoid "
+        "LIMIT 1), quest_id) WHERE quest_id=0")
+
+
 def _migrate_items(c):
     """Normalize the old shop_items (full item JSON embedded in `raw`) into the
     `items` catalog + a lean shop_items that references it. Idempotent."""
@@ -792,17 +1013,19 @@ def _migrate_items(c):
             "quantity_remain) VALUES(?,?,?,?,?,?)", new_rows)
         c.execute("DROP TABLE _shop_items_old")
 
-    # Drop any items array still embedded in stored shop-meta blobs.
-    for row in c.execute("SELECT shop_id, raw FROM shops").fetchall():
-        try:
-            blob = json.loads(row["raw"])
-        except Exception:
-            continue
-        shop = blob.get("shop") if isinstance(blob.get("shop"), dict) else blob
-        if isinstance(shop.get("items"), list) and shop["items"]:
-            shop["items"] = []
-            c.execute("UPDATE shops SET raw=? WHERE shop_id=?",
-                      (json.dumps(blob, separators=(",", ":")), row["shop_id"]))
+    # Drop any items array still embedded in stored shop-meta blobs. Only relevant while shops
+    # still has a `raw` column; _migrate_shops_columns later promotes raw -> canonical columns.
+    if "raw" in _columns(c, "shops"):
+        for row in c.execute("SELECT shop_id, raw FROM shops").fetchall():
+            try:
+                blob = json.loads(row["raw"])
+            except Exception:
+                continue
+            shop = blob.get("shop") if isinstance(blob.get("shop"), dict) else blob
+            if isinstance(shop.get("items"), list) and shop["items"]:
+                shop["items"] = []
+                c.execute("UPDATE shops SET raw=? WHERE shop_id=?",
+                          (json.dumps(blob, separators=(",", ":")), row["shop_id"]))
 
 
 def kv_get(conn, key, default=None):
@@ -816,3 +1039,4 @@ def kv_set(conn, key, value):
         "ON CONFLICT(k) DO UPDATE SET v=excluded.v",
         (key, str(value)),
     )
+

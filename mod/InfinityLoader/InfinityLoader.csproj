@@ -36,8 +36,10 @@
       <Private>False</Private>
     </Reference>
     <Reference Include="0Harmony">
-      <!-- AE's OWN Harmony (2.4.2.0) — the same instance the game has loaded, so no conflict. -->
-      <HintPath>$(AqwiManaged)\0Harmony.dll</HintPath>
+      <!-- AE's OWN Harmony (2.4.2.0) — the same instance the game has loaded, so no conflict.
+           The base game ships NO 0Harmony in Managed/; our Doorstop pack supplies it, so build
+           against the repo's bundled copy (mod/doorstop/0Harmony.dll). -->
+      <HintPath>$(MSBuildProjectDirectory)\..\doorstop\0Harmony.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="Newtonsoft.Json">

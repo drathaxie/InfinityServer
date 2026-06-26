@@ -25,8 +25,13 @@ def main():
     loot.clear(uid)
     start_inv = len(game.inventory(conn, char["id"]))
 
-    # a kill rolls drops from the catalog and holds them as PENDING loot (rewardPlayer.items)
-    items = [loot._catalog(conn, i) for i in loot.DROP_TABLE[:3]]
+    # a kill rolls drops from the catalog and holds them as PENDING loot (rewardPlayer.items).
+    # Pick catalog items the starter character does NOT already own, so a kept drop grows inventory.
+    drop_ids = [r["item_id"] for r in conn.execute(
+        "SELECT item_id FROM items WHERE item_id > 0 AND item_id NOT IN "
+        "(SELECT item_id FROM char_items WHERE char_id=?) ORDER BY item_id LIMIT 3",
+        (char["id"],)).fetchall()]
+    items = [loot._catalog(conn, i) for i in drop_ids]
     wire = loot.add_pending(uid, items)
     assert len(wire) == 3 and all(w["LootID"] >= 2_700_000 for w in wire), "drops get unique LootIDs"
     assert all("ID" in w and w["Quantity"] >= 1 for w in wire), "drops carry catalog ID + Quantity"

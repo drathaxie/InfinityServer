@@ -187,6 +187,28 @@ def login(conn, username, password):
     return char
 
 
+def authenticate(conn, username, password):
+    """Verify an EXISTING account's password (does NOT create accounts, unlike login) and return
+    {"username","access"} or None. access = the account's character access_level, raised to
+    DEV_ACCESS_LEVEL for allowlisted dev accounts (data/dev_users.txt). The staff editor login uses
+    this: a normal account authenticates but returns its real (low) access, which the gate rejects."""
+    if not username:
+        return None
+    acc = conn.execute("SELECT id, username, password FROM accounts WHERE LOWER(username)=LOWER(?) "
+                       "ORDER BY id LIMIT 1", (username,)).fetchone()
+    if acc is None or not acc["password"]:
+        return None
+    ok, _ = verify_password(password, acc["password"])
+    if not ok:
+        return None
+    row = conn.execute("SELECT MAX(access_level) AS a FROM characters WHERE account_id=?",
+                       (acc["id"],)).fetchone()
+    access = int((row["a"] if row and row["a"] is not None else 0) or 0)
+    if str(acc["username"]).lower() in _dev_users():
+        access = max(access, DEV_ACCESS_LEVEL)
+    return {"username": acc["username"], "access": access}
+
+
 # ---- credentials (OUR design — no AE capture covers account auth) -----------
 # PBKDF2-HMAC-SHA256 with a per-account random salt, stdlib-only. Stored as
 # "pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>".
@@ -258,10 +280,9 @@ STARTER_WEAPON_ITEM = 1         # Default Sword (Level 1, EquipSpot 2)
 
 def _grant_equipped(conn, char_id, item_id):
     """Grant one catalog item to a character, equipped. Returns the CharItemID (or None)."""
-    row = conn.execute("SELECT raw FROM items WHERE item_id=?", (int(item_id),)).fetchone()
-    if row is None:
+    item = db.item(conn, item_id)
+    if item is None:
         return None
-    item = json.loads(row["raw"])
     item.setdefault("ID", int(item_id))
     item["Equipped"] = True
     return _grant_item(conn, char_id, item)
@@ -338,11 +359,7 @@ def _grant_item(conn, char_id, item, loot_id=-1):
     Returns the new CharItemID. A class item is granted at the maxed class points (CP), not
     a stack count — so the class is fully playable and CP stays consistent (P2-1)."""
     item_id = int(item.get("ID", 0))
-    conn.execute(
-        "INSERT INTO items(item_id, name, item_type, raw) VALUES(?,?,?,?) "
-        "ON CONFLICT(item_id) DO NOTHING",
-        (item_id, item.get("Name"), int(item.get("ItemType", 0) or 0),
-         json.dumps(db.item_template(item), separators=(",", ":"))))
+    db.store_item(conn, item)               # ensure the catalog row exists (canonical columns)
     # Stack onto an existing non-banked row for this item (the client keys inventory by item ID,
     # so a second row collides and crashes login). Class items are the exception — their Quantity
     # is class points, not a stack — so they're granted once at maxed CP, never merged.
@@ -367,19 +384,18 @@ def _grant_item(conn, char_id, item, loot_id=-1):
 def _is_class_item(conn, item_id):
     """Whether a catalog item is a class armor (so sell/drop must be rejected — its Quantity
     is class points, not a sellable stack)."""
-    irow = conn.execute("SELECT raw FROM items WHERE item_id=?", (int(item_id),)).fetchone()
-    if not irow:
+    item = db.item(conn, item_id)
+    if not item:
         return False
     try:
-        return _item_is_class(json.loads(irow["raw"]))
+        return _item_is_class(item)
     except Exception:
         return False
 
 
 def _wire_item(conn, ci):
     """Rebuild the wire InventoryItem from the catalog def + this owned instance."""
-    irow = conn.execute("SELECT raw FROM items WHERE item_id=?", (ci["item_id"],)).fetchone()
-    item = json.loads(irow["raw"]) if irow else {"ID": ci["item_id"]}
+    item = db.item(conn, ci["item_id"]) or {"ID": ci["item_id"]}
     item["CharItemID"] = ci["char_item_id"]
     item["Quantity"] = ci["quantity"]
     item["LootID"] = ci["loot_id"]
@@ -461,8 +477,85 @@ def load_quests(conn, ids):
     for qid in ids:
         row = conn.execute("SELECT raw FROM quests WHERE quest_id=?", (qid,)).fetchone()
         if row is not None:
-            out[str(qid)] = json.loads(row["raw"])
+            q = json.loads(row["raw"])
+            q["turnin"] = db.quest_turnins(conn, qid)   # generated from the normalized table
+            out[str(qid)] = q
     return out
+
+
+# ---- quest editor (DB manager): load/save a quest + its four normalized tables together --------
+
+def quest_editor_data(conn, qid):
+    """Everything the quest editor needs for one quest: the quest def (minus turnin), its objectives
+    (quest_turnins), the per-objective drop rolls (quest_objective_drops) and kill-credit monsters
+    (quest_objective_refs), and the rewards (quest_rewards). None if the quest doesn't exist."""
+    row = conn.execute("SELECT raw FROM quests WHERE quest_id=?", (int(qid),)).fetchone()
+    if not row:
+        return None
+    raw = json.loads(row["raw"])
+    turnins = db.quest_turnins(conn, qid)
+    qoids = [int(t["QOID"]) for t in turnins if t.get("QOID") is not None]
+    drops = {}
+    for q in qoids:
+        r = conn.execute("SELECT chance, min_qty, max_qty FROM quest_objective_drops WHERE qoid=?",
+                         (q,)).fetchone()
+        if r:
+            drops[str(q)] = {"chance": float(r["chance"]), "min": int(r["min_qty"]),
+                             "max": int(r["max_qty"])}
+    refs = {str(q): sorted(db.objective_monsters(conn, q)) for q in qoids
+            if db.objective_monsters(conn, q)}
+    rewards = [{"kind": r["kind"], "item_id": r["item_id"], "quantity": r["quantity"]}
+               for r in conn.execute(
+                   "SELECT kind, item_id, quantity FROM quest_rewards WHERE quest_id=? ORDER BY idx",
+                   (int(qid),))]
+    quest = {k: v for k, v in raw.items() if k != "turnin"}
+    return {"quest": quest, "turnins": turnins, "drops": drops, "refs": refs, "rewards": rewards}
+
+
+def quest_editor_save(conn, payload):
+    """Write a quest edited in the manager back to ALL its tables in one transaction: quests.raw +
+    columns, quest_turnins (objectives), quest_objective_drops, quest_objective_refs, quest_rewards.
+    The objectives' drops/refs are REPLACED for this quest's QOIDs (the editor is authoritative)."""
+    quest = dict(payload.get("quest") or {})
+    qid = int(quest.get("QuestID") or payload.get("id") or 0)
+    if qid <= 0:
+        return {"ok": False, "msg": "missing quest id"}
+    turnins = payload.get("turnins") or []
+    drops = payload.get("drops") or {}
+    refs = payload.get("refs") or {}
+    rewards = payload.get("rewards") or []
+    quest["QuestID"] = qid
+    quest["turnin"] = turnins
+    # rebuild raw.Rewards (client display) from the edited rewards list, grouped by kind
+    rw = {}
+    for r in rewards:
+        rw.setdefault(r.get("kind") or "Static", []).append(
+            {"ItemID": r.get("item_id"), "Quantity": int(r.get("quantity", 1) or 1)})
+    quest["Rewards"] = rw
+    conn.execute("UPDATE quests SET name=?, descr=?, end_text=?, raw=? WHERE quest_id=?",
+                 (quest.get("Name"), quest.get("Desc"), quest.get("EndText"),
+                  json.dumps(quest, separators=(",", ":")), qid))
+    db.store_quest_turnins(conn, qid, turnins)
+    qoids = [int(t["QOID"]) for t in turnins if t.get("QOID") is not None]
+    if qoids:
+        ph = ",".join("?" for _ in qoids)
+        conn.execute(f"DELETE FROM quest_objective_drops WHERE qoid IN ({ph})", tuple(qoids))
+        conn.execute(f"DELETE FROM quest_objective_refs WHERE qoid IN ({ph})", tuple(qoids))
+    for q, d in (drops or {}).items():
+        conn.execute("INSERT INTO quest_objective_drops(qoid, chance, min_qty, max_qty) "
+                     "VALUES(?,?,?,?)", (int(q), float(d.get("chance", 1.0) or 1.0),
+                                         int(d.get("min", 1) or 1), int(d.get("max", 1) or 1)))
+    for q, mons in (refs or {}).items():
+        for mid in (mons or []):
+            conn.execute("INSERT INTO quest_objective_refs(quest_id, qoid, mon_id) VALUES(?,?,?) "
+                         "ON CONFLICT(qoid, mon_id) DO NOTHING", (qid, int(q), int(mid)))
+    conn.execute("DELETE FROM quest_rewards WHERE quest_id=?", (qid,))
+    for i, r in enumerate(rewards):
+        conn.execute("INSERT INTO quest_rewards(quest_id, idx, kind, item_id, quantity) "
+                     "VALUES(?,?,?,?,?)", (qid, i, r.get("kind") or "Static",
+                                           r.get("item_id"), int(r.get("quantity", 1) or 1)))
+    conn.commit()
+    return {"ok": True, "ID": qid}
 
 
 # questsCopmlete is a completion BITFIELD the client indexes as questsComplete[qID >> 3]
@@ -488,8 +581,9 @@ def _quest_def(conn, qid):
 
 
 def _quest_turnins(conn, qid):
-    q = _quest_def(conn, qid)
-    return q.get("turnin") or [] if isinstance(q, dict) else []
+    """A quest's objectives — now from the normalized quest_turnins table (the source of truth),
+    not parsed from raw."""
+    return db.quest_turnins(conn, qid)
 
 
 def _ref_ints(refids):
@@ -696,13 +790,34 @@ def record_kill(conn, char, mon_catalog_id, mon_name=""):
     except (TypeError, ValueError):
         mon = None
     mname = (mon_name or "").lower()
+    if not mname and mon is not None:
+        # name not resolved from the live registration — fall back to the authoritative catalog
+        # name so RefID-less objectives can still be matched by name (not blanket-credited).
+        row = conn.execute("SELECT name FROM monsters WHERE mon_id=?", (mon,)).fetchone()
+        if row and row["name"]:
+            mname = row["name"].lower()
     changed = False
     for qid in _accepted_ids(conn, cid):
         for t in _quest_turnins(conn, qid):
             if int(t.get("QOType", 0) or 0) != QOT_KILL:
                 continue
+            authored = db.objective_monsters(conn, t["QOID"]) if t.get("QOID") is not None else set()
             refs = _ref_ints(t.get("RefIDs"))
-            if refs:
+            amount = 1                       # kill-count objectives credit +1 per kill
+            if authored:
+                # AUTHORED mapping (quest_objective_refs) is authoritative: this objective is
+                # credited only by the monsters explicitly listed — no name-guessing. It's also a
+                # PROBABILISTIC drop: roll its chance, then a random min..max amount (so a kill can
+                # drop all/some/none of a quest's objectives, in varying quantities).
+                if mon is None or mon not in authored:
+                    continue
+                chance, lo, hi = db.objective_drop(conn, t["QOID"])
+                if random.random() >= chance:
+                    continue                 # didn't drop this objective this kill
+                amount = random.randint(min(lo, hi), max(lo, hi))
+                if amount <= 0:
+                    continue
+            elif refs:
                 # RefIDs lists the monster catalog ids that count — match exactly.
                 if mon is None or mon not in refs:
                     continue
@@ -712,11 +827,14 @@ def record_kill(conn, char, mon_catalog_id, mon_name=""):
                 # killing a Sneevil only credits a "...Sneevil..." objective, not a frogzard one.
                 if mname not in (t.get("Name") or "").lower():
                     continue
-            # else: RefID-less AND monster name unknown -> last-resort credit any kill.
+            else:
+                # No RefIDs AND the monster can't be identified -> can't match this objective.
+                # Do NOT blanket-credit (that made any kill count for any quest). Skip it.
+                continue
             req = int(t.get("Quantity", 1) or 1)
             cur = _obj_qty(conn, cid, t["QOID"])
             if cur < req:
-                _set_obj(conn, cid, t["QOID"], cur + 1)
+                _set_obj(conn, cid, t["QOID"], min(req, cur + amount))   # cap at the requirement
                 changed = True
     if changed:
         conn.commit()
@@ -787,9 +905,9 @@ def _grant_quest_rewards(conn, char, q):
         grant_xp(conn, char, exp)           # quest XP levels you up too (per the curve)
     for r in conn.execute("SELECT item_id FROM quest_rewards WHERE quest_id=?",
                           (int(q.get("QuestID", 0) or 0),)):
-        irow = conn.execute("SELECT raw FROM items WHERE item_id=?", (r["item_id"],)).fetchone()
-        if irow:
-            _grant_item(conn, cid, json.loads(irow["raw"]))
+        item = db.item(conn, r["item_id"])
+        if item:
+            _grant_item(conn, cid, item)
 
 
 def auto_turnin(conn, char):
@@ -876,10 +994,9 @@ def _equipped_rig(conn, char_id):
     for ci in conn.execute(
             "SELECT item_id FROM char_items WHERE char_id=? AND equipped=1 AND banked=0",
             (char_id,)):
-        irow = conn.execute("SELECT raw FROM items WHERE item_id=?", (ci["item_id"],)).fetchone()
-        if irow is None:
+        item = db.item(conn, ci["item_id"])
+        if item is None:
             continue
-        item = json.loads(irow["raw"])
         spot = int(item.get("EquipSpot", 0) or 0)
         name = _EQP_SPOT_NAMES.get(spot)
         if not name:
@@ -923,6 +1040,21 @@ def _hair_info(conn, hair_id, gender=None):
             if str(h.get("Gender", "")).upper() == str(gender).upper():
                 return h
     return matches[0]
+
+
+def load_hairshop(conn, shop_id):
+    """ResponseLoadHairShop: the hair catalog as HairData {HairID,sName,sFile,sGen,bundle}, mapped
+    from the same base_classes hair list /charedit uses. This is the PUBLIC path to character
+    customization (the HairShop apop button) — any player, no staff gate — so the client opens the
+    customization overlay seeded with these hairs."""
+    row = conn.execute("SELECT v FROM kv WHERE k=?", ("base_classes",)).fetchone()
+    try:
+        hairs = (json.loads(row["v"]) or {}).get("hairs") or [] if row and row["v"] else []
+    except (ValueError, TypeError):
+        hairs = []
+    hair = [{"HairID": h.get("ID"), "sName": h.get("Name"), "sFile": h.get("Filename"),
+             "sGen": h.get("Gender"), "bundle": h.get("Bundle")} for h in hairs]
+    return {"Cmd": "loadHairShop", "HairShopID": shop_id, "hair": hair}
 
 
 def build_init_player(conn, char):
@@ -1200,7 +1332,7 @@ def pattern_bonus(conn, char_id):
     {STR,END,DEX,INT,WIS,LCK, hp, weapon:(min,max)|None}."""
     bonus = {"STR": 0, "END": 0, "DEX": 0, "INT": 0, "WIS": 0, "LCK": 0, "hp": 0, "weapon": None}
     for ci in conn.execute(
-            "SELECT ci.*, it.raw AS item_raw FROM char_items ci "
+            "SELECT ci.*, it.equip_spot AS item_equip_spot FROM char_items ci "
             "JOIN items it ON it.item_id=ci.item_id "
             "WHERE ci.char_id=? AND ci.equipped=1 AND ci.banked=0", (char_id,)):
         pat = patterns.applied(ci)
@@ -1209,10 +1341,7 @@ def pattern_bonus(conn, char_id):
         for k, v in patterns.primary_stats(pat).items():
             bonus[k] += v
         bonus["hp"] += patterns.flat_hp(pat)
-        try:                                   # the equipped item's slot decides the weapon gem
-            spot = int(json.loads(ci["item_raw"]).get("EquipSpot", 0) or 0)
-        except (TypeError, ValueError):
-            spot = 0
+        spot = int(ci["item_equip_spot"] or 0)   # the equipped item's slot decides the weapon gem
         if spot == patterns.WEAPON:
             wr = patterns.weapon_range(pat)
             if wr:
@@ -1305,9 +1434,7 @@ def build_stat_update(char, hp=None, bonus=None):
 def shop_listing(conn, shop_item):
     """Rebuild one shop entry: the shared catalog item def re-joined with this
     shop's instance fields (ShopItemID, QuantityRemain)."""
-    irow = conn.execute("SELECT raw FROM items WHERE item_id=?",
-                        (shop_item["item_id"],)).fetchone()
-    item = json.loads(irow["raw"]) if irow else {"ID": shop_item["item_id"]}
+    item = db.item(conn, shop_item["item_id"]) or {"ID": shop_item["item_id"]}
     item["ShopItemID"] = shop_item["shop_item_id"]
     item["QuantityRemain"] = shop_item["quantity_remain"]
     return item
@@ -1315,12 +1442,10 @@ def shop_listing(conn, shop_item):
 
 def load_shop(conn, shop_id):
     """Assemble a loadShop response from the normalized catalog (or None)."""
-    row = conn.execute("SELECT raw FROM shops WHERE shop_id=?", (shop_id,)).fetchone()
-    if row is None:
+    blob = db.shop_blob(conn, shop_id)          # loadShop wrapper generated from columns
+    if blob is None:
         return None
-    blob = json.loads(row["raw"])
-    shop = blob.get("shop") if isinstance(blob.get("shop"), dict) else blob
-    shop["items"] = [
+    blob["shop"]["items"] = [
         shop_listing(conn, si) for si in conn.execute(
             "SELECT * FROM shop_items WHERE shop_id=? ORDER BY shop_item_id", (shop_id,))
     ]
@@ -1352,10 +1477,9 @@ def buy(conn, char, params):
 
     # Pull the item definition from the shared catalog (already free of the
     # shop-instance fields) and turn it into an owned InventoryItem.
-    irow = conn.execute("SELECT raw FROM items WHERE item_id=?", (row["item_id"],)).fetchone()
-    if irow is None:
+    item = db.item(conn, row["item_id"])
+    if item is None:
         return {"Cmd": "buyItem", "Success": False, "Message": "Item not available."}
-    item = json.loads(irow["raw"])
     field = "coins" if use_coins else "gold"
     conn.execute(f"UPDATE characters SET {field}={field}-? WHERE id=?", (cost, char["id"]))
     cid = _grant_item(conn, char["id"], item)
@@ -1392,8 +1516,7 @@ def sell(conn, char, params):
         return {"Cmd": "sellItem", "Success": False, "Message": "You don't own that."}
     char_item_id = int(row["char_item_id"])
 
-    irow = conn.execute("SELECT raw FROM items WHERE item_id=?", (item_id,)).fetchone()
-    item = json.loads(irow["raw"]) if irow else {}
+    item = db.item(conn, item_id) or {}
     unit = int(item.get("Cost", 0) or 0)
     sell_price = max(1, unit // 4)          # typical AQW resale fraction
     use_coins = bool(item.get("Coins"))
@@ -1473,10 +1596,9 @@ def remove_item(conn, char, params):
 
 
 def _equip_spot(conn, item_id):
-    irow = conn.execute("SELECT raw FROM items WHERE item_id=?", (item_id,)).fetchone()
-    if irow is None:
+    item = db.item(conn, item_id)
+    if item is None:
         return None, None
-    item = json.loads(irow["raw"])
     return item, int(item.get("EquipSpot", 0) or 0)
 
 
