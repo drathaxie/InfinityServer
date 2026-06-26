@@ -504,9 +504,10 @@ def quest_editor_data(conn, qid):
                              "max": int(r["max_qty"])}
     refs = {str(q): sorted(db.objective_monsters(conn, q)) for q in qoids
             if db.objective_monsters(conn, q)}
-    rewards = [{"kind": r["kind"], "item_id": r["item_id"], "quantity": r["quantity"]}
+    rewards = [{"kind": r["kind"], "item_id": r["item_id"], "quantity": r["quantity"],
+                "rate": r["rate"], "hidden": r["hidden"]}
                for r in conn.execute(
-                   "SELECT kind, item_id, quantity FROM quest_rewards WHERE quest_id=? ORDER BY idx",
+                   "SELECT kind, item_id, quantity, rate, hidden FROM quest_rewards WHERE quest_id=? ORDER BY idx",
                    (int(qid),))]
     quest = {k: v for k, v in raw.items() if k != "turnin"}
     return {"quest": quest, "turnins": turnins, "drops": drops, "refs": refs, "rewards": rewards}
@@ -530,7 +531,8 @@ def quest_editor_save(conn, payload):
     rw = {}
     for r in rewards:
         rw.setdefault(r.get("kind") or "Static", []).append(
-            {"ItemID": r.get("item_id"), "Quantity": int(r.get("quantity", 1) or 1)})
+            {"ItemID": r.get("item_id"), "Quantity": int(r.get("quantity", 1) or 1),
+             "Rate": float(r.get("rate", 0) or 0), "Hidden": bool(r.get("hidden"))})
     quest["Rewards"] = rw
     conn.execute("UPDATE quests SET name=?, descr=?, end_text=?, raw=? WHERE quest_id=?",
                  (quest.get("Name"), quest.get("Desc"), quest.get("EndText"),
@@ -551,9 +553,11 @@ def quest_editor_save(conn, payload):
                          "ON CONFLICT(qoid, mon_id) DO NOTHING", (qid, int(q), int(mid)))
     conn.execute("DELETE FROM quest_rewards WHERE quest_id=?", (qid,))
     for i, r in enumerate(rewards):
-        conn.execute("INSERT INTO quest_rewards(quest_id, idx, kind, item_id, quantity) "
-                     "VALUES(?,?,?,?,?)", (qid, i, r.get("kind") or "Static",
-                                           r.get("item_id"), int(r.get("quantity", 1) or 1)))
+        conn.execute("INSERT INTO quest_rewards(quest_id, idx, kind, item_id, quantity, rate, hidden) "
+                     "VALUES(?,?,?,?,?,?,?)", (qid, i, r.get("kind") or "Static",
+                                               r.get("item_id"), int(r.get("quantity", 1) or 1),
+                                               float(r.get("rate", 0) or 0),
+                                               1 if r.get("hidden") else 0))
     conn.commit()
     return {"ok": True, "ID": qid}
 
@@ -763,18 +767,24 @@ def house_save(conn, char, house_map_id, frame, data):
 
 
 def machine_interact(conn, char, qid, machine_name):
-    """machineInteract [questID, machineName]: complete the Interact objective (QOType 2) of
-    that quest whose RefIDs references the machine. Re-sends questData."""
+    """machineInteract [questID, machineName]: credit the Interact objective (QOType 2) whose
+    RefIDs matches the clicked machine. Multi-piece interacts credit +1 per piece up to the
+    required count — one RefID 'DSPiece' covers the whole 'DSPiece1'..'DSPiece6' set (each click
+    sends its own machine name). Re-sends questData."""
     cid = char["id"]
     if _quest_status(conn, cid, qid) == 1:
+        m = str(machine_name or "")
         for t in _quest_turnins(conn, qid):
-            if int(t.get("QOType", 0) or 0) == QOT_INTERACT:
-                refs = [r.strip() for r in str(t.get("RefIDs") or "").split(",")]
-                if not machine_name or str(machine_name) in refs:
-                    req = int(t.get("Quantity", 1) or 1)
-                    if _obj_qty(conn, cid, t["QOID"]) < req:
-                        _set_obj(conn, cid, t["QOID"], req)
-                        conn.commit()
+            if int(t.get("QOType", 0) or 0) != QOT_INTERACT:
+                continue
+            refs = [r.strip() for r in str(t.get("RefIDs") or "").split(",") if r.strip()]
+            # match exactly OR by prefix, so RefIDs 'DSPiece' credits machines 'DSPiece1'..'DSPiece6'
+            if not m or not refs or any(m == r or m.startswith(r) for r in refs):
+                req = int(t.get("Quantity", 1) or 1)
+                cur = _obj_qty(conn, cid, t["QOID"])
+                if cur < req:
+                    _set_obj(conn, cid, t["QOID"], min(req, cur + 1))   # one piece at a time
+                    conn.commit()
     return quest_data(conn, _refresh(conn, char))
 
 

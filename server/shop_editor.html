@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shop Editor</title>
+<style>
+  :root { --bg:#1d2127; --panel:#272c34; --panel2:#2f3640; --line:#3a4150; --ink:#e6e9ef;
+          --muted:#9aa4b2; --accent:#5b8cff; --accent2:#3fa46a; --danger:#c0504d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; gap:8px; align-items:center; padding:10px 14px; background:var(--panel);
+           border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0 10px 0 0; font-weight:600; }
+  select, input, button { font:inherit; color:var(--ink); background:var(--panel2);
+           border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  input[type=text], input[type=number] { width:100%; }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.go { background:var(--accent2); border-color:var(--accent2); color:#fff; }
+  button.del { background:transparent; border-color:var(--line); color:var(--muted); padding:4px 9px; }
+  button.del:hover { color:#fff; border-color:var(--danger); background:var(--danger); }
+  .status { margin-left:auto; color:var(--muted); font-size:13px; }
+  main { max-width:1000px; margin:0 auto; padding:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:16px; }
+  .card > h2 { margin:0 0 10px; font-size:14px; color:var(--accent); text-transform:uppercase; letter-spacing:.04em; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px; }
+  .field { display:flex; flex-direction:column; gap:3px; flex:1; min-width:120px; }
+  .field label { font-size:12px; color:var(--muted); }
+  .li { display:flex; gap:10px; align-items:flex-end; background:var(--panel2); border:1px solid var(--line);
+        border-radius:8px; padding:10px; margin-bottom:8px; }
+  .li .field { min-width:90px; }
+  .li .nm { flex:2; color:var(--ink); font-size:13px; padding-bottom:8px; }
+  .pick { position:relative; max-width:360px; margin-top:6px; }
+  .pickres { position:absolute; z-index:10; left:0; right:0; top:100%; background:var(--panel2);
+             border:1px solid var(--line); border-radius:6px; max-height:220px; overflow:auto; display:none; }
+  .pickres div { padding:5px 8px; cursor:pointer; }
+  .pickres div:hover { background:var(--accent); color:#fff; }
+  .empty { color:var(--muted); font-style:italic; padding:6px 0; }
+  .hint { color:var(--muted); font-size:12px; margin-top:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Shop Editor</h1>
+  <select id="picker" title="Choose a shop"></select>
+  <button class="go" id="btnSave">Save</button>
+  <span class="status" id="status"></span>
+</header>
+<main id="main"></main>
+
+<script>
+const $ = s => document.querySelector(s);
+let data = { shop:{}, items:[] }, ENUMS = {};
+function setStatus(m, ok=true){ const s=$("#status"); s.textContent=m; s.style.color=ok?"#9aa4b2":"#e08585"; }
+function field(label, el){ const f=document.createElement("div"); f.className="field"; const l=document.createElement("label"); l.textContent=label; f.append(l, el); return f; }
+function inp(val, on, type="text"){ const i=document.createElement("input"); i.type=type; i.value=(val??""); i.oninput=()=>on(type==="number"?(i.value===""?0:(parseFloat(i.value)||0)):i.value); return i; }
+function card(title){ const d=document.createElement("div"); d.className="card"; const h=document.createElement("h2"); h.textContent=title; d.appendChild(h); return d; }
+function selEnum(name, val, on){
+  const s=document.createElement("select"); const opts=ENUMS[name]||{};
+  const keys=Object.keys(opts).sort((a,b)=>(a-b)||a.localeCompare(b));
+  const cur=(val==null?"":String(val)); let has=false;
+  for(const k of keys){ const o=document.createElement("option"); o.value=k; o.textContent=opts[k]+"  ("+k+")"; s.appendChild(o); if(k===cur)has=true; }
+  if(cur!=="" && !has){ const o=document.createElement("option"); o.value=cur; o.textContent="unknown ("+cur+")"; s.appendChild(o); }
+  s.value=cur;
+  s.onchange=()=>{ const v=s.value; on(v===""?null:(v.trim()!=="" && !isNaN(v)?parseInt(v):v)); };
+  return s;
+}
+function picker(endpoint, placeholder, add){
+  const wrap=document.createElement("div"); wrap.className="pick";
+  const i=document.createElement("input"); i.type="text"; i.placeholder=placeholder; i.style.width="100%";
+  const res=document.createElement("div"); res.className="pickres"; let t=null;
+  i.oninput=()=>{ clearTimeout(t); t=setTimeout(async()=>{
+    const arr=await (await fetch(endpoint+"?q="+encodeURIComponent(i.value.trim()))).json();
+    res.innerHTML=""; res.style.display=arr.length?"block":"none";
+    for(const m of arr){ const d=document.createElement("div"); d.textContent=m.id+" — "+m.name;
+      d.onclick=()=>{ add(m.id, m.name); i.value=""; res.style.display="none"; }; res.appendChild(d); }
+  }, 180); };
+  i.onblur=()=>setTimeout(()=>res.style.display="none", 200);
+  wrap.append(i, res); return wrap;
+}
+
+async function loadList(sel){
+  const arr=await (await fetch("list")).json();
+  const p=$("#picker"); p.innerHTML="";
+  for(const it of arr){ const o=document.createElement("option"); o.value=it.ID; o.textContent=it.ID+" — "+it.name; p.appendChild(o); }
+  if(sel!=null) p.value=String(sel);
+}
+async function loadShop(id){
+  if(!id) return;
+  data = await (await fetch("load?ID="+encodeURIComponent(id))).json();
+  if(!data || !data.shop){ data={ shop:{ shopID:parseInt(id)||0 }, items:[] }; }
+  data.items = data.items || [];
+  render(); setStatus("loaded shop "+(data.shop.shopID??id));
+}
+function render(){
+  const m=$("#main"); m.innerHTML="";
+  const sh=data.shop||{};
+  const c=card("Shop #"+(sh.shopID??"?"));
+  const r=document.createElement("div"); r.className="row";
+  r.appendChild(field("Name", inp(sh.Name, v=>sh.Name=v)));
+  r.appendChild(field("Location", inp(sh.Location, v=>sh.Location=v)));
+  c.appendChild(r); m.appendChild(c);
+
+  const d=card("Listings  ("+(data.items.length)+" items  ·  stock -1 = unlimited)");
+  if(!data.items.length){ const e=document.createElement("div"); e.className="empty"; e.textContent="No items. Add one below."; d.appendChild(e); }
+  data.items.forEach((it,idx)=>{
+    const row=document.createElement("div"); row.className="li";
+    const nm=document.createElement("div"); nm.className="nm"; nm.textContent=(it.name?it.name+"  ":"")+"#"+it.item_id; row.appendChild(nm);
+    row.appendChild(field("Cost", inp(it.cost, v=>it.cost=parseInt(v)||0, "number")));
+    row.appendChild(field("Currency", selEnum("Currency", it.coins?1:0, v=>it.coins=(v?1:0))));
+    row.appendChild(field("Stock", inp(it.quantity_remain==null?-1:it.quantity_remain, v=>it.quantity_remain=parseInt(v), "number")));
+    const del=document.createElement("button"); del.className="del"; del.textContent="✕"; del.title="remove listing";
+    del.onclick=()=>{ data.items.splice(idx,1); render(); };
+    const dw=document.createElement("div"); dw.className="field"; dw.style.flex="0"; dw.style.minWidth="0";
+    const sp=document.createElement("label"); sp.innerHTML="&nbsp;"; dw.append(sp, del); row.appendChild(dw);
+    d.appendChild(row);
+  });
+  d.appendChild(picker("items", "find an item to add to the shop…", (id, name)=>{
+    if(!data.items.some(x=>x.item_id===id)) data.items.push({ item_id:id, name:name, cost:0, coins:0, quantity_remain:-1 });
+    render();
+  }));
+  m.appendChild(d);
+}
+async function save(){
+  const sh=data.shop||{};
+  if(sh.shopID==null){ setStatus("nothing to save", false); return; }
+  setStatus("saving…");
+  const fd=new URLSearchParams(); fd.set("json", JSON.stringify(data));
+  const r=await fetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).then(r=>r.json());
+  if(r.ok){ setStatus("saved shop "+r.ID); loadList(r.ID); } else setStatus(r.msg||"save failed", false);
+}
+(async function(){
+  try { ENUMS = await (await fetch("/editor/enums.json")).json(); } catch(e){ ENUMS={}; }
+  await loadList();
+  $("#picker").onchange = e=>loadShop(e.target.value);
+  $("#btnSave").onclick = save;
+  const id = new URLSearchParams(location.search).get("ID") || $("#picker").value;
+  if(id){ $("#picker").value=String(id); loadShop(id); }
+})();
+</script>
+<script src="/editor/nav.js"></script>
+</body>
+</html>

@@ -61,7 +61,7 @@
 
 <script>
 const $ = s => document.querySelector(s);
-let data = null, qid = 0;
+let data = null, qid = 0, ENUMS = {};
 const QOTYPES = [["0","Turnin (item)"],["1","Killcount"],["2","Interact"],["3","Talk"],["4","Apop"],["5","Cutscene"]];
 
 function setStatus(m, ok=true){ const s=$("#status"); s.textContent=m; s.style.color=ok?"#9aa4b2":"#e08585"; }
@@ -134,10 +134,14 @@ function render(){
   const c3=card("Rewards");
   data.rewards.forEach((rw,i)=>{
     const row=document.createElement("div"); row.className="row";
-    row.append(field("Kind", inp(rw.kind||"Static", v=>rw.kind=v)));
-    const nameSpan=document.createElement("div"); nameSpan.className="field";
+    const kindOpts=Object.entries(ENUMS.QuestRewardType||{Static:"Static"});
+    row.append(field("Kind", sel(rw.kind||"Static", kindOpts, v=>{ rw.kind=v; render(); })));
     row.append(field("Item ID", inp(rw.item_id, v=>rw.item_id=parseInt(v)||0,"number")));
     row.append(field("Qty", inp(rw.quantity??1, v=>rw.quantity=parseInt(v)||1,"number")));
+    // Rate only matters for Roll/Random kinds (per-item chance, 0..1)
+    if(rw.kind==="Roll" || rw.kind==="Random")
+      row.append(field("Rate", inp(rw.rate??0, v=>rw.rate=parseFloat(v)||0,"number")));
+    row.append(field("Hidden", sel(rw.hidden?"1":"0", [["0","no"],["1","yes"]], v=>rw.hidden=(v==="1"))));
     const pk=picker("items","find item…",(id)=>{ rw.item_id=id; render(); });
     row.append(field("Pick item", pk));
     const del=document.createElement("button"); del.className="del"; del.textContent="✕";
@@ -148,7 +152,7 @@ function render(){
   });
   const ra=document.createElement("div"); ra.className="addbar";
   const rb=document.createElement("button"); rb.textContent="+ Add reward";
-  rb.onclick=()=>{ data.rewards.push({kind:"Static",item_id:0,quantity:1}); render(); };
+  rb.onclick=()=>{ data.rewards.push({kind:"Static",item_id:0,quantity:1,rate:0,hidden:false}); render(); };
   ra.appendChild(rb); c3.appendChild(ra);
   m.appendChild(c3);
 }
@@ -214,6 +218,7 @@ async function save(){
 $("#picker").onchange=e=>loadQuest(e.target.value);
 $("#btnSave").onclick=save;
 (async()=>{
+  try { ENUMS = await (await fetch("/editor/enums.json")).json(); } catch(e){ ENUMS={}; }
   const id=new URLSearchParams(location.search).get("ID");
   await loadList(id);
   await loadQuest(id || $("#picker").value);

@@ -232,13 +232,24 @@ function elemEl(p,e,ei){
     // what the button DOES (ApopButtonActions). The common three get a tailored field; any other
     // captured action (Goto, OpenApop, OpenCutscene, …) is preserved and stays selectable.
     if(!e.action) e.action="ApopList";
-    const ACTS=[["ApopList","Open panel"],["Link","Open web link"],["CloseApop","Close apop"]];
+    const ACTS=[["ApopList","Open panel"],["Join","Join a map"],["chat","Run a command"],
+                ["Link","Open web link"],["CloseApop","Close apop"]];
     if(!ACTS.some(([v])=>v===e.action)) ACTS.push([e.action, e.action+" (advanced — preserved)"]);
     d.appendChild(field("When clicked", sel(e.action, ACTS, v=>{ e.action=v; render(); })));
     if(e.action==="ApopList"){
       const panelOpts=[["", "(none)"]].concat((apop.panels||[]).map(pp=>[String(pp.PID), `${pp.name} (#${pp.PID})`]));
       const cur = (e.targets&&e.targets.length)? String(e.targets[0]) : "";
       d.appendChild(field("Opens panel", sel(cur, panelOpts, v=>{ e.targets = v? [parseInt(v)] : []; })));
+    } else if(e.action==="Join"){
+      // Join button -> RequestJoin; strData is "map" or "map,frame" (frame defaults to Spawn).
+      const part=i=>(e.strData||"").split(",")[i]||"";
+      const setJoin=(m,f)=>{ e.strData=(m||"")+(f?(","+f):""); };
+      const r2=rowEl();
+      r2.appendChild(field("Map name (e.g. battleon)", inp(part(0), v=>setJoin(v, part(1)))));
+      r2.appendChild(field("Frame (optional, default Spawn)", inp(part(1), v=>setJoin(part(0), v))));
+      d.appendChild(r2);
+    } else if(e.action==="chat"){
+      d.appendChild(field("Command to run (e.g. /genderswap)", inp(e.strData, v=>{ e.strData=v; })));
     } else if(e.action==="Link"){
       d.appendChild(field("Web link (URL — must be http/https)", inp(e.link, v=>{ e.link=v; })));
     }
