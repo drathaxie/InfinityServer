@@ -23,7 +23,20 @@ db.init()
 seed.run()
 conn = db.connect()
 
-sample = json.loads(SAMPLE.read_text(encoding="utf-8"))
+if SAMPLE.exists():
+    sample = json.loads(SAMPLE.read_text(encoding="utf-8"))
+else:
+    shops = json.loads((pathlib.Path(__file__).resolve().parent.parent / "data" / "shops.json")
+                       .read_text(encoding="utf-8"))
+    shop_id_s, stored = next(iter(shops.items()))
+    sample = json.loads(json.dumps(stored["meta"]))
+    shop = sample.get("shop") if isinstance(sample.get("shop"), dict) else sample
+    shop["items"] = []
+    for li in stored.get("items") or []:
+        it = db.item(conn, li["item_id"])
+        it["ShopItemID"] = li["shop_item_id"]
+        it["QuantityRemain"] = li["quantity_remain"]
+        shop["items"].append(it)
 shop_id = int(sample["shop"]["shopID"])
 
 # 1) Storage is normalized: items in their own table; shop_items carry no item JSON.
@@ -32,7 +45,8 @@ assert "raw" not in si_cols, "shop_items must not embed item JSON anymore"
 n_items = conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
 n_links = conn.execute("SELECT COUNT(*) FROM shop_items WHERE shop_id=?", (shop_id,)).fetchone()[0]
 assert n_items >= len(sample["shop"]["items"]), (n_items, len(sample["shop"]["items"]))
-stored_shop = json.loads(conn.execute("SELECT raw FROM shops WHERE shop_id=?", (shop_id,)).fetchone()["raw"])
+assert "raw" not in db._columns(conn, "shops"), "shops must be canonical columns, not a raw blob"
+stored_shop = db.shop_blob(conn, shop_id)
 assert stored_shop["shop"]["items"] == [], "stored shop meta must not embed items"
 print(f"normalized: items table={n_items}, shop_items links={n_links}, shop meta items=[]")
 

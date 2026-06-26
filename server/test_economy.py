@@ -10,7 +10,7 @@ db.init()
 seed.run()
 conn = db.connect()
 
-# fresh test account (clear child rows first — FK constraints)
+# fresh test account (clear child rows first - FK constraints)
 conn.execute("DELETE FROM char_items WHERE char_id IN "
              "(SELECT id FROM characters WHERE name='__test__')")
 conn.execute("DELETE FROM characters WHERE name='__test__'")
@@ -32,7 +32,7 @@ assert _fresh_inv[game.STARTER_WEAPON_ITEM].get("ItemPattern", {}).get("Base") =
 print(f"fresh-start OK: lvl1, 0 gold, Warrior + pre-gemmed Default Sword")
 
 # the initPlayer must NOT leak the captured maxed account's gem inventory / pending loot /
-# house / friends — those reappearing on relog was the reported bug.
+# house / friends - those reappearing on relog was the reported bug.
 _init = game.build_init_player(conn, char)
 for _k in ("loot", "patterns", "houseItems", "friends"):
     assert _init.get(_k) == [], f"initPlayer.{_k} must be empty for a fresh char, got {len(_init.get(_k) or [])}"
@@ -48,7 +48,7 @@ start_gold = char["gold"]
 start_inv = len(game.inventory(conn, char["id"]))
 print(f"login: char#{char['id']} gold={start_gold} inventory={start_inv}")
 
-# pick a real, NON-class shop item to buy (class items are non-sellable now — P2-1)
+# pick a real, NON-class shop item to buy (class items are non-sellable now - P2-1)
 row = None
 for r in conn.execute("SELECT shop_id, shop_item_id, cost, item_id FROM shop_items "
                       "ORDER BY shop_item_id"):
@@ -91,7 +91,7 @@ sresp = game.sell(conn, char, [str(cls_id), "1"])
 assert not sresp["Success"] and "Class" in sresp.get("Message", ""), "class items can't be sold"
 assert game.remove_item(conn, char, [str(cls_id), "1"]) is None, "class items can't be dropped"
 # the catalog/shop carries the purchase quantity (1), not a leaked maxed CP
-craw = _json.loads(conn.execute("SELECT raw FROM items WHERE item_id=?", (cls_id,)).fetchone()["raw"])
+craw = db.item(conn, cls_id)
 assert craw.get("Quantity") == 1, f"catalog class-armor Quantity must be 1, got {craw.get('Quantity')}"
 # every OWNED class item has the consistent maxed CP (reconciled from 1/302499/302500)
 owned_q = [r["quantity"] for r in conn.execute(
@@ -104,3 +104,4 @@ assert gq == seed.CLASS_CP_MAX, f"granted class item must have maxed CP, got {gq
 conn.execute("DELETE FROM char_items WHERE char_item_id=?", (cid,)); conn.commit()
 print(f"P2-1 class CP OK: non-sellable/non-droppable, catalog Quantity=1, owned CP {seed.CLASS_CP_MAX} (consistent)")
 print("\nALL ECONOMY TESTS PASSED")
+

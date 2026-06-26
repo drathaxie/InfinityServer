@@ -21,19 +21,11 @@ NAME = "Dev Check All"
 
 def fill(conn, shop_id=SHOP_ID, name=NAME):
     # Ensure the shop meta exists and shows a name (the captured 2722 came back empty).
-    row = conn.execute("SELECT raw FROM shops WHERE shop_id=?", (shop_id,)).fetchone()
-    if row is None:
-        meta = {"Cmd": "loadShop", "shop": {"shopID": shop_id, "Name": name, "items": []}}
-        conn.execute("INSERT INTO shops(shop_id, raw) VALUES(?,?)",
-                     (shop_id, json.dumps(meta, separators=(",", ":"))))
-    else:
-        blob = json.loads(row["raw"])
-        shop = blob.get("shop") if isinstance(blob.get("shop"), dict) else blob
-        if not shop.get("Name"):
-            shop["Name"] = name
-            shop["items"] = []          # meta never embeds items (assembled at load time)
-            conn.execute("UPDATE shops SET raw=? WHERE shop_id=?",
-                         (json.dumps(blob, separators=(",", ":")), shop_id))
+    meta = db.shop_meta(conn, shop_id) or {}
+    if not meta.get("Name"):
+        meta = {k: v for k, v in meta.items() if k != "items"}   # meta never embeds items
+        meta["shopID"], meta["Name"] = shop_id, name
+        db.store_shop(conn, meta, shop_id=shop_id, replace=True)
 
     # Rebuild the listing: one free, unlimited shop_item per catalog item. shop_item_id
     # = item_id (unique within the shop; buy() keys on (shop_id, shop_item_id)).

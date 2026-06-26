@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quest Editor</title>
+<style>
+  :root { --bg:#1d2127; --panel:#272c34; --panel2:#2f3640; --line:#3a4150; --ink:#e6e9ef;
+          --muted:#9aa4b2; --accent:#5b8cff; --accent2:#3fa46a; --danger:#c0504d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; gap:8px; align-items:center; padding:10px 14px; background:var(--panel);
+           border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0 10px 0 0; font-weight:600; }
+  select, input, textarea, button { font:inherit; color:var(--ink); background:var(--panel2);
+           border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  textarea { width:100%; min-height:54px; resize:vertical; }
+  input[type=text], input[type=number] { width:100%; }
+  button { cursor:pointer; background:var(--panel2); }
+  button:hover { border-color:var(--accent); }
+  button.go { background:var(--accent2); border-color:var(--accent2); color:#fff; }
+  button.del { background:transparent; border-color:var(--line); color:var(--muted); padding:4px 8px; }
+  button.del:hover { color:#fff; border-color:var(--danger); background:var(--danger); }
+  .status { margin-left:auto; color:var(--muted); font-size:13px; }
+  main { max-width:1000px; margin:0 auto; padding:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:16px; }
+  .card > h2 { margin:0 0 10px; font-size:14px; color:var(--accent); text-transform:uppercase; letter-spacing:.04em; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px; }
+  .field { display:flex; flex-direction:column; gap:3px; flex:1; min-width:120px; }
+  .field label { font-size:12px; color:var(--muted); }
+  .field.grow { flex:3; }
+  .obj { border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; background:var(--panel2); }
+  .obj .ohead { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+  .obj .qoid { font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; background:#34405a; color:#9cc0ff; }
+  .sub { border-left:2px solid var(--line); padding:6px 0 2px 12px; margin:8px 0; }
+  .sub h3 { margin:0 0 6px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+  .chip { display:flex; align-items:center; gap:6px; background:var(--panel); border:1px solid var(--line);
+          border-radius:14px; padding:2px 6px 2px 10px; font-size:13px; }
+  .chip b { color:#8ee0ab; }
+  .chip span.x { cursor:pointer; color:var(--muted); padding:0 3px; }
+  .chip span.x:hover { color:var(--danger); }
+  .pick { position:relative; max-width:320px; }
+  .pickres { position:absolute; z-index:10; left:0; right:0; top:100%; background:var(--panel2);
+             border:1px solid var(--line); border-radius:6px; max-height:220px; overflow:auto; display:none; }
+  .pickres div { padding:5px 8px; cursor:pointer; }
+  .pickres div:hover { background:var(--accent); color:#fff; }
+  .empty { color:var(--muted); font-style:italic; padding:6px 0; }
+  .addbar { margin-top:8px; }
+  .hint { color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Quest Editor</h1>
+  <select id="picker" title="Choose a quest"></select>
+  <button class="go" id="btnSave">Save</button>
+  <span class="status" id="status"></span>
+</header>
+<main id="main"></main>
+
+<script>
+const $ = s => document.querySelector(s);
+let data = null, qid = 0;
+const QOTYPES = [["0","Turnin (item)"],["1","Killcount"],["2","Interact"],["3","Talk"],["4","Apop"],["5","Cutscene"]];
+
+function setStatus(m, ok=true){ const s=$("#status"); s.textContent=m; s.style.color=ok?"#9aa4b2":"#e08585"; }
+
+async function loadList(sel){
+  const arr = await (await fetch("list")).json();
+  const p = $("#picker"); p.innerHTML="";
+  for(const q of arr){ const o=document.createElement("option"); o.value=q.ID; o.textContent=`${q.ID} — ${q.name}`; p.appendChild(o); }
+  if(sel) p.value=sel;
+}
+async function loadQuest(id){
+  qid = parseInt(id)||0;
+  data = await (await fetch("load?ID="+encodeURIComponent(qid)).then(r=>r.json()));
+  if(!data || !data.quest){ data=null; $("#main").innerHTML="<p class=empty>Quest not found.</p>"; return; }
+  data.drops=data.drops||{}; data.refs=data.refs||{}; data.rewards=data.rewards||[]; data.turnins=data.turnins||[];
+  render();
+}
+
+// generic builders
+function field(label, el){ const f=document.createElement("div"); f.className="field"; const l=document.createElement("label"); l.textContent=label; f.append(l, el); return f; }
+function inp(val,on,type="text"){ const i=document.createElement("input"); i.type=type; i.value=(val??""); i.oninput=()=>on(type==="number"?(parseFloat(i.value)||0):i.value); return i; }
+function area(val,on){ const t=document.createElement("textarea"); t.value=(val??""); t.oninput=()=>on(t.value); return t; }
+function sel(val,opts,on){ const s=document.createElement("select"); for(const[v,t]of opts){const o=document.createElement("option");o.value=v;o.textContent=t;s.appendChild(o);} s.value=String(val); s.onchange=()=>on(s.value); return s; }
+function card(title){ const d=document.createElement("div"); d.className="card"; const h=document.createElement("h2"); h.textContent=title; d.appendChild(h); return d; }
+
+// search picker (monsters or items) -> calls add(id,name)
+function picker(endpoint, placeholder, add){
+  const wrap=document.createElement("div"); wrap.className="pick";
+  const i=document.createElement("input"); i.type="text"; i.placeholder=placeholder;
+  const res=document.createElement("div"); res.className="pickres";
+  let t=null;
+  i.oninput=()=>{ clearTimeout(t); t=setTimeout(async()=>{
+    const arr=await (await fetch(endpoint+"?q="+encodeURIComponent(i.value.trim()))).json();
+    res.innerHTML=""; if(!arr.length){res.style.display="none";return;}
+    for(const m of arr){ const d=document.createElement("div"); d.textContent=`${m.id} — ${m.name}`;
+      d.onclick=()=>{ add(m.id,m.name); i.value=""; res.style.display="none"; }; res.appendChild(d); }
+    res.style.display="block";
+  },180); };
+  i.onblur=()=>setTimeout(()=>res.style.display="none",200);
+  wrap.append(i,res); return wrap;
+}
+
+function render(){
+  const m=$("#main"); m.innerHTML="";
+  const q=data.quest;
+
+  // 1. quest fields
+  const c1=card("Quest");
+  const r1=document.createElement("div"); r1.className="row";
+  r1.append(field("Quest ID", inp(q.QuestID, v=>q.QuestID=parseInt(v)||q.QuestID,"number")));
+  r1.append(field("Name", inp(q.Name, v=>q.Name=v)));
+  r1.append(field("Gold", inp(q.Gold, v=>q.Gold=v,"number")));
+  r1.append(field("Exp", inp(q.Exp, v=>q.Exp=v,"number")));
+  c1.appendChild(r1);
+  c1.appendChild(field("Description", area(q.Desc, v=>q.Desc=v)));
+  c1.appendChild(field("End text", area(q.EndText, v=>q.EndText=v)));
+  m.appendChild(c1);
+
+  // 2. objectives (turnins) + their drops + refs
+  const c2=card("Objectives");
+  if(!data.turnins.length) c2.appendChild(Object.assign(document.createElement("div"),{className:"empty",textContent:"No objectives."}));
+  data.turnins.forEach((t,idx)=>c2.appendChild(objEl(t,idx)));
+  const add=document.createElement("div"); add.className="addbar";
+  const b=document.createElement("button"); b.textContent="+ Add objective";
+  b.onclick=()=>{ const nq=(Math.max(0,...data.turnins.map(x=>x.QOID||0))+1); data.turnins.push({QOID:nq,QOType:1,Name:"New objective",ItemID:-1,Quantity:1,RefIDs:"","$type":"AQ2D_Server.Game_Engine.Quests.Quest+Turnin, AQ2D_Server",QuestID:qid}); render(); };
+  add.appendChild(b); c2.appendChild(add);
+  m.appendChild(c2);
+
+  // 3. rewards
+  const c3=card("Rewards");
+  data.rewards.forEach((rw,i)=>{
+    const row=document.createElement("div"); row.className="row";
+    row.append(field("Kind", inp(rw.kind||"Static", v=>rw.kind=v)));
+    const nameSpan=document.createElement("div"); nameSpan.className="field";
+    row.append(field("Item ID", inp(rw.item_id, v=>rw.item_id=parseInt(v)||0,"number")));
+    row.append(field("Qty", inp(rw.quantity??1, v=>rw.quantity=parseInt(v)||1,"number")));
+    const pk=picker("items","find item…",(id)=>{ rw.item_id=id; render(); });
+    row.append(field("Pick item", pk));
+    const del=document.createElement("button"); del.className="del"; del.textContent="✕";
+    del.onclick=()=>{ data.rewards.splice(i,1); render(); };
+    const dwrap=document.createElement("div"); dwrap.className="field"; dwrap.style.flex="0"; dwrap.append(document.createElement("label"),del);
+    row.append(dwrap);
+    c3.appendChild(row);
+  });
+  const ra=document.createElement("div"); ra.className="addbar";
+  const rb=document.createElement("button"); rb.textContent="+ Add reward";
+  rb.onclick=()=>{ data.rewards.push({kind:"Static",item_id:0,quantity:1}); render(); };
+  ra.appendChild(rb); c3.appendChild(ra);
+  m.appendChild(c3);
+}
+
+function objEl(t,idx){
+  const d=document.createElement("div"); d.className="obj";
+  const head=document.createElement("div"); head.className="ohead";
+  const tag=document.createElement("span"); tag.className="qoid"; tag.textContent="QOID "+(t.QOID??"?");
+  head.appendChild(tag);
+  const del=document.createElement("button"); del.className="del"; del.textContent="Delete objective"; del.style.marginLeft="auto";
+  del.onclick=()=>{ data.turnins.splice(idx,1); render(); };
+  head.appendChild(del); d.appendChild(head);
+
+  const r=document.createElement("div"); r.className="row";
+  r.append(field("Type", sel(t.QOType??1, QOTYPES, v=>{t.QOType=parseInt(v);})));
+  r.append(field("Name", inp(t.Name, v=>t.Name=v)));
+  r.append(field("Quantity (required)", inp(t.Quantity??1, v=>t.Quantity=parseInt(v)||1,"number")));
+  r.append(field("ItemID (-1 = none)", inp(t.ItemID??-1, v=>t.ItemID=parseInt(v)||-1,"number")));
+  d.appendChild(r);
+  d.append(field("RefIDs (raw, comma list)", inp(t.RefIDs??"", v=>t.RefIDs=v)));
+
+  // drop roll (per objective)
+  const qo=String(t.QOID);
+  const ds=document.createElement("div"); ds.className="sub";
+  const dh=document.createElement("h3"); dh.textContent="Drop roll (blank = deterministic +1 per credited kill)"; ds.appendChild(dh);
+  const drow=document.createElement("div"); drow.className="row";
+  const dd=data.drops[qo];
+  function ensureDrop(){ if(!data.drops[qo]) data.drops[qo]={chance:1,min:1,max:1}; return data.drops[qo]; }
+  drow.append(field("Chance 0-1", inp(dd?dd.chance:"", v=>{ensureDrop().chance=parseFloat(v)||0;},"number")));
+  drow.append(field("Min", inp(dd?dd.min:"", v=>{ensureDrop().min=parseInt(v)||1;},"number")));
+  drow.append(field("Max", inp(dd?dd.max:"", v=>{ensureDrop().max=parseInt(v)||1;},"number")));
+  if(dd){ const clr=document.createElement("button"); clr.className="del"; clr.textContent="clear"; clr.onclick=()=>{delete data.drops[qo]; render();};
+          const w=document.createElement("div"); w.className="field"; w.style.flex="0"; w.append(document.createElement("label"),clr); drow.append(w); }
+  ds.appendChild(drow); d.appendChild(ds);
+
+  // kill-credit monsters (refs)
+  const rs=document.createElement("div"); rs.className="sub";
+  const rh=document.createElement("h3"); rh.textContent="Credited by monsters (kill-credit mapping)"; rs.appendChild(rh);
+  const chips=document.createElement("div"); chips.className="chips";
+  (data.refs[qo]||[]).forEach(mid=>{
+    const c=document.createElement("span"); c.className="chip"; c.innerHTML=`<b>${mid}</b>`;
+    const x=document.createElement("span"); x.className="x"; x.textContent="✕";
+    x.onclick=()=>{ data.refs[qo]=data.refs[qo].filter(m=>m!==mid); render(); };
+    c.appendChild(x); chips.appendChild(c);
+  });
+  if(!(data.refs[qo]||[]).length) chips.appendChild(Object.assign(document.createElement("span"),{className:"hint",textContent:"none — falls back to RefIDs/name match"}));
+  rs.appendChild(chips);
+  rs.appendChild(picker("monsters","add monster by id/name…",(id)=>{ (data.refs[qo]=data.refs[qo]||[]); if(!data.refs[qo].includes(id)) data.refs[qo].push(id); render(); }));
+  d.appendChild(rs);
+  return d;
+}
+
+async function save(){
+  if(!data){ setStatus("nothing loaded",false); return; }
+  data.quest.QuestID=qid;
+  const fd=new URLSearchParams(); fd.set("json", JSON.stringify({...data, id:qid}));
+  setStatus("saving…");
+  const r=await fetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()});
+  const j=await r.json();
+  if(j.ok){ setStatus("saved quest "+j.ID); } else setStatus("error: "+(j.msg||"save failed"),false);
+}
+
+$("#picker").onchange=e=>loadQuest(e.target.value);
+$("#btnSave").onclick=save;
+(async()=>{
+  const id=new URLSearchParams(location.search).get("ID");
+  await loadList(id);
+  await loadQuest(id || $("#picker").value);
+})();
+</script>
+<script src="/editor/nav.js"></script>
+</body>
+</html>

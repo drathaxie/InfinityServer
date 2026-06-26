@@ -27,9 +27,13 @@ unimplemented endpoints return an empty stub and are logged to webapi_unhandled)
 """
 import http.server
 import socketserver
+import base64
+import hashlib
+import hmac
 import json
 import os
 import pathlib
+import time
 import urllib.parse
 import urllib.request
 
@@ -46,6 +50,44 @@ PUBLIC_HOST = os.environ.get("INFINITY_PUBLIC_HOST", "127.0.0.1")
 GAME_PORT = int(os.environ.get("INFINITY_GAME_PORT", "5588"))
 CAPTURE_PROXY = False                         # one-time shape learning; then keep False
 UPSTREAM = "https://infinity.aq.com/game/api/"
+
+# Staff gate for the editor tools (the pages + all apop/* and quest/* endpoints). Authoring tools
+# that write game content, reachable both via Caddy and directly on :8182 — so the gate lives in
+# the app. Staff log in with their REAL game account; access is gated by access_level (a normal
+# player authenticates but is rejected). The session is a signed cookie (HMAC over EDIT_SECRET);
+# EDIT_SECRET is just the server-side signing key, NOT a shared password. FAIL CLOSED: no secret
+# configured -> the editors refuse to serve. Reuses INFINITY_EDIT_PASS as the signing key so no new
+# env var is required (its role changed from a password to a signing secret).
+EDIT_SECRET = (os.environ.get("INFINITY_EDIT_SECRET")
+               or os.environ.get("INFINITY_EDIT_PASS") or "").encode("utf-8")
+EDIT_MIN_ACCESS = int(os.environ.get("INFINITY_EDIT_MIN_ACCESS", "40"))   # staff tier (dev=100)
+EDIT_SESSION_SECS = 12 * 3600
+EDIT_COOKIE = "infinity_edit"
+
+
+def _sign_session(username, access):
+    """A signed, expiring session token: base64(payload).hmac. Stateless — no session table."""
+    payload = {"u": username, "a": int(access), "exp": int(time.time()) + EDIT_SESSION_SECS}
+    body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
+    sig = hmac.new(EDIT_SECRET, body.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{body}.{sig}"
+
+
+def _verify_session(token):
+    """The payload dict if the token is validly signed, unexpired, and meets EDIT_MIN_ACCESS; else None."""
+    if not token or not EDIT_SECRET or "." not in token:
+        return None
+    body, sig = token.rsplit(".", 1)
+    expect = hmac.new(EDIT_SECRET, body.encode(), hashlib.sha256).hexdigest()[:32]
+    if not hmac.compare_digest(sig, expect):
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+    except Exception:
+        return None
+    if int(payload.get("exp", 0)) < time.time() or int(payload.get("a", 0)) < EDIT_MIN_ACCESS:
+        return None
+    return payload
 
 LOG_DIR = pathlib.Path(__file__).resolve().parent
 CAPTURE_LOG = LOG_DIR / "webapi_capture.jsonl"
@@ -347,6 +389,115 @@ def create_new_apop(conn, form):
     return {"ID": str(apop_id)}
 
 
+# --- apop editor: list/load/save the apop documents the in-game WebEditButton points at -------
+# The in-game pencil opens WebApiURL + "apop/Edit.aspx?ID=n" (a browser). We serve our own editor
+# page there + these JSON endpoints so apops can be authored without touching raw JSON. apops.raw
+# stays a document (nested panels/elements), so this is an editor, not a column promotion.
+
+def apop_list(conn, qs):
+    """apop/list -> [{ID,name}] for the editor's picker (all apops, id-sorted)."""
+    return [{"ID": r["apop_id"], "name": r["name"] or f"Apop {r['apop_id']}"}
+            for r in conn.execute("SELECT apop_id, name FROM apops ORDER BY apop_id")]
+
+
+def apop_load(conn, qs):
+    """apop/load?ID=n -> the full apop document, or {} if absent (the editor starts blank)."""
+    try:
+        aid = int(urllib.parse.parse_qs(qs).get("ID", ["0"])[0])
+    except (ValueError, IndexError):
+        return {}
+    row = conn.execute("SELECT raw FROM apops WHERE apop_id=?", (aid,)).fetchone()
+    if not row:
+        return {}
+    try:
+        return json.loads(row["raw"])
+    except Exception:
+        return {}
+
+
+def apop_npcs(conn, qs):
+    """apop/npcs?q=text -> [{id,name}] NPC matches for the actor picker (cap 50)."""
+    q = (urllib.parse.parse_qs(qs).get("q", [""])[0] or "").strip().lower()
+    if q:
+        rows = conn.execute(
+            "SELECT mon_id, name FROM monsters WHERE LOWER(name) LIKE ? ORDER BY mon_id LIMIT 50",
+            (f"%{q}%",)).fetchall()
+    else:
+        rows = conn.execute("SELECT mon_id, name FROM monsters ORDER BY mon_id LIMIT 50").fetchall()
+    return [{"id": r["mon_id"], "name": r["name"] or ""} for r in rows]
+
+
+def apop_save(conn, form):
+    """apop/save {id, json} -> {"ok":True,"ID":n}. Empty/0 id mints the next apop id (>=6000);
+    else updates that apop. Stores the full document verbatim + a denormalized name column."""
+    idv = (form.get("id", [""])[0] or "").strip()
+    raw = form.get("json", ["{}"])[0]
+    try:
+        doc = json.loads(raw)
+    except Exception:
+        return {"ok": False, "msg": "Invalid apop document."}
+    if not isinstance(doc, dict):
+        return {"ok": False, "msg": "Apop document must be an object."}
+    if idv.isdigit() and int(idv) > 0:
+        apop_id = int(idv)
+    else:
+        row = conn.execute("SELECT COALESCE(MAX(apop_id), 5999) + 1 AS nxt FROM apops").fetchone()
+        apop_id = int(row["nxt"])
+    doc["ID"] = apop_id
+    name = (doc.get("name") or f"Apop {apop_id}").strip() or f"Apop {apop_id}"
+    conn.execute(
+        "INSERT INTO apops(apop_id, name, raw) VALUES(?,?,?) "
+        "ON CONFLICT(apop_id) DO UPDATE SET name=excluded.name, raw=excluded.raw",
+        (apop_id, name, json.dumps(doc, separators=(",", ":"))))
+    conn.commit()
+    return {"ok": True, "ID": apop_id}
+
+
+# ---- quest editor (DB manager): a quest + its four normalized tables on one page ---------------
+
+def quest_list(conn, qs):
+    """quest/list -> [{ID,name}] for the editor's quest picker (id-sorted)."""
+    return [{"ID": r["quest_id"], "name": r["name"] or f"Quest {r['quest_id']}"}
+            for r in conn.execute("SELECT quest_id, name FROM quests ORDER BY quest_id")]
+
+
+def quest_load(conn, qs):
+    """quest/load?ID=n -> {quest, turnins, drops, refs, rewards}, or {} if the quest is absent."""
+    try:
+        qid = int(urllib.parse.parse_qs(qs).get("ID", ["0"])[0])
+    except (ValueError, IndexError):
+        return {}
+    return game.quest_editor_data(conn, qid) or {}
+
+
+def quest_items(conn, qs):
+    """quest/items?q=text -> [{id,name}] catalog item matches for reward/turnin pickers (cap 50)."""
+    q = (urllib.parse.parse_qs(qs).get("q", [""])[0] or "").strip().lower()
+    if q.lstrip("-").isdigit():
+        rows = conn.execute("SELECT item_id, name FROM items WHERE item_id=? LIMIT 50",
+                            (int(q),)).fetchall()
+    elif q:
+        rows = conn.execute("SELECT item_id, name FROM items WHERE LOWER(name) LIKE ? "
+                            "ORDER BY item_id LIMIT 50", (f"%{q}%",)).fetchall()
+    else:
+        rows = conn.execute("SELECT item_id, name FROM items ORDER BY item_id LIMIT 50").fetchall()
+    return [{"id": r["item_id"], "name": r["name"] or ""} for r in rows]
+
+
+def quest_save(conn, form):
+    """quest/save {json} -> {"ok":True,"ID":n}; writes the quest + all four normalized tables."""
+    try:
+        payload = json.loads(form.get("json", ["{}"])[0])
+    except Exception:
+        return {"ok": False, "msg": "Invalid quest payload."}
+    if not isinstance(payload, dict):
+        return {"ok": False, "msg": "Quest payload must be an object."}
+    try:
+        return game.quest_editor_save(conn, payload)
+    except Exception as ex:
+        return {"ok": False, "msg": f"save failed: {ex}"}
+
+
 def get_base_classes(conn, qs):
     """Data/GetBaseClasses -> {items, hairs, character_bundle}. Feeds char-create AND the /charedit
     hair list (CharacterCustomizationController.BuildHairLists fetches this and reads .hairs). Served
@@ -372,7 +523,109 @@ ROUTES = {
     "tweak/createnewapop":   ("POST", create_new_apop),
     "tweak/dialoggersave":   ("POST", dialogger_save),
     "tweak/dialoggerload":   ("POST", dialogger_load),
+    "apop/list":             ("GET",  apop_list),
+    "apop/load":             ("GET",  apop_load),
+    "apop/npcs":             ("GET",  apop_npcs),
+    "apop/save":             ("POST", apop_save),
+    "quest/list":            ("GET",  quest_list),
+    "quest/load":            ("GET",  quest_load),
+    "quest/monsters":        ("GET",  apop_npcs),     # same monster picker (id/name)
+    "quest/items":           ("GET",  quest_items),
+    "quest/save":            ("POST", quest_save),
 }
+
+# Editor pages (staff-gated) -> the HTML file served for each. The in-game pencil opens apop;
+# the quest editor is opened from a browser at WebApiURL + "quest/Edit.aspx?ID=n".
+EDITOR_PAGES = {"apop/edit.aspx": "apop_editor.html", "apop/edit": "apop_editor.html",
+                "quest/edit.aspx": "quest_editor.html", "quest/edit": "quest_editor.html"}
+EDITOR_PREFIXES = ("apop/", "quest/")
+
+# The DB-manager menu (the hamburger nav shared by every editor page via /editor/nav.js). Add a
+# new editor here and it appears in the menu everywhere. soon=True renders it greyed/disabled.
+EDITOR_MENU = [
+    {"label": "Quests", "url": "/quest/Edit.aspx"},
+    {"label": "Apops / Dialog", "url": "/apop/Edit.aspx"},
+    {"label": "Shops", "url": "", "soon": True},
+    {"label": "Items", "url": "", "soon": True},
+    {"label": "Monsters & Drops", "url": "", "soon": True},
+]
+
+def _login_html(nxt, error):
+    """The staff login page — posts game credentials to /editor/login. nxt is pre-sanitised."""
+    err = (f'<p class="err">{error}</p>' if error else "")
+    return f"""<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width, initial-scale=1"><title>Staff Login</title>
+<style>
+  :root {{ --bg:#1d2127; --panel:#272c34; --panel2:#2f3640; --line:#3a4150; --ink:#e6e9ef;
+          --muted:#9aa4b2; --accent:#5b8cff; --danger:#e08585; }}
+  body {{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }}
+  form {{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:26px;
+         width:320px; }}
+  h1 {{ font-size:16px; margin:0 0 4px; }} p.sub {{ color:var(--muted); margin:0 0 18px; font-size:13px; }}
+  label {{ display:block; font-size:12px; color:var(--muted); margin:12px 0 4px; }}
+  input {{ width:100%; box-sizing:border-box; font:inherit; color:var(--ink); background:var(--panel2);
+          border:1px solid var(--line); border-radius:6px; padding:9px 10px; }}
+  button {{ width:100%; margin-top:18px; padding:10px; font:inherit; font-weight:600; cursor:pointer;
+           color:#fff; background:var(--accent); border:1px solid var(--accent); border-radius:6px; }}
+  .err {{ color:var(--danger); font-size:13px; margin:10px 0 0; }}
+</style></head><body>
+<form method=post action="/editor/login">
+  <h1>Staff Login</h1>
+  <p class=sub>Sign in with your in-game account.</p>
+  <label>Username</label><input name=user autofocus autocomplete=username>
+  <label>Password</label><input name=pass type=password autocomplete=current-password>
+  <input type=hidden name=next value="{nxt}">
+  <button type=submit>Sign in</button>
+  {err}
+</form></body></html>"""
+
+
+# The editor pages are served from sibling .html files so they're editable without code changes.
+def _editor_html(filename):
+    try:
+        return (LOG_DIR / filename).read_text(encoding="utf-8")
+    except OSError:
+        return ("<!doctype html><meta charset=utf-8><title>Editor</title>"
+                f"<p>{filename} is missing on the server.</p>")
+
+
+def _editor_nav_js():
+    """The shared DB-manager nav, injected by every editor page via <script src=/editor/nav.js>.
+    Builds a hamburger menu (from EDITOR_MENU) into the page's <header> next to its title, plus a
+    Log out link. Data-driven: a new editor in EDITOR_MENU shows up here on every page."""
+    return ("(function(){\n"
+            "var ITEMS=" + json.dumps(EDITOR_MENU) + ";\n"
+            "var cur=location.pathname.toLowerCase();\n"
+            "var wrap=document.createElement('span');\n"
+            "wrap.style.cssText='position:relative;display:inline-block;vertical-align:middle;margin-right:12px;font:13px/1.4 system-ui,Segoe UI,Roboto,sans-serif;';\n"
+            "var btn=document.createElement('button');\n"
+            "btn.type='button';btn.textContent='\\u2630';btn.title='Editors';\n"
+            "btn.style.cssText='font-size:18px;line-height:1;padding:6px 10px;cursor:pointer;color:#e6e9ef;background:#272c34;border:1px solid #3a4150;border-radius:8px;';\n"
+            "var menu=document.createElement('div');\n"
+            "menu.style.cssText='display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:9999;min-width:215px;background:#272c34;border:1px solid #3a4150;border-radius:10px;padding:6px;box-shadow:0 10px 30px rgba(0,0,0,.5);';\n"
+            "var t=document.createElement('div');t.textContent='Database Manager';\n"
+            "t.style.cssText='font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#9aa4b2;padding:6px 9px 8px;';menu.appendChild(t);\n"
+            "ITEMS.forEach(function(it){\n"
+            " var active=it.url&&cur.indexOf(it.url.toLowerCase().split('?')[0])===0;\n"
+            " var el=document.createElement(it.url?'a':'div');\n"
+            " el.textContent=it.label+(it.soon?'  \\u2014 soon':'');\n"
+            " el.style.cssText='display:block;padding:8px 10px;border-radius:7px;text-decoration:none;color:'+(it.soon?'#6b7280':'#e6e9ef')+';'+(it.url?'cursor:pointer;':'cursor:default;')+(active?'background:#34405a;':'');\n"
+            " if(it.url){el.href=it.url;el.onmouseenter=function(){el.style.background='#5b8cff';el.style.color='#fff';};el.onmouseleave=function(){el.style.background=active?'#34405a':'';el.style.color=it.soon?'#6b7280':'#e6e9ef';};}\n"
+            " menu.appendChild(el);});\n"
+            "var hr=document.createElement('div');hr.style.cssText='border-top:1px solid #3a4150;margin:6px 4px;';menu.appendChild(hr);\n"
+            "var out=document.createElement('a');out.textContent='Log out';out.href='/editor/logout';\n"
+            "out.style.cssText='display:block;padding:8px 10px;border-radius:7px;text-decoration:none;color:#9aa4b2;cursor:pointer;';\n"
+            "out.onmouseenter=function(){out.style.background='#c0504d';out.style.color='#fff';};out.onmouseleave=function(){out.style.background='';out.style.color='#9aa4b2';};menu.appendChild(out);\n"
+            "btn.onclick=function(e){e.stopPropagation();menu.style.display=(menu.style.display==='none'?'block':'none');};\n"
+            "document.addEventListener('click',function(){menu.style.display='none';});\n"
+            "wrap.appendChild(btn);wrap.appendChild(menu);\n"
+            "function mount(){if(document.getElementById('__edmenu'))return;wrap.id='__edmenu';\n"
+            " var h=document.querySelector('header');\n"
+            " if(h){h.style.position=h.style.position||'relative';h.insertBefore(wrap,h.firstChild);}\n"
+            " else{wrap.style.position='fixed';wrap.style.top='10px';wrap.style.left='10px';wrap.style.zIndex='9999';document.body.appendChild(wrap);}}\n"
+            "if(document.body)mount();else document.addEventListener('DOMContentLoaded',mount);\n"
+            "})();")
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -387,16 +640,89 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_text(self, text, code=200):
+    def _send_text(self, text, code=200, ctype="text/plain; charset=utf-8"):
         body = (text or "").encode("utf-8")
         self.send_response(code)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_html(self, html, code=200):
+        body = (html or "").encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def _route_key(self):
         return self.path.split("?", 1)[0].lstrip("/").lower()
+
+    def _cookie(self, name):
+        for part in (self.headers.get("Cookie", "") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == name:
+                return v
+        return ""
+
+    def _require_edit_auth(self):
+        """Gate the editor pages + endpoints behind a signed game-account session cookie (issued by
+        /editor/login, access-gated in _verify_session). Enforced in the app so it holds via Caddy
+        or direct :8182. FAIL CLOSED if no signing secret. Unauthed: redirect a page GET to the
+        login form; 401 a data endpoint. Returns True if authorized."""
+        if not EDIT_SECRET:
+            self._send_json({"error": "editor auth not configured (set INFINITY_EDIT_PASS)"}, 503)
+            return False
+        if _verify_session(self._cookie(EDIT_COOKIE)):
+            return True
+        if self.command == "GET" and self._route_key() in EDITOR_PAGES:
+            self.send_response(302)
+            self.send_header("Location", "/editor/login?next=" + urllib.parse.quote(self.path))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        else:
+            self._send_json({"error": "not authorized"}, 401)
+        return False
+
+    def _editor_login(self, method, body):
+        """GET -> login form; POST {user,pass,next} -> authenticate a REAL game account, gate by
+        access_level, set the session cookie + redirect. Never creates accounts."""
+        def safe_next(n):
+            return n if (n or "").startswith("/") and not (n or "").startswith("//") \
+                and '"' not in (n or "") else "/quest/Edit.aspx"
+        if method == "GET":
+            nxt = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")\
+                .get("next", ["/quest/Edit.aspx"])[0]
+            return self._send_html(_login_html(safe_next(nxt), ""))
+        form = urllib.parse.parse_qs(body.decode("utf-8", "replace"))
+        user = (form.get("user", [""])[0] or "").strip()
+        pw = form.get("pass", [""])[0] or ""
+        nxt = safe_next(form.get("next", ["/quest/Edit.aspx"])[0])
+        conn = db.connect()
+        try:
+            res = game.authenticate(conn, user, pw)
+        finally:
+            conn.close()
+        if not res:
+            return self._send_html(_login_html(nxt, "Invalid username or password."), 401)
+        if int(res["access"]) < EDIT_MIN_ACCESS:
+            return self._send_html(
+                _login_html(nxt, "That account doesn't have staff access."), 403)
+        token = _sign_session(res["username"], res["access"])
+        self.send_response(302)
+        self.send_header("Set-Cookie", f"{EDIT_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; "
+                         f"Max-Age={EDIT_SESSION_SECS}")
+        self.send_header("Location", nxt)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _editor_logout(self):
+        self.send_response(302)
+        self.send_header("Set-Cookie", f"{EDIT_COOKIE}=; Path=/; Max-Age=0")
+        self.send_header("Location", "/editor/login")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self):
         self._handle("GET")
@@ -411,6 +737,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if method == "POST":
             length = int(self.headers.get("Content-Length", 0) or 0)
             body = self.rfile.read(length) if length else b""
+
+        # public auth endpoints (the login flow itself — NOT gated, else redirect loop)
+        if key == "editor/login":
+            return self._editor_login(method, body)
+        if key == "editor/logout":
+            return self._editor_logout()
+        if key == "editor/nav.js" and method == "GET":   # shared hamburger nav (UI only, no data)
+            return self._send_text(_editor_nav_js(), ctype="application/javascript; charset=utf-8")
+
+        # staff gate: every editor page AND endpoint (apop/*, quest/*). key is already lowercased,
+        # so a mixed-case path can't slip past. Enforced before any editor handler runs.
+        if key in EDITOR_PAGES or any(key.startswith(p) for p in EDITOR_PREFIXES):
+            if not self._require_edit_auth():
+                return
+
+        # the editor pages themselves (HTML), opened by the in-game pencil or a browser
+        if method == "GET" and key in EDITOR_PAGES:
+            return self._send_html(_editor_html(EDITOR_PAGES[key]))
 
         route = ROUTES.get(key)
         if route and route[0] == method:
@@ -466,10 +810,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             pass
 
 
+class _Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True   # rebind immediately on restart (don't fail on a TIME_WAIT socket)
+    daemon_threads = True        # don't let lingering request threads block shutdown
+
+
 def main():
     db.init()
     mode = "CAPTURE+proxy" if CAPTURE_PROXY else "local-only"
-    with socketserver.ThreadingTCPServer((HOST, PORT), Handler) as httpd:
+    with _Server((HOST, PORT), Handler) as httpd:
         print(f"Web API on http://{HOST}:{PORT}/  ({mode}); "
               f"routes: {', '.join(sorted(ROUTES))}")
         httpd.serve_forever()

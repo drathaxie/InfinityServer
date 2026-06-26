@@ -20,6 +20,8 @@ damage range (GetMin/MaxWeaponRange = Base*(1-+Wild)); gear uses the stat bonuse
 """
 import json
 
+import db
+
 # EquipSpots enum (decomp): Weapon=2, Head=3, Back=4, Armor=7
 WEAPON, HEAD, BACK, ARMOR = 2, 3, 4, 7
 ENHANCEABLE = {WEAPON, HEAD, BACK, ARMOR}
@@ -96,8 +98,7 @@ def applied(ci):
 
 
 def _item_def(conn, item_id):
-    irow = conn.execute("SELECT raw FROM items WHERE item_id=?", (item_id,)).fetchone()
-    return json.loads(irow["raw"]) if irow else None
+    return db.item(conn, item_id)
 
 
 def _update_pattern(item_id, pattern, ok=True, err=""):

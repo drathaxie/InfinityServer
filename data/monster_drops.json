@@ -1,3 +1,17 @@
 {
-  "_comment": "Per-monster drop tables. Key = MonID (string). Value = list of {item_id, rate, quantity}, where rate is the item's INDEPENDENT 0..1 chance to drop on a kill (each entry rolls on its own, so a kill can yield several items or none). Monsters NOT listed here fall back to loot.py's shared global pool. Example: \"1\": [{\"item_id\": 4770, \"rate\": 0.10, \"quantity\": 1}, {\"item_id\": 5357, \"rate\": 0.02, \"quantity\": 1}]"
+ "_comment": "Per-monster drop tables. Key = MonID (string). Value = list of {item_id, rate, quantity}, where rate is the item's INDEPENDENT 0..1 chance to drop on a kill (each entry rolls on its own, so a kill can yield several items or none). Monsters NOT listed here fall back to loot.py's shared global pool. Example: \"1\": [{\"item_id\": 4770, \"rate\": 0.10, \"quantity\": 1}, {\"item_id\": 5357, \"rate\": 0.02, \"quantity\": 1}]",
+ "183": [
+  {
+   "item_id": 101344,
+   "rate": 0.1,
+   "quantity": 1
+  }
+ ],
+ "207": [
+  {
+   "item_id": 87479,
+   "rate": 0.5,
+   "quantity": 5
+  }
+ ]
 }

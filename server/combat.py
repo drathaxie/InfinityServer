@@ -54,18 +54,22 @@ def register_area_monsters(area, monbranch):
 
 
 def monster_identity(area, target_string):
-    """(catalog MonID, name) for a live target m:<MonMapID> — from register_monster's stored
-    mon_id if we have it, else the area monBranch mapping. (None, '') if unknown."""
-    info = _moninfo.get((area, target_string))
-    if info and info.get("mon_id"):
-        return info.get("mon_id"), info.get("name") or ""
+    """(catalog MonID, name) for a live target m:<MonMapID>. register_monster (the moveToCell
+    path) stores the mon_id but NOT the name, so fall back to the area monBranch mapping
+    (register_area_monsters), which carries strMonName, for the name. Killcount quest credit
+    relies on this name, so an empty name here is what made any kill credit any quest.
+    (None, '') if unknown."""
+    branch = (None, "")
     if target_string and target_string.startswith("m:"):
         try:
             mmid = int(target_string[2:])
+            branch = (_area_moncat.get(area) or {}).get(mmid, (None, ""))
         except ValueError:
             return None, ""
-        return (_area_moncat.get(area) or {}).get(mmid, (None, ""))
-    return None, ""
+    info = _moninfo.get((area, target_string))
+    if info and info.get("mon_id"):
+        return info.get("mon_id"), info.get("name") or branch[1] or ""
+    return branch
 
 
 def monster_catalog_id(area, target_string):

@@ -39,23 +39,12 @@ def _seed_shop(conn, shop_obj):
     shop_id = int(shop.get("shopID", 0))
     items = shop.get("items") or []
 
-    meta = json.loads(json.dumps(shop_obj))          # deep copy, items stripped
-    (meta["shop"] if has_wrapper else meta)["items"] = []
-    conn.execute(
-        "INSERT INTO shops(shop_id, raw) VALUES(?, ?) "
-        "ON CONFLICT(shop_id) DO NOTHING",
-        (shop_id, json.dumps(meta, separators=(",", ":"))),
-    )
+    db.store_shop(conn, shop_obj, shop_id=shop_id)   # shop meta in canonical columns (items dropped)
 
     n = 0
     for it in items:
         item_id = int(it.get("ID", 0))
-        conn.execute(
-            "INSERT INTO items(item_id, name, item_type, raw) VALUES(?,?,?,?) "
-            "ON CONFLICT(item_id) DO NOTHING",
-            (item_id, it.get("Name"), int(it.get("ItemType", 0) or 0),
-             json.dumps(db.item_template(it), separators=(",", ":"))),
-        )
+        db.store_item(conn, it)             # catalog row in canonical columns (insert-if-absent)
         qremain = it.get("QuantityRemain")
         conn.execute(
             "INSERT INTO shop_items(shop_id, shop_item_id, item_id, cost, coins, "
@@ -128,15 +117,7 @@ def _seed_quest(conn, q):
          q.get("RewardCount"), q.get("TurnInMapID"), q.get("TurnInNPCID"),
          q.get("TurnInFrame"), q.get("TurnInPad"), json.dumps(q, separators=(",", ":"))),
     )
-    conn.execute("DELETE FROM quest_turnins WHERE quest_id=?", (qid,))
-    for i, t in enumerate(q.get("turnin") or []):
-        conn.execute(
-            "INSERT INTO quest_turnins(quest_id, idx, type, qo_type, qo_id, item_id, "
-            "quantity, ref_ids) VALUES(?,?,?,?,?,?,?,?)",
-            (qid, i, (t.get("$type", "").split(".")[-1].split(",")[0] or None),
-             t.get("QOType"), t.get("QOID"), t.get("ItemID"), t.get("Quantity"),
-             json.dumps(t.get("RefIDs")) if t.get("RefIDs") is not None else None),
-        )
+    db.store_quest_turnins(conn, qid, q.get("turnin"))   # lossless objective rows (qturninrecord)
     conn.execute("DELETE FROM quest_rewards WHERE quest_id=?", (qid,))
     idx = 0
     rewards = q.get("Rewards") or {}
@@ -264,14 +245,12 @@ def seed_classes(conn):
                 # not a catalog property — it leaked in and made the shop show 302500 (P2-1).
                 # Class points are per-owned-instance (char_items.quantity); the catalog/shop
                 # listing is just the purchase quantity (1, per the captured shop sample).
-                cat = db.item_template(real)
-                cat["Quantity"] = 1
-                conn.execute(
-                    "INSERT INTO items(item_id, name, item_type, raw) VALUES(?,?,?,?) "
-                    "ON CONFLICT(item_id) DO NOTHING",
-                    (iid, real.get("Name") or real.get("sName") or name,
-                     int(real.get("ItemType", 21) or 21),
-                     json.dumps(cat, separators=(",", ":"))))
+                r2 = dict(real)
+                r2["ID"] = iid
+                r2["Name"] = real.get("Name") or real.get("sName") or name
+                r2["ItemType"] = int(real.get("ItemType", 21) or 21)
+                r2["Quantity"] = 1          # catalog purchase qty, not the captured class points
+                db.store_item(conn, r2)
         defs = c.get("_skilldefs", {})
         for slot_s, skill_id in (c.get("Skills") or {}).items():
             slot, sid = int(slot_s), int(skill_id)
@@ -453,6 +432,13 @@ _class_item_defs = {}
 # maxed CP is the faithful, non-corrupt state (vs the live 1 / 302499 / 302500 split). (P2-1)
 CLASS_CP_MAX = 302500
 
+# STAFF-ONLY class armors: granted only to access >= STAFF_CLASS_ACCESS, and stripped from anyone
+# below it. Big Jake (class 9100 / armor item 91000) is a staff/dev class, not a player class.
+STAFF_ONLY_CLASS_ITEMS = {91000}
+STAFF_CLASS_ACCESS = 40
+BIG_JAKE_CLASS_ID = 9100
+STARTER_CLASS_ID = 33                  # Warrior — fall back to it if a stripped class was equipped
+
 
 def class_item_ids(conn):
     """The class-armor item ids (from each class's rig.ID) that exist in the catalog."""
@@ -526,10 +512,10 @@ def seed_skill_graphs(conn):
 
 
 def grant_class_items(conn):
-    """Give every character the base class armors (from the seeded class items) so they can
-    equip + play each class. Idempotent: only grants a class item a character doesn't own.
-    Also reconciles class POINTS to a consistent maxed CP (P2-1) — the live DB had a corrupt
-    1 / 302499 / 302500 split (grant default / sell-bug decrement / maxed)."""
+    """Maintain class-item ownership. Base classes are NOT auto-granted — players BUY them at the
+    class shop (Gravelyn's Infinity); existing owners keep what they already have. This reconciles
+    class POINTS to a consistent maxed CP (P2-1: the live DB had a 1/302499/302500 split), dedupes
+    class-item rows, and enforces the STAFF-ONLY class gate (Big Jake). Returns # of changes."""
     item_ids = class_item_ids(conn)
     # reconcile: every owned class item -> the consistent maxed CP (heals the 1/302499 rows)
     for iid in item_ids:
@@ -550,19 +536,34 @@ def grant_class_items(conn):
                 (ch["char_id"], iid)).fetchone()["char_item_id"]
             conn.execute("DELETE FROM char_items WHERE char_id=? AND item_id=? AND char_item_id<>?",
                          (ch["char_id"], iid, keep))
-    granted = 0
-    for ch in conn.execute("SELECT id FROM characters").fetchall():
-        for iid in item_ids:
-            owned = conn.execute("SELECT 1 FROM char_items WHERE char_id=? AND item_id=?",
-                                 (ch["id"], iid)).fetchone()
-            if not owned:
-                cid = int(db.kv_get(conn, "next_char_item_id", "1"))   # same counter as _grant_item
+    # Enforce the STAFF-ONLY class gate: strip those armors from non-staff, grant to staff.
+    # (Base classes are intentionally NOT auto-granted anymore — bought at the class shop.)
+    changed = 0
+    staff_ids = [r["id"] for r in conn.execute(
+        "SELECT id FROM characters WHERE COALESCE(access_level, 0) >= ?", (STAFF_CLASS_ACCESS,))]
+    for iid in STAFF_ONLY_CLASS_ITEMS:
+        if not conn.execute("SELECT 1 FROM items WHERE item_id=?", (iid,)).fetchone():
+            continue                                       # that staff class isn't in this DB
+        for ch in conn.execute(
+                "SELECT id, class_id FROM characters WHERE COALESCE(access_level, 0) < ?",
+                (STAFF_CLASS_ACCESS,)).fetchall():
+            if conn.execute("SELECT 1 FROM char_items WHERE char_id=? AND item_id=?",
+                            (ch["id"], iid)).fetchone():
+                conn.execute("DELETE FROM char_items WHERE char_id=? AND item_id=?", (ch["id"], iid))
+                if int(ch["class_id"] or 0) == BIG_JAKE_CLASS_ID:   # had it equipped -> fall back
+                    conn.execute("UPDATE characters SET class_id=? WHERE id=?",
+                                 (STARTER_CLASS_ID, ch["id"]))
+                changed += 1
+        for sid in staff_ids:
+            if not conn.execute("SELECT 1 FROM char_items WHERE char_id=? AND item_id=?",
+                                (sid, iid)).fetchone():
+                cid = int(db.kv_get(conn, "next_char_item_id", "1"))
                 db.kv_set(conn, "next_char_item_id", cid + 1)
                 conn.execute("INSERT INTO char_items(char_item_id, char_id, item_id, quantity, "
                              "equipped, banked, loot_id) VALUES(?,?,?,?,0,0,-1)",
-                             (cid, ch["id"], iid, CLASS_CP_MAX))   # grant maxed class points (CP)
-                granted += 1
-    return granted
+                             (cid, sid, iid, CLASS_CP_MAX))
+                changed += 1
+    return changed
 
 
 def seed_items(conn):
@@ -575,11 +576,9 @@ def seed_items(conn):
     except Exception:
         return 0
     for iid, it in items.items():
-        conn.execute(
-            "INSERT INTO items(item_id, name, item_type, raw) VALUES(?,?,?,?) "
-            "ON CONFLICT(item_id) DO NOTHING",
-            (int(iid), it.get("Name"), int(it.get("ItemType", 0) or 0),
-             json.dumps(it, separators=(",", ":"))))
+        i2 = dict(it)
+        i2.setdefault("ID", int(iid))
+        db.store_item(conn, i2)
     return len(items)
 
 
@@ -594,9 +593,7 @@ def seed_shops(conn):
         return 0, 0
     links = 0
     for sid, s in shops.items():
-        conn.execute(
-            "INSERT INTO shops(shop_id, raw) VALUES(?,?) ON CONFLICT(shop_id) DO NOTHING",
-            (int(sid), json.dumps(s.get("meta", {}), separators=(",", ":"))))
+        db.store_shop(conn, s.get("meta", {}), shop_id=int(sid))
         for li in s.get("items") or []:
             conn.execute(
                 "INSERT INTO shop_items(shop_id, shop_item_id, item_id, cost, coins, "
@@ -624,7 +621,7 @@ def seed_monster_drops(conn):
     """Per-monster drop tables from data/monster_drops.json — {"<MonID>": [{item_id, rate, quantity}]}.
     `rate` is the item's INDEPENDENT 0..1 chance to drop on a kill. Idempotent (insert-if-absent);
     non-numeric keys (e.g. a "_comment") are skipped. Empty/absent file = no per-monster drops
-    (every monster then uses loot.py's global pool). Returns the number of (mon,item) rows seeded."""
+    (a monster then drops only the global_drops table, if any). Returns the number of rows seeded."""
     try:
         data = json.loads(MONSTER_DROPS_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -646,6 +643,66 @@ def seed_monster_drops(conn):
     return n
 
 
+def seed_global_drops(conn):
+    """Global drop table from data/global_drops.json — {"<ItemID>": {rate, quantity}} that EVERY
+    monster rolls on top of its own drops (e.g. gems). Idempotent (insert-if-absent); rows whose
+    item isn't in the catalog are skipped (FK). Returns the number of rows seeded."""
+    f = DATA / "global_drops.json"
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    n = 0
+    for iid, spec in (data or {}).items():
+        if not str(iid).lstrip("-").isdigit():
+            continue
+        if not conn.execute("SELECT 1 FROM items WHERE item_id=?", (int(iid),)).fetchone():
+            continue                                   # item not in catalog -> skip (FK)
+        conn.execute(
+            "INSERT INTO global_drops(item_id, rate, quantity) VALUES(?,?,?) "
+            "ON CONFLICT(item_id) DO NOTHING",
+            (int(iid), float((spec or {}).get("rate", 0.05) or 0.05),
+             int((spec or {}).get("quantity", 1) or 1)))
+        n += 1
+    return n
+
+
+def seed_quest_objective_refs(conn):
+    """Authored, self-describing kill-credit mappings (+ probabilistic drop params) from
+    data/quest_objective_refs.json, keyed by quest then objective:
+        {"<questID>": {"<QOID>": {"monsters": [mon_id,...],
+                                   "chance": f, "min": n, "max": n}}}
+    monsters = the catalog ids that credit the objective (quest_objective_refs rows carry
+    quest_id+qoid+mon_id); chance/min/max (optional, default 1/1/1 = deterministic +1) = the
+    probabilistic drop roll (quest_objective_drops). Makes objective crediting a pure table lookup
+    instead of RefID/name guessing. Idempotent (insert-if-absent)."""
+    f = DATA / "quest_objective_refs.json"
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    n = 0
+    for qid, objs in (data or {}).items():
+        if not str(qid).lstrip("-").isdigit() or not isinstance(objs, dict):
+            continue
+        for qoid, spec in objs.items():
+            if not str(qoid).lstrip("-").isdigit():
+                continue
+            mons = spec.get("monsters") if isinstance(spec, dict) else spec
+            if isinstance(spec, dict) and any(k in spec for k in ("chance", "min", "max")):
+                conn.execute(
+                    "INSERT INTO quest_objective_drops(qoid, chance, min_qty, max_qty) "
+                    "VALUES(?,?,?,?) ON CONFLICT(qoid) DO NOTHING",
+                    (int(qoid), float(spec.get("chance", 1.0) or 1.0),
+                     int(spec.get("min", 1) or 1), int(spec.get("max", 1) or 1)))
+            for mid in (mons or []):
+                conn.execute(
+                    "INSERT INTO quest_objective_refs(quest_id, qoid, mon_id) VALUES(?,?,?) "
+                    "ON CONFLICT(qoid, mon_id) DO NOTHING", (int(qid), int(qoid), int(mid)))
+                n += 1
+    return n
+
+
 def run():
     db.init()
     with db.connect() as conn:
@@ -664,11 +721,13 @@ def run():
         cutscenes = seed_cutscenes(conn)
         dclasses = seed_defaultclasses(conn)
         mdrops = seed_monster_drops(conn)
+        gdrops = seed_global_drops(conn)
+        qrefs = seed_quest_objective_refs(conn)
         conn.commit()
     print(f"[seed] items={items} shops={shops} shop_items={links} monsters={mons} maps={maps} "
           f"quests={quests} apops={apops} classes={cls} skills={sk} skill_graphs={graphs} "
           f"class_items_granted={class_grants} cutscenes={cutscenes} defaultclasses={dclasses} "
-          f"monster_drops={mdrops}")
+          f"monster_drops={mdrops} global_drops={gdrops} quest_obj_refs={qrefs}")
 
 
 if __name__ == "__main__":
