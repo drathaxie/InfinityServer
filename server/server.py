@@ -482,6 +482,19 @@ async def dispatch(session, writer, raw):
         print(f"  [s2c] getQuests ({len(ids)} ids)")
         return
 
+    if cmd == "qabandon":                    # RequestAbandonQuest -> drop an accepted quest
+        if session.char is None or not params:
+            return
+        try:
+            qid = int(params[0])
+        except (ValueError, TypeError):
+            return
+        await send_obj(writer, game.abandon_quest(session.conn, session.char, qid))
+        session.char = session.conn.execute("SELECT * FROM characters WHERE id=?",
+                                            (session.char["id"],)).fetchone()
+        print(f"  [qabandon] quest {qid}")
+        return
+
     # --- quest progress (per character, persisted) ---------------------------
     if cmd in ("acceptQuest", "trackQuest", "openApopQO", "watchCutscene",
                "qobjective", "tryQuestComplete", "machineInteract"):
@@ -519,9 +532,13 @@ async def dispatch(session, writer, raw):
         elif cmd == "tryQuestComplete":
             choice = int(params[1]) if len(params) > 1 and str(params[1]).lstrip("-").isdigit() else -1
             resp = game.try_quest_complete(session.conn, session.char, arg, choice)
+            reward_items = resp.pop("rewardItems", [])     # internal: push live so no relog needed
             await send_obj(writer, resp)
             if resp.get("Success"):
                 _refresh_char()
+                if reward_items:                            # show the reward in the bag immediately
+                    await send_obj(writer, {"Cmd": "addItems", "items": reward_items,
+                                            "patternItems": [], "bankedItems": []})
                 await send_obj(writer, game.quest_data(session.conn, session.char))
             print(f"  [s2c] QComp {arg} success={resp.get('Success')}")
 

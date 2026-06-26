@@ -906,6 +906,8 @@ def levelup_packet(char, level, exp, maxhp):
 
 
 def _grant_quest_rewards(conn, char, q):
+    """Grant the quest's gold/exp/items. Returns the granted item wire dicts (with CharItemID) so
+    the caller can push them as a live addItems — otherwise the reward only shows after a relog."""
     cid = char["id"]
     gold = int(q.get("Gold", 0) or 0)
     exp = int(q.get("Exp", 0) or 0)
@@ -913,11 +915,17 @@ def _grant_quest_rewards(conn, char, q):
         conn.execute("UPDATE characters SET gold=gold+? WHERE id=?", (gold, cid))
     if exp:
         grant_xp(conn, char, exp)           # quest XP levels you up too (per the curve)
+    granted = []
     for r in conn.execute("SELECT item_id FROM quest_rewards WHERE quest_id=?",
                           (int(q.get("QuestID", 0) or 0),)):
         item = db.item(conn, r["item_id"])
         if item:
-            _grant_item(conn, cid, item)
+            ci = _grant_item(conn, cid, item)
+            wire = dict(item)
+            wire["CharItemID"] = ci
+            wire["Quantity"] = int(wire.get("Quantity", 1) or 1)
+            granted.append(wire)
+    return granted
 
 
 def auto_turnin(conn, char):
@@ -983,10 +991,23 @@ def try_quest_complete(conn, char, qid, choice=-1):
                  "ON CONFLICT(char_id, quest_id) DO UPDATE SET status=2", (cid, qid))
     for t in turnins:
         conn.execute("DELETE FROM char_quest_objectives WHERE char_id=? AND qoid=?", (cid, t.get("QOID")))
-    _grant_quest_rewards(conn, char, q)
+    rewards = _grant_quest_rewards(conn, char, q)
     conn.commit()
     return {"Cmd": "QComp", "ID": qid, "Success": True, "Title": q.get("Name") or "",
-            "Message": "", "IndexType": 0, "NotificationType": ntype}
+            "Message": "", "IndexType": 0, "NotificationType": ntype,
+            "rewardItems": rewards}              # popped + pushed as addItems by the handler
+
+
+def abandon_quest(conn, char, qid):
+    """qabandon [questID]: drop an accepted quest — remove it from char_quests and clear its
+    objective progress. Returns the refreshed questData panel."""
+    cid = char["id"]
+    conn.execute("DELETE FROM char_quests WHERE char_id=? AND quest_id=?", (cid, int(qid)))
+    for t in _quest_turnins(conn, int(qid)):
+        conn.execute("DELETE FROM char_quest_objectives WHERE char_id=? AND qoid=?",
+                     (cid, t.get("QOID")))
+    conn.commit()
+    return quest_data(conn, char)
 
 
 # EquipSpots enum -> the user.eqp key the avatar rig uses for that slot. The Class spot
