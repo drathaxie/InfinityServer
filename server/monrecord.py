@@ -94,6 +94,8 @@ def to_catalog(cols):
     for col, key in _CAT_INV.items():                  # avatar customization
         if col in cols:
             out[key] = cols[col]
+    if not out.get("Scale"):       # a scale-less/zero stub row renders at scale 0 (invisible) —
+        out["Scale"] = 1.0         # every monster must have a render scale; default to full size.
     return out
 
 
