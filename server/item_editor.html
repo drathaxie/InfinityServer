@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Item Editor</title>
+<style>
+  :root { --bg:#1d2127; --panel:#272c34; --panel2:#2f3640; --line:#3a4150; --ink:#e6e9ef;
+          --muted:#9aa4b2; --accent:#5b8cff; --accent2:#3fa46a; --danger:#c0504d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; gap:8px; align-items:center; padding:10px 14px; background:var(--panel);
+           border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0 10px 0 0; font-weight:600; }
+  select, input, textarea, button { font:inherit; color:var(--ink); background:var(--panel2);
+           border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  textarea { width:100%; min-height:64px; resize:vertical; }
+  input[type=text], input[type=number] { width:100%; }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.go { background:var(--accent2); border-color:var(--accent2); color:#fff; }
+  .status { margin-left:auto; color:var(--muted); font-size:13px; }
+  main { max-width:1000px; margin:0 auto; padding:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:16px; }
+  .card > h2 { margin:0 0 10px; font-size:14px; color:var(--accent); text-transform:uppercase; letter-spacing:.04em; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px; }
+  .field { display:flex; flex-direction:column; gap:3px; flex:1; min-width:130px; }
+  .field label { font-size:12px; color:var(--muted); }
+  .hint { color:var(--muted); font-size:12px; margin-top:6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Item Editor</h1>
+  <select id="picker" title="Choose an item"></select>
+  <button class="go" id="btnSave">Save</button>
+  <span class="status" id="status"></span>
+</header>
+<main id="main"></main>
+
+<script>
+const $ = s => document.querySelector(s);
+let item = null;
+function setStatus(m, ok=true){ const s=$("#status"); s.textContent=m; s.style.color=ok?"#9aa4b2":"#e08585"; }
+function field(label, el){ const f=document.createElement("div"); f.className="field"; const l=document.createElement("label"); l.textContent=label; f.append(l, el); return f; }
+function inp(val, on, type="text"){ const i=document.createElement("input"); i.type=type; i.value=(val??""); i.oninput=()=>on(type==="number"?(i.value===""?0:(parseFloat(i.value)||0)):i.value); return i; }
+function area(val, on){ const t=document.createElement("textarea"); t.value=(val??""); t.oninput=()=>on(t.value); return t; }
+function check(val, on){ const w=document.createElement("label"); w.style.cssText="display:flex;gap:6px;align-items:center;font-size:13px;height:34px;"; const c=document.createElement("input"); c.type="checkbox"; c.checked=!!val; c.style.width="auto"; c.onchange=()=>on(c.checked); w.append(c, document.createTextNode("yes")); return w; }
+function card(title){ const d=document.createElement("div"); d.className="card"; const h=document.createElement("h2"); h.textContent=title; d.appendChild(h); return d; }
+let ENUMS = {};
+// dropdown from a named enum ({value:label}); preserves an unknown current value; numeric keys
+// save as ints, non-numeric (e.g. gender M/F) as strings.
+function selEnum(name, val, on){
+  const s=document.createElement("select"); const opts=ENUMS[name]||{};
+  const keys=Object.keys(opts).sort((a,b)=>(a-b)||a.localeCompare(b));
+  const cur = (val==null?"":String(val)); let has=false;
+  for(const k of keys){ const o=document.createElement("option"); o.value=k; o.textContent=opts[k]+"  ("+k+")"; s.appendChild(o); if(k===cur)has=true; }
+  if(cur!=="" && !has){ const o=document.createElement("option"); o.value=cur; o.textContent="unknown ("+cur+")"; s.appendChild(o); }
+  s.value=cur;
+  s.onchange=()=>{ const v=s.value; on(v===""?null:(v.trim()!=="" && !isNaN(v) ? parseInt(v) : v)); };
+  return s;
+}
+
+// [wireKey, label, type, enumName?]
+const FIELDS = [
+ ["Name","Name","text"],["ItemType","Item Type","enum","ItemType"],["EquipSpot","Equip Spot","enum","EquipSpot"],
+ ["Level","Level","number"],["Cost","Cost","number"],["Coins","Coins (currency)","bool"],
+ ["Rarity","Rarity","enum","Rarity"],["Element","Element","enum","Element"],["DamageRange","Damage Range","number"],
+ ["DPS","DPS","number"],["StackSize","Stack Size","number"],["Linkage","Linkage","text"],
+ ["Icon","Icon","text"],["Filename","Filename","text"],["isClass","Is Class","bool"],
+];
+const KNOWN = new Set(FIELDS.map(f=>f[0]).concat(["ID","Description"]));
+
+async function loadList(sel){
+  const arr = await (await fetch("list")).json();
+  const p = $("#picker"); p.innerHTML="";
+  for(const it of arr){ const o=document.createElement("option"); o.value=it.ID; o.textContent=it.ID+" — "+it.name; p.appendChild(o); }
+  if(sel!=null) p.value=String(sel);
+}
+async function loadItem(id){
+  if(!id) return;
+  item = await (await fetch("load?ID="+encodeURIComponent(id))).json();
+  if(!item || !item.ID) item = { ID: parseInt(id)||0 };
+  render(); setStatus("loaded item "+item.ID);
+}
+function render(){
+  const m=$("#main"); m.innerHTML="";
+  const c=card("Item #"+(item.ID??"?"));
+  const r=document.createElement("div"); r.className="row";
+  FIELDS.forEach(([k,lab,ty,en])=>{
+    let el;
+    if(ty==="bool") el=check(item[k], v=>item[k]=v);
+    else if(ty==="enum") el=selEnum(en, item[k], v=>item[k]=v);
+    else el=inp(item[k], v=>item[k]=v, ty==="number"?"number":"text");
+    r.appendChild(field(lab, el));
+  });
+  c.appendChild(r);
+  c.appendChild(field("Description", area(item.Description, v=>item.Description=v)));
+  const extra = Object.keys(item).filter(k=>!KNOWN.has(k));
+  if(extra.length){ const h=document.createElement("p"); h.className="hint"; h.textContent="Other fields preserved on save: "+extra.join(", "); c.appendChild(h); }
+  m.appendChild(c);
+}
+async function save(){
+  if(!item || !item.ID){ setStatus("nothing to save", false); return; }
+  setStatus("saving…");
+  const fd=new URLSearchParams(); fd.set("json", JSON.stringify(item));
+  const r=await fetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).then(r=>r.json());
+  if(r.ok){ setStatus("saved item "+r.ID); loadList(r.ID); } else setStatus(r.msg||"save failed", false);
+}
+(async function(){
+  try { ENUMS = await (await fetch("/editor/enums.json")).json(); } catch(e){ ENUMS={}; }
+  await loadList();
+  $("#picker").onchange = e=>loadItem(e.target.value);
+  $("#btnSave").onclick = save;
+  const id = new URLSearchParams(location.search).get("ID") || $("#picker").value;
+  if(id){ $("#picker").value=String(id); loadItem(id); }
+})();
+</script>
+<script src="/editor/nav.js"></script>
+</body>
+</html>

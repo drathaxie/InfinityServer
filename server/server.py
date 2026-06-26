@@ -253,6 +253,27 @@ async def dispatch(session, writer, raw):
                                      "channel": "Adminyell", "ID": session.member.uid})
                 print(f"  [modyell] {name} (by {session.member.name}): {text}")
             return
+        if sub == "genderswap" and session.char is not None and session.member is not None:
+            # Player gender swap (fired by an apop "chat" button, e.g. Bev). Flips M<->F, resets to
+            # a gender-appropriate default hair, and replies ResponseGenderSwap so the client runs
+            # SetGender + createAvatar. Free on our server (no coin cost). Broadcast so others see it.
+            newg = "F" if (session.char["gender"] or "M").upper() == "M" else "M"
+            hid = game._default_hair_id(session.conn, newg)
+            session.conn.execute("UPDATE characters SET gender=?, hair_id=? WHERE id=?",
+                                 (newg, hid, session.char["id"]))
+            session.conn.commit()
+            session.char = session.conn.execute("SELECT * FROM characters WHERE id=?",
+                                                (session.char["id"],)).fetchone()
+            hi = game._hair_info(session.conn, hid, newg) or {}
+            pk = {"Cmd": "genderSwap", "success": True, "uid": session.member.uid, "gender": newg,
+                  "HairID": hid, "strHairName": hi.get("Name") or "",
+                  "coins": int(session.char["coins"] or 0)}
+            await send_obj(writer, pk)
+            world.broadcast(session.area, pk, exclude=session.member.uid)
+            cust = session.member.user_obj.setdefault("customization", {})
+            cust["HairID"] = hid
+            print(f"  [genderswap] {session.char['name']} -> {newg} (hair {hid})")
+            return
         # --- dev cheats (staff only, access >= 40) ---
         _staff = session.char is not None and int(session.char["access_level"] or 0) >= 40
         if sub == "addgold" and _staff:

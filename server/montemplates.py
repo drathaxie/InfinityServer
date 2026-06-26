@@ -179,6 +179,57 @@ def get(conn, mon_id):
     return monrecord.to_monbranch(monrecord.row_to_cols(row)) if row else None
 
 
+# Curated canonical columns the monster editor exposes (the rest ride untouched in the columns).
+EDITOR_COLS = ["name", "subtitle", "linkage", "hp", "hp_max", "mp_max", "race", "element",
+               "level", "gender", "class_id", "behave", "scale", "apop_id", "no_move", "b_red"]
+
+
+def editor_load(conn, mon_id):
+    """{monster:{col:val,...}, drops:[{item_id,rate,quantity}]} for the monster editor, or {}."""
+    row = conn.execute(f"SELECT {_MONCOLS} FROM monsters WHERE mon_id=?", (int(mon_id),)).fetchone()
+    if row is None:
+        return {}
+    cols = monrecord.row_to_cols(row)
+    mon = {c: cols.get(c) for c in EDITOR_COLS}
+    mon["mon_id"] = int(mon_id)
+    drops = [{"item_id": r["item_id"], "rate": r["rate"], "quantity": r["quantity"]}
+             for r in conn.execute("SELECT item_id, rate, quantity FROM monster_drops "
+                                   "WHERE mon_id=? ORDER BY item_id", (int(mon_id),))]
+    return {"monster": mon, "drops": drops}
+
+
+def editor_save(conn, payload):
+    """Persist monster column edits + replace its drop table. {ok,ID} or {ok:False,msg}."""
+    mon = payload.get("monster") or {}
+    try:
+        mid = int(mon.get("mon_id"))
+    except (TypeError, ValueError):
+        return {"ok": False, "msg": "Monster needs a numeric mon_id."}
+    if conn.execute("SELECT 1 FROM monsters WHERE mon_id=?", (mid,)).fetchone() is None:
+        return {"ok": False, "msg": f"monster {mid} not found."}
+    sets, vals = [], []
+    for c in EDITOR_COLS:
+        if c in mon:
+            sets.append(f'"{c}"=?')
+            vals.append(mon[c])
+    if sets:
+        conn.execute(f"UPDATE monsters SET {', '.join(sets)} WHERE mon_id=?", tuple(vals) + (mid,))
+    conn.execute("DELETE FROM monster_drops WHERE mon_id=?", (mid,))
+    for d in (payload.get("drops") or []):
+        try:
+            iid = int(d.get("item_id"))
+        except (TypeError, ValueError):
+            continue
+        if conn.execute("SELECT 1 FROM items WHERE item_id=?", (iid,)).fetchone() is None:
+            return {"ok": False, "msg": f"item {iid} isn't in the catalog (add it first)."}
+        conn.execute("INSERT INTO monster_drops(mon_id, item_id, rate, quantity) VALUES(?,?,?,?) "
+                     "ON CONFLICT(mon_id, item_id) DO UPDATE SET rate=excluded.rate, "
+                     "quantity=excluded.quantity",
+                     (mid, iid, float(d.get("rate", 0.1) or 0.1), int(d.get("quantity", 1) or 1)))
+    conn.commit()
+    return {"ok": True, "ID": mid}
+
+
 def template(conn, mon_id):
     """An identity-only Monbranch for a MonID: catalog entry with placement
     fields stripped, or a minimal stub if we never captured this monster."""

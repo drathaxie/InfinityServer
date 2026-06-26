@@ -40,6 +40,7 @@ import urllib.request
 import db
 import game
 import montemplates
+import editor_enums
 
 HOST = "0.0.0.0"
 PORT = 8182                                   # mod ApiPatch rewrites WebApiURL -> here
@@ -498,6 +499,135 @@ def quest_save(conn, form):
         return {"ok": False, "msg": f"save failed: {ex}"}
 
 
+def item_list(conn, qs):
+    """item/list -> [{ID,name}] for the item editor picker (id-sorted)."""
+    return [{"ID": r["item_id"], "name": r["name"] or f"Item {r['item_id']}"}
+            for r in conn.execute("SELECT item_id, name FROM items ORDER BY item_id")]
+
+
+def item_load(conn, qs):
+    """item/load?ID=n -> the item wire dict (generated from canonical columns), or {} if absent."""
+    try:
+        iid = int(urllib.parse.parse_qs(qs).get("ID", ["0"])[0])
+    except (ValueError, IndexError):
+        return {}
+    return db.item(conn, iid) or {}
+
+
+def item_save(conn, form):
+    """item/save {json} -> {"ok":True,"ID":n}; upserts the item (replace) into the catalog columns.
+    Unknown fields ride through `_extra`, so editing a curated set never drops data."""
+    try:
+        payload = json.loads(form.get("json", ["{}"])[0])
+    except Exception:
+        return {"ok": False, "msg": "Invalid item payload."}
+    if not isinstance(payload, dict) or not str(payload.get("ID", "")).lstrip("-").isdigit():
+        return {"ok": False, "msg": "Item needs a numeric ID."}
+    try:
+        db.store_item(conn, payload, replace=True)
+        conn.commit()
+        return {"ok": True, "ID": int(payload["ID"])}
+    except Exception as ex:
+        return {"ok": False, "msg": f"save failed: {ex}"}
+
+
+def monster_list(conn, qs):
+    """monster/list -> [{ID,name}] for the monster editor picker (id-sorted)."""
+    return [{"ID": r["mon_id"], "name": r["name"] or f"Monster {r['mon_id']}"}
+            for r in conn.execute("SELECT mon_id, name FROM monsters ORDER BY mon_id")]
+
+
+def monster_load(conn, qs):
+    """monster/load?ID=n -> {monster:{cols}, drops:[...]}, or {} if absent."""
+    try:
+        mid = int(urllib.parse.parse_qs(qs).get("ID", ["0"])[0])
+    except (ValueError, IndexError):
+        return {}
+    return montemplates.editor_load(conn, mid) or {}
+
+
+def monster_save(conn, form):
+    """monster/save {json} -> {"ok":True,"ID":n}; writes the monster columns + its drop table."""
+    try:
+        payload = json.loads(form.get("json", ["{}"])[0])
+    except Exception:
+        return {"ok": False, "msg": "Invalid monster payload."}
+    if not isinstance(payload, dict):
+        return {"ok": False, "msg": "Monster payload must be an object."}
+    try:
+        return montemplates.editor_save(conn, payload)
+    except Exception as ex:
+        return {"ok": False, "msg": f"save failed: {ex}"}
+
+
+def shop_list(conn, qs):
+    """shop/list -> [{ID,name}] for the shop editor picker (id-sorted)."""
+    return [{"ID": r["shop_id"], "name": r["name"] or f"Shop {r['shop_id']}"}
+            for r in conn.execute("SELECT shop_id, name FROM shops ORDER BY shop_id")]
+
+
+def shop_load(conn, qs):
+    """shop/load?ID=n -> {shop:<full meta>, items:[{shop_item_id,item_id,cost,coins,quantity_remain,name}]}.
+    The full meta is returned (incl. $type/gameFlag) so editing Name/Location preserves the rest."""
+    try:
+        sid = int(urllib.parse.parse_qs(qs).get("ID", ["0"])[0])
+    except (ValueError, IndexError):
+        return {}
+    meta = db.shop_meta(conn, sid)
+    if meta is None:
+        return {}
+    items = [{"shop_item_id": r["shop_item_id"], "item_id": r["item_id"], "cost": r["cost"],
+              "coins": 1 if r["coins"] else 0, "quantity_remain": r["quantity_remain"],
+              "name": r["name"] or ""}
+             for r in conn.execute(
+                 "SELECT si.shop_item_id, si.item_id, si.cost, si.coins, si.quantity_remain, i.name "
+                 "FROM shop_items si LEFT JOIN items i ON i.item_id=si.item_id "
+                 "WHERE si.shop_id=? ORDER BY si.shop_item_id", (sid,))]
+    return {"shop": meta, "items": items}
+
+
+def shop_save(conn, form):
+    """shop/save {json} -> {"ok":True,"ID":n}; writes the shop meta + replaces its shop_items."""
+    try:
+        payload = json.loads(form.get("json", ["{}"])[0])
+    except Exception:
+        return {"ok": False, "msg": "Invalid shop payload."}
+    shop = payload.get("shop") or {}
+    try:
+        sid = int(shop.get("shopID") if shop.get("shopID") is not None else shop.get("shop_id"))
+    except (TypeError, ValueError):
+        return {"ok": False, "msg": "Shop needs a numeric shopID."}
+    try:
+        db.store_shop(conn, shop, shop_id=sid, replace=True)     # preserves $type/gameFlag via _extra
+        rows = payload.get("items") or []
+        used = {int(it["shop_item_id"]) for it in rows if it.get("shop_item_id")}
+        nxt = max(used) if used else 0
+        conn.execute("DELETE FROM shop_items WHERE shop_id=?", (sid,))
+        for it in rows:
+            try:
+                iid = int(it.get("item_id"))
+            except (TypeError, ValueError):
+                continue
+            if conn.execute("SELECT 1 FROM items WHERE item_id=?", (iid,)).fetchone() is None:
+                return {"ok": False, "msg": f"item {iid} isn't in the catalog (add it first)."}
+            siid = it.get("shop_item_id")
+            if not siid:
+                nxt += 1
+                while nxt in used:
+                    nxt += 1
+                siid = nxt
+                used.add(siid)
+            conn.execute("INSERT INTO shop_items(shop_id, shop_item_id, item_id, cost, coins, "
+                         "quantity_remain) VALUES(?,?,?,?,?,?)",
+                         (sid, int(siid), iid, int(it.get("cost", 0) or 0),
+                          1 if int(it.get("coins", 0) or 0) else 0,
+                          int(it.get("quantity_remain", -1) if it.get("quantity_remain") is not None else -1)))
+        conn.commit()
+        return {"ok": True, "ID": sid}
+    except Exception as ex:
+        return {"ok": False, "msg": f"save failed: {ex}"}
+
+
 def get_base_classes(conn, qs):
     """Data/GetBaseClasses -> {items, hairs, character_bundle}. Feeds char-create AND the /charedit
     hair list (CharacterCustomizationController.BuildHairLists fetches this and reads .hairs). Served
@@ -532,22 +662,36 @@ ROUTES = {
     "quest/monsters":        ("GET",  apop_npcs),     # same monster picker (id/name)
     "quest/items":           ("GET",  quest_items),
     "quest/save":            ("POST", quest_save),
+    "item/list":             ("GET",  item_list),
+    "item/load":             ("GET",  item_load),
+    "item/save":             ("POST", item_save),
+    "monster/list":          ("GET",  monster_list),
+    "monster/load":          ("GET",  monster_load),
+    "monster/items":         ("GET",  quest_items),   # item picker for the drop table
+    "monster/save":          ("POST", monster_save),
+    "shop/list":             ("GET",  shop_list),
+    "shop/load":             ("GET",  shop_load),
+    "shop/items":            ("GET",  quest_items),   # item picker for the listing
+    "shop/save":             ("POST", shop_save),
 }
 
 # Editor pages (staff-gated) -> the HTML file served for each. The in-game pencil opens apop;
 # the quest editor is opened from a browser at WebApiURL + "quest/Edit.aspx?ID=n".
 EDITOR_PAGES = {"apop/edit.aspx": "apop_editor.html", "apop/edit": "apop_editor.html",
-                "quest/edit.aspx": "quest_editor.html", "quest/edit": "quest_editor.html"}
-EDITOR_PREFIXES = ("apop/", "quest/")
+                "quest/edit.aspx": "quest_editor.html", "quest/edit": "quest_editor.html",
+                "item/edit.aspx": "item_editor.html", "item/edit": "item_editor.html",
+                "monster/edit.aspx": "monster_editor.html", "monster/edit": "monster_editor.html",
+                "shop/edit.aspx": "shop_editor.html", "shop/edit": "shop_editor.html"}
+EDITOR_PREFIXES = ("apop/", "quest/", "item/", "monster/", "shop/")
 
 # The DB-manager menu (the hamburger nav shared by every editor page via /editor/nav.js). Add a
 # new editor here and it appears in the menu everywhere. soon=True renders it greyed/disabled.
 EDITOR_MENU = [
     {"label": "Quests", "url": "/quest/Edit.aspx"},
     {"label": "Apops / Dialog", "url": "/apop/Edit.aspx"},
-    {"label": "Shops", "url": "", "soon": True},
-    {"label": "Items", "url": "", "soon": True},
-    {"label": "Monsters & Drops", "url": "", "soon": True},
+    {"label": "Items", "url": "/item/Edit.aspx"},
+    {"label": "Monsters & Drops", "url": "/monster/Edit.aspx"},
+    {"label": "Shops", "url": "/shop/Edit.aspx"},
 ]
 
 def _login_html(nxt, error):
@@ -745,6 +889,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._editor_logout()
         if key == "editor/nav.js" and method == "GET":   # shared hamburger nav (UI only, no data)
             return self._send_text(_editor_nav_js(), ctype="application/javascript; charset=utf-8")
+        if key == "editor/enums.json" and method == "GET":   # shared enum labels for dropdowns
+            return self._send_text(json.dumps(editor_enums.ENUMS), ctype="application/json; charset=utf-8")
 
         # staff gate: every editor page AND endpoint (apop/*, quest/*). key is already lowercased,
         # so a mixed-case path can't slip past. Enforced before any editor handler runs.

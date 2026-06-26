@@ -224,9 +224,11 @@ CREATE INDEX IF NOT EXISTS idx_quest_turnins_qoid ON quest_turnins(qo_id);
 CREATE TABLE IF NOT EXISTS quest_rewards (
     quest_id INTEGER NOT NULL,
     idx      INTEGER NOT NULL,
-    kind     TEXT,                -- Static / random
+    kind     TEXT,                -- QuestRewardType: Static / Roll / Choose / Random
     item_id  INTEGER,
     quantity INTEGER,
+    rate     REAL    NOT NULL DEFAULT 0,   -- QuestRewardItem.Rate (drop chance for Roll/Random)
+    hidden   INTEGER NOT NULL DEFAULT 0,   -- QuestRewardItem.Hidden
     PRIMARY KEY (quest_id, idx),
     FOREIGN KEY (quest_id) REFERENCES quests(quest_id) ON DELETE CASCADE
 );
@@ -785,6 +787,12 @@ def _migrate(c):
     ci_cols = _columns(c, "char_items")
     if "pattern_json" not in ci_cols:
         c.execute("ALTER TABLE char_items ADD COLUMN pattern_json TEXT")
+    # quest_rewards: QuestRewardItem.Rate/Hidden (for Roll/Random reward kinds).
+    qr_cols = _columns(c, "quest_rewards")
+    if "rate" not in qr_cols:
+        c.execute("ALTER TABLE quest_rewards ADD COLUMN rate REAL NOT NULL DEFAULT 0")
+    if "hidden" not in qr_cols:
+        c.execute("ALTER TABLE quest_rewards ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
     # classes.rig: the authoritative class visual/particle rig (added 2026-06-15i)
     # classes.resource: per-class resource bar model (updateClass params) (added 2026-06-17, P0-2)
     if _table_exists(c, "classes"):
