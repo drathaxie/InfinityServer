@@ -54,6 +54,7 @@
 <header>
   <h1>Quest Editor</h1>
   <select id="picker" title="Choose a quest"></select>
+  <button id="btnNew">+ New</button>
   <button class="go" id="btnSave">Save</button>
   <span class="status" id="status"></span>
 </header>
@@ -119,6 +120,33 @@ function render(){
   c1.appendChild(field("Description", area(q.Desc, v=>q.Desc=v)));
   c1.appendChild(field("End text", area(q.EndText, v=>q.EndText=v)));
   m.appendChild(c1);
+
+  // 1b. wiring: who gives it, where, who you turn it in to
+  const cd=card("NPC & Location (wiring)");
+  const rd1=document.createElement("div"); rd1.className="row";
+  rd1.append(field("Giver NPC ID", inp(q.NPCID, v=>q.NPCID=parseInt(v)||0,"number")));
+  rd1.append(field("Giver NPC name", inp(q.NPCName, v=>q.NPCName=v)));
+  rd1.append(field("Map name", inp(q.MapName, v=>q.MapName=v)));
+  rd1.append(field("Frame", inp(q.Frame, v=>q.Frame=v)));
+  rd1.append(field("Pad", inp(q.Pad, v=>q.Pad=parseInt(v)||0,"number")));
+  cd.appendChild(rd1);
+  const rd2=document.createElement("div"); rd2.className="row";
+  rd2.append(field("Turn-in NPC ID", inp(q.TurnInNPCID, v=>q.TurnInNPCID=parseInt(v)||0,"number")));
+  rd2.append(field("Turn-in map", inp(q.TurnInMapName, v=>q.TurnInMapName=v)));
+  rd2.append(field("Turn-in frame", inp(q.TurnInFrame, v=>q.TurnInFrame=v)));
+  rd2.append(field("Turn-in pad", inp(q.TurnInPad, v=>q.TurnInPad=parseInt(v)||0,"number")));
+  cd.appendChild(rd2);
+  const rd3=document.createElement("div"); rd3.className="row";
+  rd3.append(field("Prev quest ID", inp(q.prevQuest, v=>q.prevQuest=parseInt(v)||0,"number")));
+  rd3.append(field("Faction ID", inp(q.FactionID, v=>q.FactionID=parseInt(v)||0,"number")));
+  rd3.append(field("Class name (req)", inp(q.ClassName, v=>q.ClassName=v)));
+  rd3.append(field("Apop ID", inp(q.ApopID, v=>q.ApopID=parseInt(v)||0,"number")));
+  rd3.append(field("Once only", sel(q.Once?"1":"0", [["0","no"],["1","yes"]], v=>q.Once=(v==="1"))));
+  cd.appendChild(rd3);
+  const dn=document.createElement("p"); dn.className="hint";
+  dn.textContent="Giver NPC ID = the monster/NPC that offers this quest (e.g. Redux = 99998). Turn-in NPC ID = who you complete it with. These wire the quest to an NPC.";
+  cd.appendChild(dn);
+  m.appendChild(cd);
 
   // 2. objectives (turnins) + their drops + refs
   const c2=card("Objectives");
@@ -215,7 +243,18 @@ async function save(){
   if(j.ok){ setStatus("saved quest "+j.ID); } else setStatus("error: "+(j.msg||"save failed"),false);
 }
 
+function newQuest(){
+  const v=prompt("New quest ID:", "");
+  if(v==null) return;
+  const id=parseInt(v)||0;
+  if(!id){ setStatus("invalid id", false); return; }
+  qid=id;
+  data={ quest:{ QuestID:id, Name:"New Quest", Desc:"", EndText:"", Gold:0, Exp:0 },
+         turnins:[], drops:{}, refs:{}, rewards:[] };
+  render(); setStatus("new quest "+id+" — fill in (set Giver NPC ID) + Save");
+}
 $("#picker").onchange=e=>loadQuest(e.target.value);
+$("#btnNew").onclick=newQuest;
 $("#btnSave").onclick=save;
 (async()=>{
   try { ENUMS = await (await fetch("/editor/enums.json")).json(); } catch(e){ ENUMS={}; }

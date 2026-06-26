@@ -534,9 +534,11 @@ def quest_editor_save(conn, payload):
             {"ItemID": r.get("item_id"), "Quantity": int(r.get("quantity", 1) or 1),
              "Rate": float(r.get("rate", 0) or 0), "Hidden": bool(r.get("hidden"))})
     quest["Rewards"] = rw
-    conn.execute("UPDATE quests SET name=?, descr=?, end_text=?, raw=? WHERE quest_id=?",
-                 (quest.get("Name"), quest.get("Desc"), quest.get("EndText"),
-                  json.dumps(quest, separators=(",", ":")), qid))
+    conn.execute("INSERT INTO quests (quest_id, name, descr, end_text, raw) VALUES (?,?,?,?,?) "
+                 "ON CONFLICT(quest_id) DO UPDATE SET name=excluded.name, descr=excluded.descr, "
+                 "end_text=excluded.end_text, raw=excluded.raw",
+                 (qid, quest.get("Name"), quest.get("Desc"), quest.get("EndText"),
+                  json.dumps(quest, separators=(",", ":"))))
     db.store_quest_turnins(conn, qid, turnins)
     qoids = [int(t["QOID"]) for t in turnins if t.get("QOID") is not None]
     if qoids:
