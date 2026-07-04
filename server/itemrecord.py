@@ -61,7 +61,12 @@ def to_item(cols):
 def cols_to_row(cols):
     row = {}
     for c in SCALAR_COLS:
-        row[c] = cols.get(c)
+        v = cols.get(c)
+        # Real captures carry these as JSON 0/1 (int), not true/false — SQLite accepts either
+        # (dynamically typed), but Postgres's BOOLEAN columns reject an int parameter outright
+        # (DatatypeMismatch), so coerce here, the one chokepoint every item passes through
+        # regardless of backend.
+        row[c] = bool(v) if (v is not None and COL_TYPES.get(c) == "BOOLEAN") else v
     for c in JSON_COLS:
         v = cols.get(c)
         row[c] = None if v is None else json.dumps(v, separators=(",", ":"))

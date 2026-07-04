@@ -104,7 +104,11 @@ def cols_to_row(cols):
     """canonical dict -> a {column: storable_value} mapping for INSERT/UPDATE."""
     row = {}
     for c in SCALAR_COLS:
-        row[c] = cols.get(c)
+        v = cols.get(c)
+        # Real captures can carry a bool column as JSON 0/1 (int) rather than true/false —
+        # SQLite tolerates either, but Postgres's BOOLEAN columns reject an int param outright
+        # (DatatypeMismatch); coerce here so both backends accept whatever the capture had.
+        row[c] = bool(v) if (v is not None and COL_TYPES.get(c) == "BOOLEAN") else v
     for c in JSON_COLS:
         v = cols.get(c)
         row[c] = None if v is None else json.dumps(v, separators=(",", ":"))
