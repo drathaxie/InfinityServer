@@ -52,7 +52,12 @@ def main():
 
     # playback: /cutscene <id> -> getDialog serves the SAME saved cutscene (no sample echo)
     assert game.load_dialog(conn, cid) == blob2, "getDialog plays the saved cutscene from our store"
-    assert game.load_dialog(conn, 999999) == "", "unknown cutscene -> empty"
+    # An unknown cutscene serves a minimal fade-and-complete scene, NOT "" — an empty scene hangs
+    # the client's player forever (PR #9). The quest/storyline step that triggered it then advances.
+    import json as _cj
+    unknown = game.load_dialog(conn, 999999)
+    assert unknown == game._MINIMAL_CUTSCENE, "unknown cutscene -> minimal fade-and-complete scene"
+    assert _cj.loads(unknown)["frames"][0][0] == "FadeToBlack", "minimal scene fades and completes"
 
     # the seeded captured AE cutscene (Bludrut Title Splash, id 28) plays
     import json as _json

@@ -41,6 +41,7 @@ import db
 import game
 import montemplates
 import placements
+import questdb
 import editor_enums
 
 HOST = "0.0.0.0"
@@ -447,10 +448,13 @@ def apop_save(conn, form):
         apop_id = int(row["nxt"])
     doc["ID"] = apop_id
     name = (doc.get("name") or f"Apop {apop_id}").strip() or f"Apop {apop_id}"
+    # Coerce any invalid `lockedMode` (RequirementLockType) before storing — one bad value bricks
+    # the client's whole-batch getApop parse, so never let it persist (this blocked BattleOn).
+    raw_out = game.sanitize_apop_raw(json.dumps(doc, separators=(",", ":")))
     conn.execute(
         "INSERT INTO apops(apop_id, name, raw) VALUES(?,?,?) "
         "ON CONFLICT(apop_id) DO UPDATE SET name=excluded.name, raw=excluded.raw",
-        (apop_id, name, json.dumps(doc, separators=(",", ":"))))
+        (apop_id, name, raw_out))
     conn.commit()
     return {"ok": True, "ID": apop_id}
 
@@ -672,16 +676,21 @@ def map_save(conn, form):
 
 def get_base_classes(conn, qs):
     """Data/GetBaseClasses -> {items, hairs, character_bundle}. Feeds char-create AND the /charedit
-    hair list (CharacterCustomizationController.BuildHairLists fetches this and reads .hairs). Served
-    from the `base_classes` kv catalog (seeded from AE's live endpoint); empty-but-valid if unset so
-    the client's JsonConvert never throws."""
+    hair list (CharacterCustomizationController.BuildHairLists fetches this and reads .hairs).
+    `items`/`character_bundle` are served from the `base_classes` kv catalog (seeded from AE's live
+    endpoint); `hairs` is generated from the hairs table (the full harvested roster, not just the
+    24 AE's base-classes response carries) so it can't drift from what /charedit and HairShop use."""
+    out = {"items": [], "hairs": [], "character_bundle": None}
     row = conn.execute("SELECT v FROM kv WHERE k=?", ("base_classes",)).fetchone()
     if row and row["v"]:
         try:
-            return json.loads(row["v"])
+            blob = json.loads(row["v"])
+            out["items"] = blob.get("items") or []
+            out["character_bundle"] = blob.get("character_bundle")
         except Exception:
             pass
-    return {"items": [], "hairs": [], "character_bundle": None}
+    out["hairs"] = db.hairs_list(conn)
+    return out
 
 
 # path (lowercased, no query) -> (method, handler taking (conn, query_or_form))
@@ -690,6 +699,7 @@ ROUTES = {
     "data/getmonsterdata":   ("GET",  get_monster_data),
     "data/getassetbundlesbyids": ("GET", get_asset_bundles),
     "data/infinityvars":     ("GET",  infinity_vars),
+    "data/questdb":          ("GET",  questdb.get),
     "data/getsoundtracks":   ("GET",  get_soundtracks),
     "login/nowinfinity":     ("POST", login_nowinfinity),
     "tweak/createnewapop":   ("POST", create_new_apop),

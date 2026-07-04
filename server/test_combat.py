@@ -570,6 +570,217 @@ def main():
     combat.auto_disengage(7)
     assert not any(u == 7 for u, *_ in combat.auto_engagements()), "auto disengaged"
     print(f"empowered FX OK: Scorched x{emp/max(base,1):.1f}, Impale heal, Incap stun; auto-engage round-trips")
+
+    # monster telegraphed tile skills (Ragnafluff): rotation pacing -> reported hit damage
+    combat.register_monster("rf", "m:5", hp=5000, mon_id=364, level=20)
+    tuid = 7777
+    combat._php[tuid] = combat.PLAYER_MAXHP
+    # an unarmed monster (no cast yet) -> a stale gmah report deals nothing
+    a0, hp0, _ = combat.monster_tile_hit("rf", "m:5", tuid, 1)
+    assert a0 is None and hp0 == combat.PLAYER_MAXHP, "no armed skill -> no damage"
+    # first cast always due; rotation index starts at -1 so the loop advances to 0
+    assert combat.monster_skill_index("rf", "m:5") == -1, "no cast yet"
+    assert combat.monster_skill_due("rf", "m:5", 1000.0), "first cast is always due"
+    # arm skill idx 0 with a 4.5s cd and mult 1.5; a reported hit deals ~ level swing * 1.5
+    combat.arm_monster_skill("rf", "m:5", 1000.0, 4.5, 1.5, 0)
+    assert combat.monster_skill_index("rf", "m:5") == 0
+    assert not combat.monster_skill_due("rf", "m:5", 1004.0), "on its 4.5s cooldown"
+    assert combat.monster_skill_due("rf", "m:5", 1005.0), "off cooldown after 4.5s"
+    atk, hp1, died = combat.monster_tile_hit("rf", "m:5", tuid, 1)
+    dmg = atk["Nodes"][0]["Damages"][0]
+    assert atk["Nodes"][0]["Targets"] == ["p:7777"] and atk["Nodes"][0]["Immediate"] is True
+    assert 100 <= dmg <= 300 and hp1 == combat.PLAYER_MAXHP - dmg, ("lvl20 swing*1.5", dmg)
+    assert not died
+    # next cast advances the rotation and can carry its own cooldown
+    combat.arm_monster_skill("rf", "m:5", 1005.0, 7.0, 1.5, 1)
+    assert combat.monster_skill_index("rf", "m:5") == 1, "rotation advanced"
+    assert not combat.monster_skill_due("rf", "m:5", 1011.0), "honors the 7s cd of skill 1"
+    # disengage clears the armed skill (no lingering damage / rotation after the fight)
+    combat.disengage("rf", "m:5")
+    assert combat.monster_skill_index("rf", "m:5") == -1, "rotation reset on disengage"
+    assert combat.monster_tile_hit("rf", "m:5", tuid, 1)[0] is None, "armed skill cleared"
+    print("monster tile skill OK: rotation index + per-skill cooldown, reported-hit dmg "
+          "(lvl20 x1.5), cleared on disengage")
+
+    # summoned adds (Ragnafluff's clones): register -> aggro -> die-for-good, capped by max_alive
+    combat.register_monster("rf2", "m:9", hp=200000, mon_id=364, level=20)
+    boss = "m:9"
+    assert combat.live_summon_count("rf2", boss) == 0
+    c1 = combat.add_summon("rf2", boss, mon_id=380, hp=4000, level=5, frame="R2")
+    c2 = combat.add_summon("rf2", boss, mon_id=380, hp=4000, level=5, frame="R2")
+    assert combat.is_summoned_ts(c1) and c1 != c2, ("negative unique ids", c1, c2)
+    assert combat.live_summon_count("rf2", boss) == 2, "two adds alive"
+    # an add is a real fightable monster: it has HP and can swing at its target
+    combat.engage("rf2", c1, 8888)
+    assert any(t == c1 for _, t, _ in combat.engagements()), "add aggro'd"
+    combat._php[8888] = combat.PLAYER_MAXHP
+    # a monster swing can MISS/DODGE now (P0-4); loop until one lands to verify the add hits
+    for _ in range(200):
+        combat._php[8888] = combat.PLAYER_MAXHP
+        atk, _, _ = combat.monster_attack("rf2", c1, 8888)
+        if atk["Nodes"][0]["Damages"][0] > 0:
+            break
+    assert atk["Caster"] == c1 and atk["Nodes"][0]["Damages"][0] > 0, "add melees (lvl5)"
+    # killing an add forgets it (no respawn) and frees a summon slot
+    combat._mon[("rf2", c1)] = 0
+    combat.forget_summon("rf2", c1)
+    assert combat.live_summon_count("rf2", boss) == 1, "dead add freed its slot"
+    print("monster summon OK: unique negative ids, adds aggro + melee, die-for-good frees slots")
+
+    # --- Conviction (Paladin/Reduxidain class 69420): stacks build/consume + per-stack scaling ---
+    import time as _t
+    puid = 4242
+    combat.register_player(puid, 2000)
+    combat.set_power(puid, {"ap": 30, "sp": 30, "tcr": 0.0, "scm": 1.5, "tha": 1.0})
+    combat.set_resource_model(puid, "conviction", 50)
+    assert combat._rp[puid] == 0, "conviction starts empty"
+    total, emp = combat._apply_determination(puid, 0, 90373)      # auto: +3 stacks
+    assert total == combat.CONV_AUTO_GAIN and not emp
+    total, emp = combat._apply_determination(puid, 1, 90369)      # Vow: +2 stacks
+    assert total == combat.CONV_AUTO_GAIN + 2 and not emp
+    combat._rp[puid] = 49
+    total, _ = combat._apply_determination(puid, 1, 90369)
+    assert total == 50, "stacks cap at the class MaxRP (50), not the global 100"
+    # per-stack scaling: Vow at 50 stacks = 1 + 0.03*50 = 2.5x (and the recorded stacks are
+    # consumed by the mult so the next cast re-records)
+    combat._rp[puid] = 50
+    combat._apply_determination(puid, 1, 90369)
+    assert abs(combat._conviction_mult(puid, 90369) - 2.5) < 1e-9
+    # Smite consumes ALL stacks (no DS empower) and scales on the CONSUMED count: 1+0.05*50=3.5
+    combat._rp[puid] = 50
+    total, emp = combat._apply_determination(puid, 4, 90372)
+    assert total == 0 and not emp, "Smite empties the pool without the Determined empower"
+    assert abs(combat._conviction_mult(puid, 90372) - 3.5) < 1e-9
+    combat._rp[puid] = 20
+    combat._apply_determination(puid, 3, 90371)                   # Guard: no gain, no scaling
+    assert combat._rp[puid] == 20 and combat._conviction_mult(puid, 90371) == 1.0
+    print(f"conviction OK: auto +{combat.CONV_AUTO_GAIN} / Vow +2 / cap 50, Vow 2.5x @50, "
+          f"Smite consumes-all 3.5x")
+
+    # Smite end-to-end: the cast's lifelink heals the caster for 30% of the damage dealt,
+    # and its Resource node reports the emptied pool
+    combat.register_monster("pal", "m:70", 10 ** 7)
+    sm_data = [{"0": {"Name": "OnRequest"}},
+               {"1": {"Name": "Cooldown", "CD": 6000},
+                "2": {"Name": "Damage", "DamageType": "Magical", "Multiplier": 1.5},
+                "3": {"Name": "Resource", "Amount": 0}}]
+    sm_forge = [{}, {"0": {"Next": {"id": "1", "Next": {"id": "2", "Next": {"id": "3"}}}}}]
+    combat._rp[puid] = 50
+    combat._php[puid] = 1000
+    atk, _, dmg = combat.cast_skill("pal", puid, 4, "m:70", sm_data, sm_forge, 90372)
+    heal = next(n for n in atk["Nodes"] if n["Name"] == "Damage" and n["Damages"][0] < 0)
+    assert heal["Damages"][0] == -max(1, round(dmg * 0.30)), "lifelink = 30% of damage dealt"
+    assert heal["Targets"] == [f"p:{puid}"] and heal["Immediate"] is True
+    assert combat.player_hp(puid) == 1000 + max(1, round(dmg * 0.30))
+    rn = next(n for n in atk["Nodes"] if n["Name"] == "Resource")
+    assert rn["Amount"] == 0, "Smite's Resource node reports the emptied pool"
+    assert atk["Nodes"][-1]["Name"] == "Resource", \
+        "the Resource (bar-set) must be the LAST node so the consume shows live, not next cast"
+    print(f"smite OK: {dmg} dmg -> lifelink heal {-heal['Damages'][0]}, pool reported empty")
+
+    # Guaranteed: a Damage node authored Guaranteed skips the to-hit/dodge roll — Smite must
+    # ALWAYS land (it spends the whole pool, so a whiff would feel awful). Cripple to-hit to a
+    # near-zero (truthy — set_power coerces a falsy 0.0 back to 1.0) so a normal hit misses
+    # almost always, and prove Guaranteed never does.
+    combat.set_power(puid, {"ap": 30, "sp": 30, "tcr": 0.0, "scm": 1.5, "tha": 0.001})
+    gsm_data = [{"0": {"Name": "OnRequest"}},
+                {"1": {"Name": "Damage", "DamageType": "Magical", "Multiplier": 1.5,
+                       "Guaranteed": True}}]
+    gsm_forge = [{}, {"0": {"Next": {"id": "1"}}}]
+    for _ in range(80):
+        combat._mon[("pal", "m:70")] = 10 ** 7
+        combat._rp[puid] = 10
+        a, _, d = combat.cast_skill("pal", puid, 4, "m:70", gsm_data, gsm_forge, 90372)
+        dn = next(n for n in a["Nodes"] if n["Name"] == "Damage")
+        assert combat.DT_MISS not in dn["DamageTypes"] and combat.DT_DODGE not in dn["DamageTypes"]
+        assert d > 0, "a Guaranteed Smite always deals damage (never a 0 miss)"
+    # control: the SAME node without the flag misses at tha 0.001 — so the flag is what matters
+    nsm_data = [{"0": {"Name": "OnRequest"}},
+                {"1": {"Name": "Damage", "DamageType": "Magical", "Multiplier": 1.5}}]
+    misses = 0
+    for _ in range(80):
+        combat._mon[("pal", "m:70")] = 10 ** 7
+        combat._rp[puid] = 10
+        _, _, dc = combat.cast_skill("pal", puid, 1, "m:70", nsm_data, gsm_forge, 90369)
+        misses += (dc == 0)
+    assert misses > 70, f"without Guaranteed, tha 0.001 misses ~always (got {misses}/80)"
+    print(f"guaranteed-hit OK: Smite never misses over 80 casts; unflagged control missed {misses}/80")
+
+    # Vow end-to-end: the damage the client sees must actually rise with stacks (the reported
+    # symptom was "didn't notice damage getting higher"). Single-shot now, tha 1.0 so no misses.
+    combat.set_power(puid, {"ap": 40, "sp": 40, "tcr": 0.0, "scm": 1.5, "tha": 1.0})
+    vow_data = [{"0": {"Name": "OnRequest"}},
+                {"1": {"Name": "Damage", "DamageType": "Physical", "Multiplier": 1.2},
+                 "2": {"Name": "Resource", "Amount": 2}}]
+    vow_forge = [{}, {"0": {"Next": {"id": "1", "Next": {"id": "2"}}}}]
+
+    def _vow_avg(stacks):
+        tot = 0
+        for _ in range(300):
+            combat._mon[("pal", "m:70")] = 10 ** 9
+            combat._rp[puid] = stacks
+            _, _, d = combat.cast_skill("pal", puid, 1, "m:70", vow_data, vow_forge, 90369)
+            tot += d
+        return tot / 300
+    lo, hi = _vow_avg(0), _vow_avg(50)
+    # 50 stacks = +150% -> 2.5x the 0-stack damage (±roll noise)
+    assert 2.3 < hi / lo < 2.7, f"Vow @50 stacks must ~2.5x its base ({lo:.0f}->{hi:.0f})"
+    print(f"vow scaling OK: {lo:.0f} dmg @0 stacks -> {hi:.0f} @50 ({hi/lo:.2f}x)")
+
+    # Protection: the heal scales with stacks (sp 100 * mult 2.0 * 2.5 @50 stacks, ±15% roll)
+    combat.set_power(puid, {"ap": 30, "sp": 100, "tcr": 0.0, "scm": 1.5, "tha": 1.0})
+    h_data = [{"0": {"Name": "OnRequest"}},
+              {"1": {"Name": "Damage", "Heal": True, "Multiplier": 2.0, "MaxTargets": 6}}]
+    h_forge = [{}, {"0": {"Next": {"id": "1"}}}]
+    combat._rp[puid] = 50
+    combat._php[puid] = 1
+    atk, _, _ = combat.cast_skill("pal", puid, 2, None, h_data, h_forge, 90370)
+    hn = next(n for n in atk["Nodes"] if n["Name"] == "Damage")
+    amt = -hn["Damages"][0]
+    assert 425 <= amt <= 575, f"Protection @50 stacks should heal ~500 (sp100*2*2.5), got {amt}"
+    print(f"protection OK: heal {amt} scaled 2.5x by 50 stacks")
+
+    # Guard: lands on the caster (not the monster), -25% incoming, outgoing bonus from stacks
+    g_data = [{"0": {"Name": "OnRequest"}},
+              {"1": {"Name": "Aura", "AuraName": "Paladin's Guard", "Duration": 6,
+                     "MaxTargets": 6}}]
+    g_forge = [{}, {"0": {"Next": {"id": "1"}}}]
+    combat._rp[puid] = 50
+    atk, _, _ = combat.cast_skill("pal", puid, 3, "m:70", g_data, g_forge, 90371)
+    an = next(n for n in atk["Nodes"] if n["Name"] == "Aura")
+    assert an["Targets"] == [f"p:{puid}"], "Guard is a party buff — never lands on the monster"
+    assert combat._guard_reduction("pal", f"p:{puid}") == 0.25
+    assert abs(combat._guard_dmg_bonus(f"p:{puid}") - (0.10 + 0.002 * 50)) < 1e-9, \
+        "outgoing bonus snapshots the caster's stacks at cast (+0.2%/stack)"
+    # a lvl-20 monster swings 100-180; guarded that lands 75-135 — every hit must respect the cap
+    combat.register_monster("pal", "m:71", 5000, level=20)
+    for _ in range(50):
+        combat._php[puid] = 2000
+        a2, _, _ = combat.monster_attack("pal", "m:71", puid)
+        d2 = a2["Nodes"][0]["Damages"][0]
+        assert d2 == 0 or 75 <= d2 <= 135, f"guarded swing outside the -25% band: {d2}"
+    # expiry drops the effect AND emits the AuraChange remove (the Dragonbane lesson)
+    combat._auras[("pal", f"p:{puid}")]["Paladin's Guard"]["ends"] = _t.time() - 1
+    removes = [pk for _, pk, _ in combat.aura_ticks() if pk.get("Cmd") == "AuraChange"]
+    assert any(pk["nam"] == "Paladin's Guard" and pk["Target"] == f"p:{puid}" for pk in removes)
+    assert combat._guard_reduction("pal", f"p:{puid}") == 0.0
+    print("guard OK: ally-targeted, -25% incoming enforced over 50 swings, +20% outgoing @50, "
+          "expiry sends the aura remove")
+
+    # decay: idle past the grace -> 5 stacks per step, step-throttled, reported for the hpmp push
+    combat._rp[puid] = 30
+    combat._conv_last_cast[puid] = _t.time() - (combat.CONV_DECAY_IDLE + 1)
+    combat._conv_next_decay.pop(puid, None)
+    decayed = dict(combat.conviction_decay())
+    assert decayed.get(puid) == 30 - combat.CONV_DECAY_RATE, "idle conviction drains per step"
+    assert puid not in dict(combat.conviction_decay()), "decay is throttled between steps"
+    pk = combat.resource_packet(puid, "Redux")
+    assert pk["Cmd"] == "hpmp" and pk["unm"] == "redux" and pk["RP"] == combat._rp[puid]
+    # mana/determination regression: the conviction machinery never touches other models
+    assert combat._resource_model.get(muid) == "mana"
+    assert all(u == puid for u, _ in [(puid, 0)] + list(decayed.items())), "only conviction decays"
+    assert combat._conviction_mult(muid, 90369) == 1.0, "non-conviction casters never scale"
+    print("conviction decay OK: 10s grace -> -5/step throttled, hpmp re-sync, no model bleed")
     print("ALL COMBAT TESTS PASSED")
 
 

@@ -14,6 +14,7 @@ import hmac
 import json
 import pathlib
 import random
+import re
 import secrets
 import time
 
@@ -90,20 +91,10 @@ def _gen_colors(seed_val):
 
 
 def _default_hair_id(conn, gender=None):
-    """The default hair for a brand-new character: the first hair in the base_classes catalog
-    matching the character's gender (the same list /charedit offers). 0 when the catalog isn't
-    present yet (e.g. local dev before the live base_classes is synced) — never a template's hair."""
-    row = conn.execute("SELECT v FROM kv WHERE k=?", ("base_classes",)).fetchone()
-    if not row or not row["v"]:
-        return 0
-    try:
-        hairs = (json.loads(row["v"]) or {}).get("hairs") or []
-    except (ValueError, TypeError):
-        return 0
-    if gender:
-        for h in hairs:
-            if str(h.get("Gender", "")).upper() == str(gender).upper():
-                return int(h.get("ID", 0) or 0)
+    """The default hair for a brand-new character: the first hair in the hairs catalog matching
+    the character's gender (the same list /charedit offers). 0 when the catalog isn't seeded yet
+    (e.g. local dev before hairs are imported) — never a template's hair."""
+    hairs = db.hairs_list(conn, gender=gender) if gender else db.hairs_list(conn)
     return int(hairs[0].get("ID", 0) or 0) if hairs else 0
 
 
@@ -360,13 +351,18 @@ def _grant_item(conn, char_id, item, loot_id=-1):
     a stack count — so the class is fully playable and CP stays consistent (P2-1)."""
     item_id = int(item.get("ID", 0))
     db.store_item(conn, item)               # ensure the catalog row exists (canonical columns)
+    # A dropped gem (ItemPattern) is a per-instance roll — its strength is unique, so gemmed
+    # gear must NEVER merge onto another row (that would clobber one roll with another's stack).
+    gem = item.get("ItemPattern")
+    gem_json = json.dumps(gem) if gem else None
     # Stack onto an existing non-banked row for this item (the client keys inventory by item ID,
     # so a second row collides and crashes login). Class items are the exception — their Quantity
-    # is class points, not a stack — so they're granted once at maxed CP, never merged.
-    if not _item_is_class(item) and not item.get("Equipped"):
+    # is class points, not a stack — so they're granted once at maxed CP, never merged. Gemmed
+    # gear is likewise never merged (unique roll per instance).
+    if not _item_is_class(item) and not item.get("Equipped") and gem is None:
         existing = conn.execute(
             "SELECT char_item_id FROM char_items WHERE char_id=? AND item_id=? AND banked=0 "
-            "ORDER BY char_item_id LIMIT 1", (char_id, item_id)).fetchone()
+            "AND pattern_json IS NULL ORDER BY char_item_id LIMIT 1", (char_id, item_id)).fetchone()
         if existing:
             conn.execute("UPDATE char_items SET quantity=quantity+? WHERE char_item_id=?",
                          (int(item.get("Quantity", 1) or 1), existing["char_item_id"]))
@@ -375,9 +371,10 @@ def _grant_item(conn, char_id, item, loot_id=-1):
     qty = seed.CLASS_CP_MAX if _item_is_class(item) else int(item.get("Quantity", 1) or 1)
     conn.execute(
         "INSERT INTO char_items(char_item_id, char_id, item_id, quantity, equipped, "
-        "banked, loot_id, purchase_date) VALUES(?,?,?,?,?,?,?,?)",
+        "banked, loot_id, purchase_date, pattern_json, char_pattern_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
         (cid, char_id, item_id, qty,
-         1 if item.get("Equipped") else 0, 0, loot_id, item.get("PurchaseDate")))
+         1 if item.get("Equipped") else 0, 0, loot_id, item.get("PurchaseDate"),
+         gem_json, cid if gem_json else None))
     return cid
 
 
@@ -1052,39 +1049,18 @@ def uid_for(char):
 
 
 def _hair_info(conn, hair_id, gender=None):
-    """Resolve a HairInfo {ID,Name,Filename,Gender,Bundle} for a hair_id from the base_classes
-    catalog (the same hair list /charedit picks from). Prefers the matching gender if duplicated."""
-    try:
-        hid = int(hair_id)
-    except (TypeError, ValueError):
-        return None
-    row = conn.execute("SELECT v FROM kv WHERE k=?", ("base_classes",)).fetchone()
-    if not row or not row["v"]:
-        return None
-    try:
-        hairs = (json.loads(row["v"]) or {}).get("hairs") or []
-    except (ValueError, TypeError):
-        return None
-    matches = [h for h in hairs if int(h.get("ID", -1)) == hid]
-    if not matches:
-        return None
-    if gender:
-        for h in matches:
-            if str(h.get("Gender", "")).upper() == str(gender).upper():
-                return h
-    return matches[0]
+    """Resolve a HairInfo {ID,Name,Filename,Gender,Bundle} for a hair_id from the hairs catalog
+    (the same list /charedit picks from). `gender` is accepted for call-site compatibility (a
+    hair_id is unique in the table, so it no longer disambiguates duplicates)."""
+    return db.hair(conn, hair_id)
 
 
 def load_hairshop(conn, shop_id):
-    """ResponseLoadHairShop: the hair catalog as HairData {HairID,sName,sFile,sGen,bundle}, mapped
-    from the same base_classes hair list /charedit uses. This is the PUBLIC path to character
+    """ResponseLoadHairShop: the hair catalog as HairData {HairID,sName,sFile,sGen,bundle}, from
+    the hairs table (the same catalog /charedit uses). This is the PUBLIC path to character
     customization (the HairShop apop button) — any player, no staff gate — so the client opens the
     customization overlay seeded with these hairs."""
-    row = conn.execute("SELECT v FROM kv WHERE k=?", ("base_classes",)).fetchone()
-    try:
-        hairs = (json.loads(row["v"]) or {}).get("hairs") or [] if row and row["v"] else []
-    except (ValueError, TypeError):
-        hairs = []
+    hairs = db.hairs_list(conn)
     hair = [{"HairID": h.get("ID"), "sName": h.get("Name"), "sFile": h.get("Filename"),
              "sGen": h.get("Gender"), "bundle": h.get("Bundle")} for h in hairs]
     return {"Cmd": "loadHairShop", "HairShopID": shop_id, "hair": hair}
@@ -1221,7 +1197,7 @@ def build_init_player(conn, char):
         "playerInfo": pinfo,
         "items": inventory(conn, char["id"]),
         "loot": [],                                   # pending loot is per-uid (loot.py); none at login
-        "patterns": [],                               # loose/unapplied gem inventory — not modelled
+        "patterns": patterns.loose_gems(conn, char["id"]),   # the enhancement gem bag (equipPattern)
         "houseItems": [],                             # houses — not modelled
         "friends": [],                                # social — not modelled
         "Actions": seact,                             # the class skill bar (sEAct) the HUD shows
@@ -1541,12 +1517,21 @@ def sell(conn, char, params):
     if _is_class_item(conn, item_id):
         return {"Cmd": "sellItem", "Success": False, "Message": "Class items can't be sold."}
 
+    # Never sell an EQUIPPED piece: its row is still worn on the avatar/HUD, and selling it would
+    # delete the row (and clobber any per-instance gem roll) while the client shows it equipped.
+    # Prefer a plain (un-gemmed) copy so a stack sale can't destroy a gem roll when a plain one
+    # exists. (pattern_json IS NOT NULL sorts False<True -> un-gemmed first.)
     row = conn.execute(
-        "SELECT * FROM char_items WHERE item_id=? AND char_id=? AND banked=0 "
-        "ORDER BY char_item_id LIMIT 1", (item_id, char["id"]),
+        "SELECT * FROM char_items WHERE item_id=? AND char_id=? AND banked=0 AND equipped=0 "
+        "ORDER BY (pattern_json IS NOT NULL), char_item_id LIMIT 1", (item_id, char["id"]),
     ).fetchone()
     if row is None:
-        return {"Cmd": "sellItem", "Success": False, "Message": "You don't own that."}
+        equipped_only = conn.execute(
+            "SELECT 1 FROM char_items WHERE item_id=? AND char_id=? AND banked=0 AND equipped=1 "
+            "LIMIT 1", (item_id, char["id"])).fetchone()
+        return {"Cmd": "sellItem", "Success": False,
+                "Message": ("Unequip that item before selling it." if equipped_only
+                            else "You don't own that.")}
     char_item_id = int(row["char_item_id"])
 
     item = db.item(conn, item_id) or {}
@@ -1570,14 +1555,34 @@ def sell(conn, char, params):
             "Amount": amount, "CharItemID": char_item_id}
 
 
+# Valid `lockedMode` values (the client's RequirementLockType enum). The client deserializes the
+# WHOLE getApop batch at once, so ONE apop carrying an unknown value (e.g. "Show") throws in
+# ResponseGetApop and bricks EVERY NPC in the area — this is what made BattleOn un-joinable.
+_VALID_LOCK_MODES = {"Hide", "Gray", "Lock"}
+_LOCKMODE_RE = re.compile(r'"lockedMode"\s*:\s*"([^"]*)"')
+
+
+def sanitize_apop_raw(raw):
+    """Coerce any invalid apop `lockedMode` to "Hide" so a single bad enum value can't crash the
+    client's batch apop parse. Returns `raw` untouched when every value is already valid (the
+    common case), so it's cheap on the getApop hot path."""
+    if not raw or '"lockedMode"' not in raw:
+        return raw
+    if all(m.group(1) in _VALID_LOCK_MODES for m in _LOCKMODE_RE.finditer(raw)):
+        return raw
+    return _LOCKMODE_RE.sub(
+        lambda m: m.group(0) if m.group(1) in _VALID_LOCK_MODES else '"lockedMode":"Hide"', raw)
+
+
 def load_apops(conn, ids):
     """getApop.apopData = {apopID: apopJSONString} for the requested ids (the client json.loads
     each string itself). Served from the apops table — the authoritative, live-editable catalog
-    (seeded from data/apops.json; CreateNewApop / DialoggerSave mutate it in place, AE-style)."""
+    (seeded from data/apops.json; CreateNewApop / DialoggerSave mutate it in place, AE-style).
+    Each raw is run through sanitize_apop_raw so a stale bad `lockedMode` can't brick the batch."""
     out = {}
     for aid in ids:
         row = conn.execute("SELECT raw FROM apops WHERE apop_id=?", (aid,)).fetchone()
-        out[str(aid)] = row["raw"] if row else _empty_apop(aid)
+        out[str(aid)] = sanitize_apop_raw(row["raw"]) if row else _empty_apop(aid)
     return out
 
 
@@ -1613,6 +1618,30 @@ def load_dialog(conn, dialog_id):
     return row["raw"] if (row and row["raw"]) else _MINIMAL_CUTSCENE
 
 
+def give_item(conn, char, item_id, qty=1):
+    """Grant `qty` of catalog item `item_id` to a character (dev /item cheat).
+    Returns the item dict shaped for an ResponseAddOrUpdateItems packet, or None
+    if the item isn't in our catalog. Stacks onto an existing row like a normal
+    grant; class items are granted once at maxed CP (their Quantity is class points)."""
+    try:
+        item_id = int(item_id)
+        qty = max(1, int(qty))
+    except (TypeError, ValueError):
+        return None
+    item = db.item(conn, item_id)
+    if item is None:
+        return None
+    item["Quantity"] = qty
+    cid = _grant_item(conn, char["id"], item)
+    conn.commit()
+    # Re-read the persisted stack count so the client shows the true total after a merge.
+    row = conn.execute("SELECT quantity FROM char_items WHERE char_item_id=?", (cid,)).fetchone()
+    item["CharItemID"] = cid
+    item["LootID"] = -1
+    item["Quantity"] = int(row["quantity"]) if row else qty
+    return item
+
+
 def remove_item(conn, char, params):
     """removeItem [itemID, qty]: permanently delete owned copies. The client
     removes from its own UI optimistically; we persist so it stays gone on relog."""
@@ -1624,9 +1653,11 @@ def remove_item(conn, char, params):
     # never drop a class item (its Quantity is class points, not a stack) — P2-1
     if _is_class_item(conn, item_id):
         return None
+    # skip EQUIPPED rows (worn on the avatar) and prefer plain over gemmed copies, so a delete
+    # can't destroy an equipped piece or clobber a gem roll while a plain copy exists.
     row = conn.execute(
-        "SELECT * FROM char_items WHERE item_id=? AND char_id=? AND banked=0 "
-        "ORDER BY char_item_id LIMIT 1", (item_id, char["id"])).fetchone()
+        "SELECT * FROM char_items WHERE item_id=? AND char_id=? AND banked=0 AND equipped=0 "
+        "ORDER BY (pattern_json IS NOT NULL), char_item_id LIMIT 1", (item_id, char["id"])).fetchone()
     if row is None:
         return None
     remaining = int(row["quantity"]) - qty
@@ -1677,6 +1708,22 @@ def equip_item(conn, char, item_id):
                      "PrefabName": item.get("PrefabName"), "EquipSpot": spot,
                      "ItemType": item.get("ItemType"), "Scale": item.get("Scale"),
                      "OffsetX": item.get("OffsetX"), "OffsetY": item.get("OffsetY")}
+    # A CLASS armor's eqp entry must be the class RIG, not the stripped catalog item — the
+    # catalog rows carry no ClassParticleBundle, and the client sets Player.classBundle from
+    # this very packet (Player.updateData reads eqp[Class].ClassParticleBundle). Serving the
+    # raw item nulled the bundle and silently killed ALL skill particles/aura VFX until the
+    # next login (which goes through build_init_player and applies the rig). Same source
+    # of truth as login.
+    if spot == EQUIP_SPOT_CLASS:
+        cls_id = forge.class_for_armor_item(conn, item_id)
+        crow = conn.execute("SELECT rig FROM classes WHERE class_id=?",
+                            (cls_id,)).fetchone() if cls_id is not None else None
+        try:
+            rig = json.loads(crow["rig"]) if crow and crow["rig"] else None
+        except (TypeError, ValueError):
+            rig = None
+        if rig:
+            equipped_item.update(rig)
     return {"Cmd": "equipItem", "equippedItem": equipped_item,
             "player": f"p:{uid_for(char)}", "equipSpot": spot}
 

@@ -69,6 +69,44 @@
   ],
   "Interruptable": [
    {"Name": "Value", "NameOverride": "Interruptable", "ComponentType": 0, "ReturnType": 3, "Tooltip": "Whether the skill can be interrupted while casting.", "AllowNulls": false}
+  ],
+  "HitTiles": [
+   {"Name": "Shape", "NameOverride": "Shape", "ComponentType": 0, "ReturnType": 0, "Options": ["Circle", "Rectangle", "VerticalRectangle"], "Tooltip": "MONSTER skill: telegraphed ground zone the client renders, then reports who's caught (e.g. VerticalRectangle = sweeping red bars). Damage applies on the report.", "AllowNulls": false},
+   {"Name": "Speed", "NameOverride": "Speed", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Telegraph fill time (seconds) before the zone deals damage.", "AllowNulls": true, "NullDisplay": "2.5"},
+   {"Name": "ScaleX", "NameOverride": "Scale X", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Zone width.", "AllowNulls": true, "NullDisplay": "3"},
+   {"Name": "ScaleY", "NameOverride": "Scale Y", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Zone height.", "AllowNulls": true, "NullDisplay": "20"},
+   {"Name": "VFX", "NameOverride": "VFX", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Optional VFX overlay id.", "AllowNulls": true, "NullDisplay": ""},
+   {"Name": "CastAnimation", "NameOverride": "Cast Anim", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Monster animation while the zone fills.", "AllowNulls": true, "NullDisplay": "Castcharge"},
+   {"Name": "FinishAnimation", "NameOverride": "Finish Anim", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Monster animation when the zone resolves.", "AllowNulls": true, "NullDisplay": "Attack1"}
+  ],
+  "TileTrack": [
+   {"Name": "Shape", "NameOverride": "Shape", "ComponentType": 0, "ReturnType": 0, "Options": ["Cross", "Line"], "Tooltip": "MONSTER skill: lances that scan the room then resolve. Cross = a horizontal + vertical line meeting in the middle.", "AllowNulls": false},
+   {"Name": "Track", "NameOverride": "Track", "ComponentType": 0, "ReturnType": 0, "Options": ["Center", "Sides"], "Tooltip": "Where the scan converges (Center) or sweeps from (Sides).", "AllowNulls": false},
+   {"Name": "Speed", "NameOverride": "Speed", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Scan time (seconds) before the hit resolves.", "AllowNulls": true, "NullDisplay": "2"},
+   {"Name": "ScaleX", "NameOverride": "Scale X", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Lance thickness (horizontal).", "AllowNulls": true, "NullDisplay": "2"},
+   {"Name": "ScaleY", "NameOverride": "Scale Y", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Lance thickness (vertical).", "AllowNulls": true, "NullDisplay": "2"},
+   {"Name": "VFX", "NameOverride": "VFX", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Optional VFX overlay id.", "AllowNulls": true, "NullDisplay": ""},
+   {"Name": "CastAnimation", "NameOverride": "Cast Anim", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Monster animation while the lances scan.", "AllowNulls": true, "NullDisplay": "Attack1"},
+   {"Name": "FinishAnimation", "NameOverride": "Finish Anim", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Monster animation when the lances resolve.", "AllowNulls": true, "NullDisplay": "Attack1"}
+  ],
+  "HitStream": [
+   {"Name": "PosX", "NameOverride": "Pos X", "ComponentType": 1, "ReturnType": 1, "Tooltip": "MONSTER skill: a moving wall of damage. Spawn X (arena coords).", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "PosY", "NameOverride": "Pos Y", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Spawn Y (arena coords).", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "Speed", "NameOverride": "Speed", "ComponentType": 1, "ReturnType": 1, "Tooltip": "How fast the wall sweeps across.", "AllowNulls": true, "NullDisplay": "1"},
+   {"Name": "Duration", "NameOverride": "Duration (ms)", "ComponentType": 1, "ReturnType": 2, "Tooltip": "How long the wall persists.", "AllowNulls": true, "NullDisplay": "15000"},
+   {"Name": "ScaleX", "NameOverride": "Scale X", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Wall width.", "AllowNulls": true, "NullDisplay": "2"},
+   {"Name": "ScaleY", "NameOverride": "Scale Y", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Wall height.", "AllowNulls": true, "NullDisplay": "1"},
+   {"Name": "VFX", "NameOverride": "VFX", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Wall VFX id (e.g. a moving fire effect).", "AllowNulls": true, "NullDisplay": ""},
+   {"Name": "FinishAnimation", "NameOverride": "Finish Anim", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Monster animation when the wall spawns.", "AllowNulls": true, "NullDisplay": "Attack3"}
+  ],
+  "Summon": [
+   {"Name": "MonID", "NameOverride": "Monster ID", "ComponentType": 1, "ReturnType": 2, "Tooltip": "MONSTER skill: spawn this catalog monster as a fightable add (server-side spawnMob).", "AllowNulls": false},
+   {"Name": "Count", "NameOverride": "Count", "ComponentType": 1, "ReturnType": 2, "Tooltip": "How many to spawn per cast.", "AllowNulls": true, "NullDisplay": "1"},
+   {"Name": "MaxAlive", "NameOverride": "Max Alive", "ComponentType": 1, "ReturnType": 2, "Tooltip": "Cap on adds alive at once (recurring casts only top up to this).", "AllowNulls": true, "NullDisplay": "2"},
+   {"Name": "HP", "NameOverride": "HP", "ComponentType": 1, "ReturnType": 2, "Tooltip": "Each add's HP.", "AllowNulls": true, "NullDisplay": "4000"},
+   {"Name": "Level", "NameOverride": "Level", "ComponentType": 1, "ReturnType": 2, "Tooltip": "Each add's level (scales its melee).", "AllowNulls": true, "NullDisplay": "5"},
+   {"Name": "X", "NameOverride": "Spawn X", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Spawn X (arena coords).", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "Y", "NameOverride": "Spawn Y", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Spawn Y (arena coords).", "AllowNulls": true, "NullDisplay": "0"}
   ]
  },
 

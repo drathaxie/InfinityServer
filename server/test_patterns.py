@@ -55,20 +55,39 @@ def main():
         assert inv2[90001].get("ItemPattern") is not None, "gem must persist"
         assert inv2[90001]["ItemPattern"]["Base"] == rw["pattern"]["Base"]
 
-        # equipPattern addresses the item by its CATALOG ID (PatternPreview sends selectedItem.ID,
-        # not a char_item_id) - resolve the owned instance, don't 404. (Regression: the client sent
-        # item_id 17585 for a Blade whose char_item_id was 2842 -> "item not found".)
-        re = patterns.equip_pattern(c, char["id"], 90001, 555, -1)
-        assert re["Cmd"] == "UpdatePattern" and re["Success"], f"equipPattern by item ID must resolve, got {re}"
-        assert re["pattern"]["Base"] == 31, "applied a Common weapon gem (Base 31)"
-
-        # removePattern clears it
-        cpid = c.execute("SELECT char_pattern_id FROM char_items WHERE char_id=? AND item_id=?",
-                         (char["id"], 90001)).fetchone()["char_pattern_id"]
-        rr = patterns.remove_pattern(c, char["id"], cpid)
+        # --- gem bag (char_patterns / initPlayer.patterns[]): grant a loose gem, slot it onto
+        #     gear via equipPattern (by the gear's CATALOG id + the bag gem's CharPatternID),
+        #     and removePattern returns it to the bag (lossless). ---
+        wgem = patterns.roll_pattern({"EquipSpot": patterns.WEAPON}, archetype="warrior", quality=9)
+        cpid = patterns.grant_gem(c, char["id"], wgem)
+        assert any(g["CharPatternID"] == cpid for g in patterns.loose_gems(c, char["id"])), \
+            "a granted gem shows in the bag (initPlayer.patterns[])"
+        re = patterns.equip_pattern(c, char["id"], 90001, cpid, -1)
+        assert re["Cmd"] == "UpdatePattern" and re["Success"], f"equipPattern must resolve, got {re}"
+        assert re["pattern"]["Base"] == wgem["Base"] and re["pattern"]["STR"] == wgem["STR"], \
+            "the gear gets the BAG gem's own stats (not a fixed Common)"
+        assert not any(g["CharPatternID"] == cpid for g in patterns.loose_gems(c, char["id"])), \
+            "the slotted gem leaves the bag"
+        inv_g = {i["ID"]: i for i in game.inventory(c, char["id"])}
+        assert inv_g[90001]["ItemPattern"]["Base"] == wgem["Base"], "applied gem persists on the item"
+        # a wrong-slot gem is rejected (an Armor gem can't go on a Weapon)
+        agem = patterns.roll_pattern({"EquipSpot": patterns.ARMOR}, archetype="wizard", quality=7)
+        acp = patterns.grant_gem(c, char["id"], agem)
+        bad = patterns.equip_pattern(c, char["id"], 90001, acp, -1)
+        assert not bad["Success"] and "slot" in bad["errorMessage"].lower(), "slot mismatch is rejected"
+        # a gem ITEM (ItemType 43) grants to the bag with archetype+slot from its name
+        gpat = patterns.gem_item_pattern({"Name": "Wizard Armor Gem", "ItemType": 43}, quality=8)
+        assert gpat["EquipSpot"] == patterns.ARMOR and gpat["INT"] > gpat["STR"], \
+            "'Wizard Armor Gem' -> a wizard (INT) gem for the Armor slot"
+        # removePattern pulls the weapon's gem back into the bag (not destroyed)
+        cpid2 = c.execute("SELECT char_pattern_id FROM char_items WHERE char_id=? AND item_id=90001",
+                          (char["id"],)).fetchone()["char_pattern_id"]
+        rr = patterns.remove_pattern(c, char["id"], cpid2)
         assert rr["Cmd"] == "removePattern"
+        assert any(g["pattern"].get("Base") == wgem["Base"] for g in patterns.loose_gems(c, char["id"])), \
+            "the removed gem returns to the bag"
         inv3 = {i["ID"]: i for i in game.inventory(c, char["id"])}
-        assert inv3[90001].get("ItemPattern") is None, "removePattern must clear the gem"
+        assert inv3[90001].get("ItemPattern") is None, "removePattern clears the gear's gem"
 
         # --- KEYSTONE (capture 2026-06-18): gems are the source of stats + weapon damage ---
         # 1=1 anchors: the minted default weapon gem equals the captured "Common Weapon"
@@ -147,6 +166,29 @@ def main():
     # the no-gem fallback is the (higher) ap-derived band - proves the gem path is in force
     flo, fhi = _band(9101, None)
     assert flo > ghi, f"ap fallback band (min {flo}) sits above the gem band (max {ghi})"
+
+    # --- class-based, rarity-scaled drop gems (roll_pattern) ---
+    wpn = {"EquipSpot": patterns.WEAPON, "Level": 5}
+    # archetype decides the pumped stat: a Warrior gem's biggest stat is STR, a Wizard gem's INT
+    warr = patterns.roll_pattern(wpn, archetype="warrior", quality=8)
+    assert max(warr, key=lambda k: warr[k] if k in ("STR", "INT", "DEX", "WIS", "END", "LUK") else -1) == "STR", \
+        f"a warrior gem must pump STR, got {warr}"
+    wiz = patterns.roll_pattern(wpn, archetype="wizard", quality=8)
+    assert wiz["INT"] > wiz["STR"], f"a wizard gem must favour INT over STR, got {wiz}"
+    assert patterns.roll_pattern(wpn, archetype="rogue", quality=8)["DEX"] >= 8, "rogue gem pumps DEX"
+    assert patterns.roll_pattern(wpn, archetype="healer", quality=8)["WIS"] >= 8, "healer gem pumps WIS"
+    # rarity IS strength: higher Quality -> higher weapon Base (Common 31 .. Mythic 230)
+    assert patterns.roll_pattern(wpn, quality=5)["Base"] == 31
+    assert patterns.roll_pattern(wpn, quality=10)["Base"] > patterns.roll_pattern(wpn, quality=7)["Base"]
+    # the primary stat scales with rarity too (Mythic warrior STR >> Common warrior STR, on average)
+    lo = sum(patterns.roll_pattern(wpn, archetype="warrior", quality=5)["STR"] for _ in range(200))
+    hi = sum(patterns.roll_pattern(wpn, archetype="warrior", quality=10)["STR"] for _ in range(200))
+    assert hi > lo * 1.6, f"Mythic warrior STR must dwarf Common ({lo/200:.1f} -> {hi/200:.1f})"
+    # archetype inferred from a gem item's name; non-enhanceable items never roll a gem
+    assert patterns.archetype_of("Wizard Armor Gem") == "wizard"
+    assert patterns.roll_pattern({"EquipSpot": 1}, quality=9) is None, "a non-gear item can't be gemmed"
+    print(f"drop-gems OK: warrior->STR wizard->INT rogue->DEX healer->WIS; rarity scales Base "
+          f"(31..230) + primary stat ({lo/200:.0f}->{hi/200:.0f})")
 
     print(f"patterns OK: weapon gem Base={rw['pattern']['Base']}, gear gem END={ra['pattern']['END']}, "
           f"persists on item, removePattern clears it")
