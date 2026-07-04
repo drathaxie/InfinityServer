@@ -414,8 +414,14 @@ def inventory(conn, char_id):
     # with the same item id crash login with "same key has already been added". Merge duplicate
     # rows into one wire item (sum quantities; equipped wins) — a safety net over _grant_item's
     # stacking that also heals any duplicates already in the DB.
+    # Houses + furniture (EquipSpot 8/9) are NOT regular inventory — they're served as the
+    # separate initPlayer.houseItems list (house_items) in the houseItem shape.
     merged, order = {}, []
     for r in rows:
+        _idef = db.item(conn, r["item_id"])
+        if _idef is not None and int(_idef.get("EquipSpot", 0) or 0) in (
+                EQUIP_SPOT_HOUSE, EQUIP_SPOT_HOUSE_ITEM):
+            continue
         iid = r["item_id"]
         if iid in merged:
             merged[iid]["Quantity"] = int(merged[iid].get("Quantity", 1) or 1) + int(r["quantity"] or 1)
@@ -863,16 +869,156 @@ def reset_saga(conn, char, sid):
     return {"Cmd": "updateQuestBits", "qComplete": list(bits)}
 
 
-def house_save(conn, char, house_map_id, frame, data):
-    """housesave [houseMapID, frame, itemsJSON]: persist the layout. -> houseSave{success}."""
+# ---- houses -----------------------------------------------------------------
+# Entering a house is a NORMAL AreaJoin whose area.houseData = mapHouseData
+# {sHouseInfo, items:[houseItem], unm} (Area.isHouse = houseData != null); the client builds
+# the map like any area and HouseItemManager.Init places the furniture. sHouseInfo is the
+# serialized {frame: [PlacedHouseItem]} dict — exactly what housesave persists. Houses are
+# EquipSpot 8 (deeds), furniture is EquipSpot 9; both live in char_items but are served via
+# initPlayer.houseItems (the houseItem shape), NOT the regular inventory. [[houses-doable]]
+EQUIP_SPOT_HOUSE = 8
+EQUIP_SPOT_HOUSE_ITEM = 9
+
+# ItemType -> the client's iType enum NAME (houseItem.sType). ResponseEquipHouse gates on
+# sType == "House"; the house UI buckets furniture by WallItem/FloorItem.
+_HOUSE_STYPE = {23: "House", 24: "WallItem", 25: "FloorItem"}
+
+# Which MAP a house deed opens. Only two house maps exist right now: the cottage (the
+# captured `house` map — the default every deed falls back to) and `infinityhouse`.
+# Overridable without code via kv 'house_maps' = {"<itemID>": "<mapName>"} (staff/SQL).
+_DEFAULT_HOUSE_MAPS = {48363: "infinityhouse"}      # Infinity Titan Base
+HOUSE_DEFAULT_MAP = "house"                          # the cottage
+
+
+def house_map_for(conn, item_id):
+    """The map name a house deed opens: kv 'house_maps' override > built-in > the cottage."""
     try:
-        hmid = int(house_map_id)
+        overrides = json.loads(db.kv_get(conn, "house_maps") or "{}")
+    except (TypeError, ValueError):
+        overrides = {}
+    return (overrides.get(str(item_id))
+            or _DEFAULT_HOUSE_MAPS.get(int(item_id))
+            or HOUSE_DEFAULT_MAP)
+
+
+def house_items(conn, char_id):
+    """The character's houses + furniture as wire houseItem dicts (initPlayer.houseItems and
+    houseData.items). MobileCompatibility MUST be 1 — UIMiniMenu refuses to enter a house
+    that 'hasn't been converted'."""
+    out = []
+    for ci in conn.execute(
+            "SELECT * FROM char_items WHERE char_id=? AND banked=0 ORDER BY char_item_id",
+            (char_id,)).fetchall():
+        item = db.item(conn, ci["item_id"])
+        if item is None or int(item.get("EquipSpot", 0) or 0) not in (
+                EQUIP_SPOT_HOUSE, EQUIP_SPOT_HOUSE_ITEM):
+            continue
+        out.append({
+            "ItemID": int(item.get("ID", ci["item_id"])),
+            "CharItemID": int(ci["char_item_id"]),
+            "Bundle": item.get("Bundle"),
+            "PrefabName": item.get("PrefabName"),
+            "sType": _HOUSE_STYPE.get(int(item.get("ItemType", 0) or 0), "FloorItem"),
+            "iQty": int(ci["quantity"] or 1),
+            "bEquip": 1 if ci["equipped"] else 0,
+            "sName": item.get("Name") or "",
+            "iCost": int(item.get("Cost", 0) or 0),
+            "bCoins": bool(item.get("Coins")),
+            "sDesc": item.get("Description") or "",
+            "bHouse": True,
+            "bTemp": False,
+            "MobileCompatibility": 1,
+        })
+    return out
+
+
+def equipped_house_id(conn, char_id):
+    """The equipped house deed's catalog item id (playerInfo.EquippedHouseItemID), or -1."""
+    row = conn.execute(
+        "SELECT ci.item_id FROM char_items ci JOIN items it ON it.item_id=ci.item_id "
+        "WHERE ci.char_id=? AND ci.equipped=1 AND ci.banked=0 AND it.equip_spot=? LIMIT 1",
+        (char_id, EQUIP_SPOT_HOUSE)).fetchone()
+    return int(row["item_id"]) if row else -1
+
+
+def equip_house(conn, char, item_id):
+    """Equip a house deed (the client sends a plain equipItem for it; the reply is
+    ResponseEquipHouse, NOT the avatar equipItem — it flips bEquip flags + EquippedHouseItemID
+    and shows a message box). One equipped house at a time. None if not an owned house."""
+    try:
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        return None
+    cid = char["id"]
+    item = db.item(conn, item_id)
+    if item is None or int(item.get("EquipSpot", 0) or 0) != EQUIP_SPOT_HOUSE:
+        return None
+    owned = conn.execute(
+        "SELECT char_item_id FROM char_items WHERE char_id=? AND item_id=? AND banked=0 "
+        "ORDER BY char_item_id LIMIT 1", (cid, item_id)).fetchone()
+    if owned is None:
+        return None
+    conn.execute(
+        "UPDATE char_items SET equipped=0 WHERE char_id=? AND equipped=1 AND item_id IN "
+        "(SELECT item_id FROM items WHERE equip_spot=?)", (cid, EQUIP_SPOT_HOUSE))
+    conn.execute("UPDATE char_items SET equipped=1 WHERE char_item_id=?",
+                 (owned["char_item_id"],))
+    conn.commit()
+    return {"Cmd": "equipHouse", "ItemID": item_id,
+            "Msg": f"{item.get('Name') or 'Your house'} is now your home!"}
+
+
+def _house_layout(conn, char_id, house_item_id):
+    """The stored {frame: [PlacedHouseItem]} dict for one of a character's houses ({} if none)."""
+    row = conn.execute(
+        "SELECT data FROM char_houses WHERE char_id=? AND house_map_id=?",
+        (char_id, int(house_item_id))).fetchone()
+    try:
+        layout = json.loads(row["data"]) if row and row["data"] else {}
+    except (TypeError, ValueError):
+        layout = {}
+    return layout if isinstance(layout, dict) else {}
+
+
+def build_house_data(conn, owner_char):
+    """The AreaJoin houseData for a player's equipped house: the saved placement dict
+    (sHouseInfo), the owner's furniture inventory (items), and the owner's name. unm MUST be
+    the lowercase name — the client compares it to mainPlayer.Name (registered lowercase) to
+    decide ownership (edit rights + adopting items into myPlayerData.houseItems)."""
+    hid = equipped_house_id(conn, owner_char["id"])
+    layout = _house_layout(conn, owner_char["id"], hid) if hid > 0 else {}
+    return {"sHouseInfo": json.dumps(layout, separators=(",", ":")) if layout else "",
+            "items": house_items(conn, owner_char["id"]),
+            "unm": (owner_char["name"] or "").lower()}
+
+
+def house_save(conn, char, house_id, frame, data):
+    """housesave [houseItemID, frame, placedJSON]: persist ONE FRAME's placement list into the
+    house's stored {frame: [...]} dict (the client's Save button sends GatherFrameSaveData for
+    the current frame only). frame '*' resets the WHOLE house (the Clear-house flow sends
+    ('*', '[]')). -> houseSave{success}. (house_id is the equipped house ITEM id — stored in
+    char_houses.house_map_id, whose name predates knowing that.)"""
+    try:
+        hid = int(house_id)
     except (TypeError, ValueError):
         return {"Cmd": "houseSave", "success": False, "reason": "Bad house id."}
+    frame = frame or ""
+    if frame == "*":
+        layout = {}
+    else:
+        layout = _house_layout(conn, char["id"], hid)
+        try:
+            placed = json.loads(data) if data else []
+        except (TypeError, ValueError):
+            return {"Cmd": "houseSave", "success": False, "reason": "Bad layout data."}
+        if placed:
+            layout[frame] = placed
+        else:
+            layout.pop(frame, None)             # an emptied room drops out of the dict
     conn.execute(
         "INSERT INTO char_houses(char_id, house_map_id, frame, data) VALUES(?,?,?,?) "
         "ON CONFLICT(char_id, house_map_id) DO UPDATE SET frame=excluded.frame, data=excluded.data",
-        (char["id"], hmid, frame or "", data or "[]"))
+        (char["id"], hid, frame, json.dumps(layout, separators=(",", ":"))))
     conn.commit()
     return {"Cmd": "houseSave", "success": True}
 
@@ -1310,7 +1456,7 @@ def build_init_player(conn, char):
         "BankSlots": DEFAULT_BANK_SLOTS,
         "BagSlots": DEFAULT_BAG_SLOTS,
         "HouseSlots": DEFAULT_HOUSE_SLOTS,
-        "EquippedHouseItemID": -1,                    # the client's no-house default
+        "EquippedHouseItemID": equipped_house_id(conn, char["id"]),   # -1 = no house
         "achievements": achievements,
         "guild": None,                                # null is the client's real "no guild" value
     }
@@ -1323,7 +1469,7 @@ def build_init_player(conn, char):
         "items": inventory(conn, char["id"]),
         "loot": [],                                   # pending loot is per-uid (loot.py); none at login
         "patterns": patterns.loose_gems(conn, char["id"]),   # the enhancement gem bag (equipPattern)
-        "houseItems": [],                             # houses — not modelled
+        "houseItems": house_items(conn, char["id"]),  # owned houses + furniture (houseItem shape)
         "friends": [],                                # social — not modelled
         "Actions": seact,                             # the class skill bar (sEAct) the HUD shows
     }
@@ -1813,6 +1959,8 @@ def equip_item(conn, char, item_id):
     item, spot = _equip_spot(conn, item_id)
     if item is None:
         return None
+    if spot in (EQUIP_SPOT_HOUSE, EQUIP_SPOT_HOUSE_ITEM):
+        return None      # houses/furniture equip via equip_house, never the avatar rig
 
     # unequip anything currently in this EquipSpot, then equip this item (if owned)
     for r in conn.execute(

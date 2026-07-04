@@ -372,6 +372,18 @@ async def dispatch(session, writer, raw):
                                                f"Relog to see them in the enhancement menu."})
                 print(f"  [item/gem] {session.char['name']} +{len(made)} bag gems: {made}")
                 return
+            if idef is not None and int(idef.get("EquipSpot", 0) or 0) in (
+                    game.EQUIP_SPOT_HOUSE, game.EQUIP_SPOT_HOUSE_ITEM):
+                # houses/furniture live in the houseItems list, not the bag — granting one
+                # via addItems would wrongly insert it into the client's regular inventory
+                # dict. Grant + tell the staffer (the house menu picks it up on relog).
+                game.give_item(session.conn, session.char, item_id, qty)
+                await send_obj(writer, {"Cmd": "chatm", "Name": "Server", "channel": "server",
+                                        "ID": 0,
+                                        "msg": f"+{qty} {idef.get('Name') or item_id} "
+                                               f"(house item). Relog to see it in the house menu."})
+                print(f"  [item/house] {session.char['name']} +{qty} of {item_id}")
+                return
             item = game.give_item(session.conn, session.char, item_id, qty)
             if item is None:
                 await send_obj(writer, {"Cmd": "chatm", "msg": f"No item {item_id} in catalog.",
@@ -731,10 +743,43 @@ async def dispatch(session, writer, raw):
         return
 
     if cmd == "house":
-        # Loading a house is a join to the house MAP, which we haven't captured — so the house
-        # instance can't be served yet (the layout still persists via housesave). Recognized
-        # no-op so it doesn't hit the unhandled log. Flagged: needs the house map data.
-        print("  [house] load not served (house map not captured); housesave still persists")
+        # Enter a house (RequestHouse: no params = your own; Params=[name] = visit an ONLINE
+        # player's). A house is a normal AreaJoin carrying area.houseData (mapHouseData:
+        # saved placements + the owner's furniture list + owner name) — the client builds the
+        # map like any area and HouseItemManager places the furniture. Instanced per owner as
+        # <houseMap>-<ownerUID>, matching AE's captured "house-508915". [[houses-doable]]
+        if session.char is None or session.member is None:
+            return
+        owner_char = session.char
+        if params and str(params[0]).strip():           # /house <name> -> visit
+            target = world.find_member(str(params[0]).strip())
+            tsess = _players.get(target.uid) if target is not None else None
+            if tsess is None or tsess.char is None:
+                await send_obj(writer, {"Cmd": "chatm", "msg": f'"{params[0]}" is not online.',
+                                        "Name": "Server", "channel": "server", "ID": 0})
+                return
+            owner_char = tsess.char
+        hid = game.equipped_house_id(session.conn, owner_char["id"])
+        if hid <= 0:
+            whose = "You don't" if owner_char["id"] == session.char["id"] else \
+                f'"{owner_char["name"]}" doesn\'t'
+            await send_obj(writer, {"Cmd": "chatm", "msg": f"{whose} have a house equipped.",
+                                    "Name": "Server", "channel": "server", "ID": 0})
+            return
+        map_name = game.house_map_for(session.conn, hid)
+        if maps.area_payload(map_name, session.conn) is None:
+            # the deed's map isn't in our maps table (e.g. a house type we haven't captured):
+            # tell the player instead of silently dumping them at the portal fallback.
+            await send_obj(writer, {"Cmd": "chatm",
+                                    "msg": f"That house's map ('{map_name}') isn't available yet.",
+                                    "Name": "Server", "channel": "server", "ID": 0})
+            return
+        hd = game.build_house_data(session.conn, owner_char)
+        await send_obj(writer, game.change_state(session.char))
+        await _enter_area(session, writer, map_name, str(game.uid_for(owner_char)),
+                          house_data=hd)
+        print(f"  [house] {session.char['name']} -> {owner_char['name']}'s "
+              f"{map_name} (deed {hid}, {len(hd['items'])} houseItems)")
         return
 
     if cmd == "gmah":
@@ -890,6 +935,15 @@ async def dispatch(session, writer, raw):
 
     if cmd == "equipItem":                  # equipping a CLASS armor switches skills
         item_id = params[0] if params else None
+        # a HOUSE deed equips via the house flow (ResponseEquipHouse sets EquippedHouseItemID
+        # + flips the deed list's bEquip), never the avatar rig — the client sends the same
+        # plain equipItem for both, so route by the item's EquipSpot here.
+        if session.char is not None and item_id is not None:
+            hresp = game.equip_house(session.conn, session.char, item_id)
+            if hresp is not None:
+                await send_obj(writer, hresp)
+                print(f"  [s2c] equipHouse (deed {item_id})")
+                return
         new_class = forge.class_for_armor_item(session.conn, item_id)
         if new_class is not None and session.char is not None:
             session.char = session.conn.execute(
@@ -1338,14 +1392,22 @@ async def _respawn_later(area, target):
     print(f"  [respawn] {target} in {area}")
 
 
-async def _enter_area(session, writer, base, room):
+async def _enter_area(session, writer, base, room, house_data=None):
     """Send the player into instance `base-room`: build the AreaJoin, move them in the world
     (announce departure/arrival), register that instance's monsters, and reply. Shared by
-    firstJoin/tfer (client-initiated) and /goto + summon-accept (server-initiated)."""
+    firstJoin/tfer (client-initiated) and /goto + summon-accept (server-initiated).
+    `house_data` (mapHouseData dict) makes the join a HOUSE: Area.isHouse keys on it."""
     area_name = f"{base}-{room}"
     area = (maps.area_payload(base, session.conn)
             or maps.area_payload("infinityportal", session.conn))
     area["areaName"] = area_name               # tell the client which room it's in
+    if house_data is not None:
+        area["houseData"] = house_data         # placements + furniture + owner (Area.isHouse)
+    else:
+        # the captured house map docs EMBED the captured player's houseData (suswolf's 81
+        # furniture items) — never serve that template on a plain map join (/join house):
+        # without an owner's house_data the area is just a map, not anyone's house.
+        area.pop("houseData", None)
     # learn this map's MonMapID -> (catalog MonID, name), keyed by the INSTANCE so each room
     # has its own monster set (the captured entities carry only the m:<MonMapID> instance id).
     combat.register_area_monsters(area_name, area.get("monBranch"))
