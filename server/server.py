@@ -584,6 +584,26 @@ async def dispatch(session, writer, raw):
         print(f"  [s2c] LoadBank ({len(items)} items)")
         return
 
+    if cmd in ("bankFromInv", "bankToInv", "bankSwapInv"):
+        # Bank moves (decomp: RequestInvToBank/BankToInv/BankSwap; Params = catalog item ids).
+        # The client only mutates on the s2c reply, so a refused move (equipped / class item /
+        # full / not owned) is answered by silence and nothing changes on either side.
+        if session.char is None or not params:
+            return
+        session.char = session.conn.execute(
+            "SELECT * FROM characters WHERE id=?", (session.char["id"],)).fetchone()
+        if cmd == "bankFromInv":
+            resp = game.bank_deposit(session.conn, session.char, params[0])
+        elif cmd == "bankToInv":
+            resp = game.bank_withdraw(session.conn, session.char, params[0])
+        else:
+            resp = game.bank_swap(session.conn, session.char, params[0],
+                                  params[1] if len(params) > 1 else None)
+        if resp is not None:
+            await send_obj(writer, resp)
+        print(f"  [s2c] {cmd} {params} -> {'ok' if resp else 'refused'}")
+        return
+
     if cmd == "getQuests":                   # RequestGetQuests(Params=quest IDs) -> defs from catalog.
         ids = []
         for p in params:

@@ -441,6 +441,103 @@ def bank(conn, char_id):
     return items
 
 
+# ---- bank moves (deposit / withdraw / swap) ---------------------------------
+# Wire (decomp: Request/ResponseInvToBank, BankToInv, BankSwap):
+#   c2s bankFromInv [itemID]         -> s2c {Cmd:"InvToBank",  invID}
+#   c2s bankToInv   [itemID]         -> s2c {Cmd:"BankToInv",  bankID}
+#   c2s bankSwapInv [invID, bankID]  -> s2c {Cmd:"BankSwap",   invID, bankID}
+# The IDs are CATALOG item ids (the client keys both its items and bankedItems dicts by ID),
+# and the client only mutates ON the response — so refusing a move is simply not replying
+# (there is no failure packet in the protocol). ALL of an item's rows move together (gemmed +
+# plain), matching the client's one-dict-entry-per-id view.
+
+def _slots_used(conn, char_id, banked):
+    """How many bank/bag SLOTS are in use = distinct item ids on that side (the client shows
+    one slot per item id — its dict is keyed by ID — regardless of row count server-side)."""
+    return conn.execute(
+        "SELECT COUNT(DISTINCT item_id) AS n FROM char_items WHERE char_id=? AND banked=?",
+        (char_id, 1 if banked else 0)).fetchone()["n"]
+
+
+def _move_rows(conn, char_id, item_id, to_banked):
+    """Flip banked on every row of an item on the source side. Returns rows moved (0 = not
+    owned there). Refuses (0) if any source row is EQUIPPED — the client's own UI blocks
+    banking equipped items ('You can not bank equipped items!'), and unequipping via the
+    bank would desync the avatar; a modded client must not bypass that."""
+    src = 0 if to_banked else 1
+    rows = conn.execute(
+        "SELECT char_item_id, equipped FROM char_items WHERE char_id=? AND item_id=? AND banked=?",
+        (char_id, item_id, src)).fetchall()
+    if not rows or any(r["equipped"] for r in rows):
+        return 0
+    conn.execute("UPDATE char_items SET banked=? WHERE char_id=? AND item_id=? AND banked=?",
+                 (1 if to_banked else 0, char_id, item_id, src))
+    return len(rows)
+
+
+def bank_deposit(conn, char, item_id):
+    """bankFromInv [itemID]: move an owned item (all its rows) into the bank. Returns the
+    s2c InvToBank, or None to refuse (not owned / equipped / class item / bank full)."""
+    try:
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        return None
+    cid = char["id"]
+    # a class item's Quantity is class points; keep it in the bag so the class stays usable
+    if _is_class_item(conn, item_id):
+        return None
+    already_banked = conn.execute(
+        "SELECT 1 FROM char_items WHERE char_id=? AND item_id=? AND banked=1 LIMIT 1",
+        (cid, item_id)).fetchone() is not None
+    if not already_banked and _slots_used(conn, cid, banked=True) >= DEFAULT_BANK_SLOTS:
+        return None                                     # bank full (new slot needed)
+    if not _move_rows(conn, cid, item_id, to_banked=True):
+        return None
+    conn.commit()
+    return {"Cmd": "InvToBank", "invID": item_id}
+
+
+def bank_withdraw(conn, char, item_id):
+    """bankToInv [itemID]: move a banked item (all its rows) back to the bag. Returns the
+    s2c BankToInv, or None to refuse (not banked / bag full)."""
+    try:
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        return None
+    cid = char["id"]
+    already_bagged = conn.execute(
+        "SELECT 1 FROM char_items WHERE char_id=? AND item_id=? AND banked=0 LIMIT 1",
+        (cid, item_id)).fetchone() is not None
+    if not already_bagged and _slots_used(conn, cid, banked=False) >= DEFAULT_BAG_SLOTS:
+        return None                                     # bag full (new slot needed)
+    if not _move_rows(conn, cid, item_id, to_banked=False):
+        return None
+    conn.commit()
+    return {"Cmd": "BankToInv", "bankID": item_id}
+
+
+def bank_swap(conn, char, inv_id, bank_id):
+    """bankSwapInv [invID, bankID]: one bag item and one banked item trade places (1-for-1,
+    so no slot-cap check). Returns the s2c BankSwap, or None to refuse — and moves NEITHER
+    on refusal, so client and server can't diverge on a half-swap."""
+    try:
+        inv_id, bank_id = int(inv_id), int(bank_id)
+    except (TypeError, ValueError):
+        return None
+    if inv_id == bank_id:       # would deposit then immediately re-withdraw the same rows
+        return None
+    cid = char["id"]
+    if _is_class_item(conn, inv_id):
+        return None
+    if not _move_rows(conn, cid, inv_id, to_banked=True):
+        return None
+    if not _move_rows(conn, cid, bank_id, to_banked=False):
+        conn.rollback()                                 # undo the deposit half
+        return None
+    conn.commit()
+    return {"Cmd": "BankSwap", "invID": inv_id, "bankID": bank_id}
+
+
 # ---- quests ----------------------------------------------------------------
 
 def default_classes(conn):
@@ -650,14 +747,29 @@ def quest_data(conn, char):
 
 
 def accept_quest(conn, char, qid):
-    """acceptQuest -> ResponseQuestAccept (Cmd 'QuestAccept'). Idempotent; won't re-accept
-    a completed quest unless it's repeatable (TODO: repeatables)."""
+    """acceptQuest -> ResponseQuestAccept (Cmd 'QuestAccept'). Idempotent. A COMPLETED quest
+    can be re-accepted iff it's repeatable — the client's own offer gate is
+    `!IsQuestComplete || IsRepeatable` where IsRepeatable = !Once (Quest.cs:140), so the
+    server honors the same flag: re-accepting flips status back to accepted and clears the
+    stale objective counters (which also clears its questsComplete bit on the next questData).
+    A quest with Once=true stays completed."""
     qid = int(qid)
-    if _quest_status(conn, char["id"], qid) != 2:
+    cid = char["id"]
+    status = _quest_status(conn, cid, qid)
+    if status == 2:
+        q = _quest_def(conn, qid)
+        if q is None or q.get("Once"):
+            return {"Cmd": "QuestAccept", "QuestID": qid}   # one-time: stays completed
+        conn.execute("UPDATE char_quests SET status=1 WHERE char_id=? AND quest_id=?",
+                     (cid, qid))
+        for t in _quest_turnins(conn, qid):                 # fresh run: zero the counters
+            conn.execute("DELETE FROM char_quest_objectives WHERE char_id=? AND qoid=?",
+                         (cid, t.get("QOID")))
+    else:
         conn.execute("INSERT INTO char_quests(char_id, quest_id, status) VALUES(?,?,1) "
-                     "ON CONFLICT(char_id, quest_id) DO NOTHING", (char["id"], qid))
-        conn.execute("UPDATE characters SET tracked_quest=? WHERE id=?", (qid, char["id"]))
-        conn.commit()
+                     "ON CONFLICT(char_id, quest_id) DO NOTHING", (cid, qid))
+    conn.execute("UPDATE characters SET tracked_quest=? WHERE id=?", (qid, cid))
+    conn.commit()
     return {"Cmd": "QuestAccept", "QuestID": qid}
 
 
@@ -787,6 +899,19 @@ def machine_interact(conn, char, qid, machine_name):
     return quest_data(conn, _refresh(conn, char))
 
 
+def _name_in_objective(mon_name, objective_name):
+    """Whether a monster's name appears in an objective name as a WHOLE WORD (both lowercased),
+    allowing a plural suffix ('Sneevil' matches 'Sneevils Defeated'). A bare substring test
+    mis-credited quests — 'rat' is inside 'piRATe', so killing a Rat advanced a 'Pirate
+    Defeated' objective. Word boundaries fix that while still matching multi-word names
+    ('Red Dragon' in 'Red Dragon Slain'). Mirrored by questdb._kill_targets (the bot KB must
+    hunt exactly what the server credits)."""
+    if not mon_name or not objective_name:
+        return False
+    return re.search(r"(?<![a-z0-9])" + re.escape(mon_name.lower()) + r"(?:e?s)?(?![a-z0-9])",
+                     objective_name.lower()) is not None
+
+
 def record_kill(conn, char, mon_catalog_id, mon_name=""):
     """Server-driven killcount: on a monster kill bump Killcount objectives (QOType 1) of
     accepted quests whose RefIDs list includes this monster's catalog id. Returns True if any
@@ -834,7 +959,7 @@ def record_kill(conn, char, mon_catalog_id, mon_name=""):
                 # No RefIDs (AE resolves the target server-side; not captured). The objective
                 # NAME is "<Monster> Defeated", so match it to the killed monster's name —
                 # killing a Sneevil only credits a "...Sneevil..." objective, not a frogzard one.
-                if mname not in (t.get("Name") or "").lower():
+                if not _name_in_objective(mname, t.get("Name")):
                     continue
             else:
                 # No RefIDs AND the monster can't be identified -> can't match this objective.
