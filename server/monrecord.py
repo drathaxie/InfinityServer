@@ -120,7 +120,11 @@ def row_to_cols(row):
     cols = {}
     for c in SCALAR_COLS:
         if c in row.keys() and row[c] is not None:
-            cols[c] = row[c]
+            v = row[c]
+            # SQLite has no real boolean type — a stored True/1 reads back as a plain int, which
+            # would then serialize to the wire as an int instead of a JSON bool. Postgres already
+            # returns a real bool here; this makes SQLite agree (mirrors cols_to_row's write side).
+            cols[c] = bool(v) if COL_TYPES.get(c) == "BOOLEAN" else v
     for c in JSON_COLS:
         v = row[c] if c in row.keys() else None
         if v is not None:
