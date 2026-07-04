@@ -100,6 +100,18 @@ CREATE TABLE IF NOT EXISTS char_items (
 );
 CREATE INDEX IF NOT EXISTS idx_char_items_char ON char_items(char_id);
 
+-- Loose gem inventory (the enhancement "gem bag" — initPlayer.patterns[]). A gem the player
+-- owns but hasn't slotted lives here as its rolled ItemPattern JSON (rarity=Quality, the
+-- archetype's primary stat, target EquipSpot). equipPattern moves one onto a gear item
+-- (char_items.pattern_json); removePattern returns it here. Class-based rarity gems (2026-07-02).
+CREATE TABLE IF NOT EXISTS char_patterns (
+    char_pattern_id INTEGER PRIMARY KEY,
+    char_id         INTEGER NOT NULL,
+    pattern_json    TEXT NOT NULL,                 -- the loose gem (ItemPattern) JSON
+    FOREIGN KEY (char_id) REFERENCES characters(id)
+);
+CREATE INDEX IF NOT EXISTS idx_char_patterns_char ON char_patterns(char_id);
+
 -- Shop meta (loadShop wrapper minus items). Columns are the source of truth; the loadShop
 -- blob is GENERATED from them (shoprecord). The column block below is generated from shoprecord.
 CREATE TABLE IF NOT EXISTS shops (
@@ -293,6 +305,57 @@ CREATE TABLE IF NOT EXISTS skills (
     auto_h_range REAL    NOT NULL DEFAULT 0,
     auto_v_range REAL    NOT NULL DEFAULT 0,
     mana         INTEGER NOT NULL DEFAULT 0
+);
+
+-- Live AE's asset-bundle catalog (data/GetAssetBundlesByIDs), harvested by
+-- capture/harvest_catalog.py against the CONTENT/STAGE/LIVE hosts. This is upstream
+-- Artix metadata, not player data - it maps a bundle ID to its CDN filename and per-
+-- environment version, letting us spot content (e.g. unshipped classes/animations)
+-- that's built on content/stage but never pushed live (version_live=0).
+CREATE TABLE IF NOT EXISTS asset_bundles (
+    bundle_id       INTEGER PRIMARY KEY,
+    name            TEXT,
+    type            TEXT,                    -- CLASS / ARMOR / ITEM / NPC / MAP / CUTSCENE / ...
+    filename        TEXT,
+    version_content INTEGER NOT NULL DEFAULT 0,
+    version_stage   INTEGER NOT NULL DEFAULT 0,
+    version_live    INTEGER NOT NULL DEFAULT 0,
+    dependency_id   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_asset_bundles_type ON asset_bundles(type);
+
+-- Hair catalog (Data/GetBaseClasses .hairs — the /charedit + HairShop picker list). Was a JSON
+-- blob under kv['base_classes'] (only the 24 default-class hairs AE's base-classes response
+-- carries); promoted to a real table, same pattern as monrecord/itemrecord, so the full harvested
+-- hairstyle roster (capture/harvest_bundle catalog, Type=="HAIR") can live here instead.
+CREATE TABLE IF NOT EXISTS hairs (
+    hair_id  INTEGER PRIMARY KEY,
+    name     TEXT,
+    gender   TEXT,          -- "M" / "F"
+    filename TEXT,          -- hair/<gender>/<Name>.swf
+    bundle   TEXT            -- {ID,Name,Filename,VersionStage,VersionLive} JSON
+);
+CREATE INDEX IF NOT EXISTS idx_hairs_gender ON hairs(gender);
+
+-- Soundtrack/audio bundles (harvest catalog Type MUSIC/AUDIO). The client streams these by
+-- bundle id (data/getsoundtracks); this is the catalog of what exists.
+CREATE TABLE IF NOT EXISTS soundtracks (
+    bundle_id     INTEGER PRIMARY KEY,
+    name          TEXT,
+    kind          TEXT,          -- MUSIC / AUDIO
+    filename      TEXT,
+    version_stage INTEGER NOT NULL DEFAULT 0,
+    version_live  INTEGER NOT NULL DEFAULT 0
+);
+
+-- Cinematic/cutscene ART bundles (harvest catalog Type CUTSCENE). Distinct from the `cutscenes`
+-- table above, which stores authored Dialogger dialog JSON — these are the .unity3d scene assets.
+CREATE TABLE IF NOT EXISTS cutscene_bundles (
+    bundle_id     INTEGER PRIMARY KEY,
+    name          TEXT,
+    filename      TEXT,
+    version_stage INTEGER NOT NULL DEFAULT 0,
+    version_live  INTEGER NOT NULL DEFAULT 0
 );
 
 -- Misc key/value (e.g. the next CharItemID counter).
@@ -702,6 +765,49 @@ def store_item(conn, it, replace=False):
               for c in itemrecord.ALL_COLS if c != "item_id")) if replace else "DO NOTHING"
     conn.execute(f"INSERT INTO items ({qc}) VALUES ({ph}) ON CONFLICT(item_id) {action}",
                  tuple(row[c] for c in itemrecord.ALL_COLS))
+
+
+_HAIRCOLS = ["hair_id", "name", "gender", "filename", "bundle"]
+
+
+def hair(conn, hair_id):
+    """A HairInfo {ID,Name,Filename,Gender,Bundle} dict for a hair_id (the same wire shape AE's
+    GetBaseClasses .hairs entries use), or None. Prefers `gender` when given, matching the old
+    kv-blob lookup's gender-preference behaviour (kept for callers that pass duplicate hair_ids)."""
+    row = conn.execute("SELECT hair_id,name,gender,filename,bundle FROM hairs WHERE hair_id=?",
+                       (int(hair_id),)).fetchone()
+    if row is None:
+        return None
+    return {"ID": row["hair_id"], "Name": row["name"], "Filename": row["filename"],
+            "Gender": row["gender"], "Bundle": json.loads(row["bundle"]) if row["bundle"] else None}
+
+
+def hairs_list(conn, gender=None):
+    """Every hair as HairInfo dicts, optionally filtered to one gender — feeds the /charedit
+    picker and the HairShop apop (data/GetBaseClasses .hairs, loadHairShop)."""
+    if gender:
+        rows = conn.execute("SELECT hair_id,name,gender,filename,bundle FROM hairs "
+                            "WHERE gender=? ORDER BY hair_id", (gender,)).fetchall()
+    else:
+        rows = conn.execute("SELECT hair_id,name,gender,filename,bundle FROM hairs "
+                            "ORDER BY hair_id").fetchall()
+    return [{"ID": r["hair_id"], "Name": r["name"], "Filename": r["filename"],
+             "Gender": r["gender"], "Bundle": json.loads(r["bundle"]) if r["bundle"] else None}
+            for r in rows]
+
+
+def store_hair(conn, h, replace=False):
+    """Upsert one HairInfo dict {ID,Name,Filename,Gender,Bundle}. replace=True overwrites an
+    existing row; default is insert-if-absent."""
+    hid = int(h.get("ID", 0))
+    bundle = h.get("Bundle")
+    action = ("DO UPDATE SET name=excluded.name, gender=excluded.gender, "
+              "filename=excluded.filename, bundle=excluded.bundle") if replace else "DO NOTHING"
+    conn.execute(
+        "INSERT INTO hairs (hair_id, name, gender, filename, bundle) VALUES (?,?,?,?,?) "
+        f"ON CONFLICT(hair_id) {action}",
+        (hid, h.get("Name"), h.get("Gender"),
+         h.get("Filename"), json.dumps(bundle, separators=(",", ":")) if bundle else None))
 
 
 _SHOPCOLS = ",".join(f'"{c}"' for c in shoprecord.ALL_COLS)

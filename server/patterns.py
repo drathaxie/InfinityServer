@@ -19,6 +19,7 @@ STR/END/DEX/INT/WIS/LUK, Wild, Base, Power, Name. Weapons use Base/Wild for thei
 damage range (GetMin/MaxWeaponRange = Base*(1-+Wild)); gear uses the stat bonuses.
 """
 import json
+import random
 
 import db
 
@@ -37,6 +38,100 @@ COMMON_WEAPON_L5 = {"ID": 1, "Quality": 5, "Level": 5,
                     "Name": "Common Weapon", "Power": 24}
 # Helm (Head) gems grant flat HEALTH instead of a damage Base (capture tooltip: "17 HEALTH").
 HELM_HP = 17
+
+# --- Random-rarity drop gems (the AE loot model) ------------------------------------------
+# Captured rewardPlayer drops (packets.jsonl) each carry an ItemPattern rolled at a RANDOM
+# Quality (the rarity) with Base/Power scaling by quality and randomised stats:
+#   Q5 Common   Fighter Helm  Base 31  Power 26   (STR4/END7/DEX4/INT1/WIS4/LUK6)
+#   Q6 Uncommon Wizard Armor  Base 68  Power 30   (STR1/END4/DEX5/INT5/WIS10/LUK5)
+#   Q7 Rare     Thief Armor   Base 76  Power 35   (STR5/END4/DEX10/INT2/WIS8/LUK6)
+# so a good drop = a high-Quality gem = a much bigger weapon Base + stats. Q5-6 Base/Power are
+# capture-anchored; Q7 real drop was Base 76 (kept a touch higher for a clean ladder), Q8-10 are
+# OUR extrapolation (flagged) since the capture only reached Rare. Weights make rarity climb rare.
+QUALITY_NAME = {5: "Common", 6: "Uncommon", 7: "Rare", 8: "Epic", 9: "Legendary", 10: "Mythic"}
+_QUALITY_WEIGHTS = [(5, 0.55), (6, 0.25), (7, 0.12), (8, 0.05), (9, 0.025), (10, 0.005)]
+_BASE_BY_QUALITY = {5: 31, 6: 68, 7: 95, 8: 130, 9: 175, 10: 230}
+_POWER_BY_QUALITY = {5: 26, 6: 32, 7: 40, 8: 50, 9: 63, 10: 80}
+
+# Gems are CLASS-BASED: the archetype decides which primary stat the gem pumps (a Warrior gem
+# raises STR, a Wizard gem INT, ...). The archetype's primary stat gets the big rarity-scaled
+# roll; the other five roll a small "spread". Archetype names match AQW's enhancement families
+# (and the captured gem Names: Fighter/Wizard/Thief/Healer). `default` = a balanced gem.
+_ARCHETYPE_PRIMARY = {
+    "warrior": "STR", "fighter": "STR", "brute": "STR",
+    "wizard": "INT", "mage": "INT", "sorcerer": "INT",
+    "rogue": "DEX", "thief": "DEX", "assassin": "DEX",
+    "healer": "WIS", "cleric": "WIS",
+    "lucky": "LUK", "hybrid": "END",
+}
+ARCHETYPES = ("warrior", "wizard", "rogue", "healer", "lucky", "hybrid")
+
+ITEMTYPE_GEM = 43                               # enhancement gem items (Fighter Helm Gem, ...)
+_SLOT_WORDS = {"weapon": WEAPON, "helm": HEAD, "head": HEAD,
+               "cape": BACK, "back": BACK, "armor": ARMOR}
+
+
+def is_gem_item(item):
+    """Whether a catalog item is an enhancement GEM token (ItemType 43) — granted to the loose
+    gem bag rather than the item inventory."""
+    return int((item or {}).get("ItemType", item.get("item_type", 0) or 0) or 0) == ITEMTYPE_GEM
+
+
+def gem_item_pattern(item, quality=None):
+    """Roll a bag gem from a gem ITEM: the archetype + target slot come from its name
+    ('Wizard Armor Gem' -> a wizard gem for the Armor slot), the rarity is rolled (or forced)."""
+    name = (item or {}).get("Name") or (item or {}).get("name") or ""
+    arch = archetype_of(name) or random.choice(ARCHETYPES)
+    low = name.lower()
+    spot = next((s for w, s in _SLOT_WORDS.items() if w in low), WEAPON)
+    return roll_pattern({"EquipSpot": spot, "Name": name}, archetype=arch, quality=quality)
+
+
+def archetype_of(name):
+    """Infer a gem's archetype from an item/gem name ('Wizard Armor Gem' -> 'wizard'); None if
+    no known family word is present."""
+    low = (name or "").lower()
+    for word, _stat in _ARCHETYPE_PRIMARY.items():
+        if word in low:
+            return word
+    return None
+
+
+def roll_quality():
+    """Pick a random gem Quality (5 Common .. 10 Mythic) on the weighted rarity curve."""
+    r = random.random()
+    acc = 0.0
+    for q, w in _QUALITY_WEIGHTS:
+        acc += w
+        if r < acc:
+            return q
+    return 5
+
+
+def roll_pattern(item, archetype=None, quality=None, level=5):
+    """Roll a class-based, rarity-scaled gem (ItemPattern) for an enhanceable item — the AE drop
+    model. Rarity (Quality) drives the weapon Base/Power and the overall stat magnitude; the
+    ARCHETYPE decides which primary stat gets the big roll (Warrior->STR, Wizard->INT, ...), the
+    rest get a small spread. `archetype`/`quality` force a family/tier (drops/dev); otherwise
+    both are rolled. Returns None for a non-enhanceable item (materials/class items never gem)."""
+    if not is_enhanceable(item):
+        return None
+    spot = int(item.get("EquipSpot", 0) or 0)
+    q = max(5, min(10, int(quality))) if quality else roll_quality()
+    arch = (archetype or "").lower() if archetype else random.choice(ARCHETYPES)
+    primary = _ARCHETYPE_PRIMARY.get(arch, "STR")
+    stats = {"STR": 0, "END": 0, "DEX": 0, "INT": 0, "WIS": 0, "LUK": 0}
+    for k in stats:                                      # small spread on every stat
+        stats[k] = random.randint(0, q // 2)
+    stats[primary] = random.randint(q, 3 * q)            # the archetype stat: the big rarity roll
+    pat = {"ID": 1, "Quality": q, "Level": int(level or 5),
+           "Wild": 0.1, "EquipSpot": spot,
+           "Base": _BASE_BY_QUALITY[q], "Power": _POWER_BY_QUALITY[q],
+           "Name": f"{QUALITY_NAME[q]} {arch.capitalize()}"}
+    pat.update(stats)
+    if spot == HEAD:                                      # helms also carry flat HP, scaled by rarity
+        pat["HP"] = round(HELM_HP * q / 5)
+    return pat
 
 
 def is_enhanceable(item):
@@ -128,33 +223,91 @@ def item_default_pattern(conn, char_id, item_id):
     return _update_pattern(item_id, pat)
 
 
-def equip_pattern(conn, char_id, item_id, char_pattern_id, loot_id=-1):
-    """Handle c2s equipPattern[selectedItem.ID, CharPatternID, LootID]. PatternPreview.cs:297
-    sends `RequestEquipPattern(selectedItem.ID, pItem.CharPatternID, ...)` — the first arg is the
-    item's CATALOG ID (despite the request field being named CharItemID), NOT a char_item_id. So
-    resolve the owned instance of that item (preferring the equipped one) and apply the gem.
+# --- the loose gem bag (char_patterns / initPlayer.patterns[]) -----------------------------
 
-    NOTE: a per-player GEM inventory (initPlayer.patterns[] -> a char_patterns table) isn't
-    modelled yet, so CharPatternID can't be resolved to a distinct gem's stats — we apply the
-    standard Common gem (same as Power Up). FLAGGED: distinct owned-gem stats are a later finding."""
+def _next_pattern_id(conn):
+    """Allocate a globally-unique instance id (shared with char_items so a CharPatternID never
+    collides with a CharItemID)."""
+    cur = int(db.kv_get(conn, "next_char_item_id", "1"))
+    db.kv_set(conn, "next_char_item_id", cur + 1)
+    return cur
+
+
+def grant_gem(conn, char_id, pattern):
+    """Drop a rolled gem into a character's loose gem bag. Returns its CharPatternID."""
+    cpid = _next_pattern_id(conn)
+    conn.execute("INSERT INTO char_patterns(char_pattern_id, char_id, pattern_json) VALUES(?,?,?)",
+                 (cpid, int(char_id), json.dumps(pattern)))
+    return cpid
+
+
+def loose_gems(conn, char_id):
+    """The character's unslotted gems -> initPlayer.patterns[] shape ({CharPatternID, pattern}).
+    Applied gems live on the gear (char_items.pattern_json) and are NOT listed here."""
+    out = []
+    for r in conn.execute("SELECT char_pattern_id, pattern_json FROM char_patterns WHERE char_id=? "
+                          "ORDER BY char_pattern_id", (int(char_id),)):
+        try:
+            out.append({"CharPatternID": r["char_pattern_id"], "pattern": json.loads(r["pattern_json"])})
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def equip_pattern(conn, char_id, item_id, char_pattern_id, loot_id=-1):
+    """Handle c2s equipPattern[selectedItem.ID, CharPatternID, LootID]: slot a LOOSE gem from the
+    bag onto an owned gear item. PatternPreview sends the gear's CATALOG id (not a char_item_id)
+    + the bag gem's CharPatternID. Validates the gem's EquipSpot matches the gear's slot, applies
+    it (char_items.pattern_json), removes it from the bag, and bounces any gem already on that
+    gear back to the bag (lossless swap)."""
+    gem = conn.execute("SELECT pattern_json FROM char_patterns WHERE char_pattern_id=? AND char_id=?",
+                       (int(char_pattern_id), char_id)).fetchone()
+    if gem is None:
+        return _update_pattern(item_id, None, ok=False, err="Gem not in your bag.")
+    pat = _parse_pattern(gem["pattern_json"])
+    if pat is None:
+        return _update_pattern(item_id, None, ok=False, err="Bad gem.")
     ci = conn.execute(
-        "SELECT * FROM char_items WHERE char_id=? AND item_id=? AND banked=0 "
-        "ORDER BY equipped DESC, char_item_id LIMIT 1", (char_id, int(item_id))).fetchone()
+        "SELECT ci.char_item_id, ci.pattern_json, it.equip_spot AS spot "
+        "FROM char_items ci JOIN items it ON it.item_id=ci.item_id "
+        "WHERE ci.char_id=? AND ci.item_id=? AND ci.banked=0 "
+        "ORDER BY ci.equipped DESC, ci.char_item_id LIMIT 1", (char_id, int(item_id))).fetchone()
     if ci is None:
         return _update_pattern(item_id, None, ok=False, err="Item not found.")
-    item = _item_def(conn, ci["item_id"]) or {}
-    pat = default_pattern(item)
-    conn.execute(
-        "UPDATE char_items SET pattern_json=?, char_pattern_id=? WHERE char_item_id=?",
-        (json.dumps(pat), char_pattern_id or ci["char_item_id"], ci["char_item_id"]))
+    gem_spot = int(pat.get("EquipSpot", 0) or 0)
+    if gem_spot and int(ci["spot"] or 0) and gem_spot != int(ci["spot"]):
+        return _update_pattern(item_id, None, ok=False,
+                               err="That gem doesn't fit this item's slot.")
+    if ci["pattern_json"]:                          # bounce the gem already on this gear to the bag
+        old = _parse_pattern(ci["pattern_json"])
+        if old is not None:
+            grant_gem(conn, char_id, old)
+    conn.execute("UPDATE char_items SET pattern_json=?, char_pattern_id=? WHERE char_item_id=?",
+                 (json.dumps(pat), int(char_pattern_id), ci["char_item_id"]))
+    conn.execute("DELETE FROM char_patterns WHERE char_pattern_id=?", (int(char_pattern_id),))
     conn.commit()
-    return _update_pattern(ci["item_id"], pat)
+    return _update_pattern(int(item_id), pat)
 
 
 def remove_pattern(conn, char_id, char_pattern_id):
-    """Handle c2s removePattern: clear the gem from whichever item holds it."""
-    conn.execute(
-        "UPDATE char_items SET pattern_json=NULL WHERE char_id=? AND char_pattern_id=?",
-        (char_id, char_pattern_id))
+    """Handle c2s removePattern: pull the gem off its gear and return it to the loose bag (so it
+    isn't destroyed — it can be re-slotted elsewhere)."""
+    ci = conn.execute(
+        "SELECT char_item_id, pattern_json FROM char_items "
+        "WHERE char_id=? AND char_pattern_id=? AND pattern_json IS NOT NULL",
+        (char_id, int(char_pattern_id))).fetchone()
+    if ci is not None:
+        old = _parse_pattern(ci["pattern_json"])
+        conn.execute("UPDATE char_items SET pattern_json=NULL, char_pattern_id=NULL "
+                     "WHERE char_item_id=?", (ci["char_item_id"],))
+        if old is not None:
+            grant_gem(conn, char_id, old)           # back to the bag, not lost
     conn.commit()
     return {"Cmd": "removePattern", "CharPatternID": int(char_pattern_id)}
+
+
+def _parse_pattern(pj):
+    try:
+        return json.loads(pj) if pj else None
+    except (TypeError, ValueError):
+        return None

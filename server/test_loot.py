@@ -9,6 +9,7 @@ import db
 import seed
 import game
 import loot
+import patterns
 
 
 def main():
@@ -72,6 +73,28 @@ def main():
     assert loot.pending(uid) == [] and len(game.inventory(conn, char["id"])) == inv_before, \
         "discard drops pending loot without adding it to the inventory"
     print("discard OK: Discard All clears pending without granting")
+
+    # --- drop gems: an enhanceable gear drop carries a random-rarity ItemPattern, and keeping it
+    #     persists that gem so the looted gear is actually stronger (the AE loot model) ---
+    gear_id = 970001
+    db.store_item(conn, {"ID": gear_id, "Name": "Loot Blade",
+                         "EquipSpot": patterns.WEAPON, "Level": 5}, replace=True)
+    conn.execute("INSERT INTO global_drops(item_id, rate, quantity) VALUES(?,1.0,1) "
+                 "ON CONFLICT(item_id) DO UPDATE SET rate=1.0", (gear_id,))
+    conn.commit()
+    rolled = [it for it in loot.roll_drops(conn, None) if int(it.get("ID")) == gear_id]
+    assert rolled, "a rate-1.0 global gear drop must roll"
+    assert rolled[0].get("ItemPattern") and rolled[0]["ItemPattern"]["Base"] > 0, \
+        "an enhanceable gear drop carries a rolled weapon gem (Base>0)"
+    w2 = loot.add_pending(uid, [rolled[0]])
+    a2, _ = loot.take(conn, char["id"], uid, w2[0]["ID"], w2[0]["LootID"])
+    assert a2["items"][0].get("ItemPattern"), "kept gear keeps its rolled gem in the wire"
+    owned = conn.execute("SELECT pattern_json FROM char_items WHERE char_id=? AND item_id=?",
+                         (char["id"], gear_id)).fetchone()
+    assert owned["pattern_json"], "the rolled gem persists on the owned char_item"
+    conn.execute("DELETE FROM global_drops WHERE item_id=?", (gear_id,))
+    conn.commit()
+    print("drop-gems OK: enhanceable gear drops carry + persist a random-rarity gem")
     print("\nALL LOOT TESTS PASSED")
 
 

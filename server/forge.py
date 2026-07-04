@@ -401,6 +401,84 @@ def handle_mutation(conn, cmd, params):
         return _err(f"{cmd} failed: {ex}")
 
 
+# --- monster skills: a monster's class graph drives its telegraphed tile attacks ----------
+# "However AE does it": a monster row carries a class_id pointing at a real CharacterClass, so
+# the SAME SkillForge that edits player classes edits monster classes (classes_object lists
+# every class). The class's skill graph holds a tile node (HitTiles/TileWave/...); the AI loop
+# emits it as a MonReq and combat applies the damage when a client reports a hit.
+_TILE_NODES = {"HitTiles", "HitStream", "TileWave", "TileTrack",
+               "TileCluster", "TileSafe", "TileMove"}
+
+
+def monster_class_id(conn, mon_id):
+    """The class_id a monster's skills come from, or None if it has none."""
+    try:
+        row = conn.execute("SELECT class_id FROM monsters WHERE mon_id=?",
+                           (int(mon_id),)).fetchone()
+    except (TypeError, ValueError):
+        return None
+    return row["class_id"] if row and row["class_id"] is not None else None
+
+
+def _graph_nodes(data):
+    """The {nodeId: props} dict from a skill `data` graph ([{header}, {nodes}])."""
+    if isinstance(data, list) and len(data) > 1 and isinstance(data[1], dict):
+        return data[1]
+    return {}
+
+
+def _named_node(nodes, name):
+    return next((p for p in nodes.values()
+                 if isinstance(p, dict) and p.get("Name") == name), None)
+
+
+def monster_skills(conn, mon_id):
+    """All telegraphed tile skills for a monster's class, in slot order — the AI rotates through
+    them. Each entry is {nodes, cd_ms, multiplier, name, skill_id}, where `nodes` is the LIST of
+    tile-node payloads in that skill's graph (each becomes one MonReq `Response`). A single skill
+    can carry several tiles fired together — Ragnafluff's 4 HitStream firewalls are one cast. The
+    Cooldown/Damage nodes in the graph set that skill's cadence-to-next and hit multiplier.
+    Empty list if the monster has no class or no tile skills."""
+    cid = monster_class_id(conn, mon_id)
+    if cid is None:
+        return []
+    out = []
+    for r in conn.execute(
+            "SELECT s.skill_id, s.name, s.data FROM class_skills cs "
+            "JOIN skills s ON s.skill_id=cs.skill_id WHERE cs.class_id=? ORDER BY cs.slot",
+            (int(cid),)):
+        nodes = _graph_nodes(_parse(r["data"], [{}, {}]))
+        cd = _named_node(nodes, "Cooldown") or {}
+        # a Summon skill (server-side spawnMob — Ragnafluff's clones) instead of a telegraphed tile
+        summon = _named_node(nodes, "Summon")
+        if summon:
+            out.append({"summon": {"mon_id": int(summon.get("MonID") or 0),
+                                   "count": int(summon.get("Count") or 1),
+                                   "max_alive": int(summon.get("MaxAlive")
+                                                    or summon.get("Count") or 1),
+                                   "hp": int(summon.get("HP") or 0),
+                                   "level": int(summon.get("Level") or 1),
+                                   "x": float(summon.get("X") or 0.0),
+                                   "y": float(summon.get("Y") or 0.0),
+                                   # optional: boss shatters the add after SelfBreakMs and stuns its
+                                   # target for StunSecs (Groglurk's Mirror). 0 => normal add.
+                                   "self_break_ms": int(summon.get("SelfBreakMs") or 0),
+                                   "stun_secs": float(summon.get("StunSecs") or 0.0)},
+                        "cd_ms": int(cd.get("CD") or 20000),
+                        "name": r["name"] or "", "skill_id": r["skill_id"]})
+            continue
+        tiles = [dict(p) for p in nodes.values()
+                 if isinstance(p, dict) and p.get("Name") in _TILE_NODES]
+        if not tiles:
+            continue
+        dmg = _named_node(nodes, "Damage") or {}
+        out.append({"nodes": tiles,
+                    "cd_ms": int(cd.get("CD") or 5000),
+                    "multiplier": float(dmg.get("Multiplier") or 1.0),
+                    "name": r["name"] or "", "skill_id": r["skill_id"]})
+    return out
+
+
 def build_init(conn):
     """The full s2c `sfInit` payload that opens the Forge."""
     pal = load_palette()

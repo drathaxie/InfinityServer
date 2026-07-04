@@ -20,6 +20,7 @@ import random
 
 import db
 import game
+import patterns
 
 # LootIDs the client keys drops by — monotonic and above the captured live range so a real
 # pending drop can never collide with a replayed sample's LootID.
@@ -62,6 +63,11 @@ def roll_drops(conn, mon_id=None):
                 # `quantity` is the MAX stack — a drop yields a random 1..quantity (e.g. Red Dragon
                 # Scales at quantity 5 drops 1-5). quantity 1 = always exactly 1.
                 item["Quantity"] = random.randint(1, max(1, int(r["quantity"] or 1)))
+                # Enhanceable gear drops with a random-rarity gem already rolled in (the AE model:
+                # the ItemPattern IS the drop's strength). Persisted per-instance on grant.
+                pat = patterns.roll_pattern(item)
+                if pat is not None:
+                    item["ItemPattern"] = pat
                 out.append(item)
     return out
 

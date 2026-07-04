@@ -39,6 +39,14 @@ UNHANDLED_LOG = pathlib.Path(__file__).resolve().parent / "unhandled.jsonl"
 # Client-side acks that need no s2c reply (movement confirms).
 NOOP_CMDS = {"MoveOK", "mv"}
 
+# STAFF-ONLY top-level cmds (access >= 40), gated centrally in dispatch. These read + rewrite
+# authored content shared by every player: the SkillForge (class/skill graphs) and the in-game
+# map pad editor (NPC placements). forge.MUTATIONS (the sf* edits) are folded in below.
+STAFF_CMDS = {
+    "sfInit", "GetMapSpawns", "getMonBranch",
+    "SavePad", "AddMon", "AddNewPad", "monDelete", "padDelete",
+} | set(forge.MUTATIONS)
+
 
 class Session:
     """Per-connection state: DB handle, logged-in character, world membership."""
@@ -171,18 +179,34 @@ async def handle_client(reader, writer):
     except (ConnectionResetError, asyncio.IncompleteReadError):
         pass
     finally:
-        if session.member is not None:
-            _players.pop(session.member.uid, None)
-            combat.forget_player(session.member.uid)   # stop monsters chasing a ghost
-            loot.clear(session.member.uid)              # drop their un-kept pending loot
-            area = world.leave(session.member)
-            if area:
-                world.broadcast(area, {"Cmd": "AreaRemove",
-                                       "uid": session.member.uid,
-                                       "unm": session.member.name})
-        session.close()
+        cleanup_session(session)
         print(f"[-] client disconnected: {peer}")
         writer.close()
+
+
+def cleanup_session(session):
+    """Tear down a disconnecting session's shared world/combat state — but ONLY if it still
+    owns its uid. The world room, _players and combat state are all keyed by uid, so a session
+    that was SUPERSEDED by a double-login (see the Login handler) no longer owns _players[uid];
+    running the full teardown for it would evict the live session that replaced it. The identity
+    check (`_players.get(uid) is session`) makes the superseded session's cleanup a safe no-op."""
+    m = session.member
+    if m is not None and _players.get(m.uid) is session:
+        _players.pop(m.uid, None)
+        combat.forget_player(m.uid)   # stop monsters chasing a ghost
+        loot.clear(m.uid)             # drop their un-kept pending loot
+        area = world.leave(m)
+        if area:
+            world.broadcast(area, {"Cmd": "AreaRemove", "uid": m.uid, "unm": m.name})
+    session.close()
+
+
+def _is_staff(session, level=40):
+    """Whether the logged-in character meets a staff access tier. The default 40 gates the
+    authoring/edit commands (SkillForge mutations, the pad editor, /dbapop) SERVER-SIDE — the
+    client only shows those tools at access 100, but a modded client can send the raw cmd, so
+    the gate can't live in the UI alone."""
+    return session.char is not None and int(session.char["access_level"] or 0) >= level
 
 
 async def dispatch(session, writer, raw):
@@ -202,9 +226,19 @@ async def dispatch(session, writer, raw):
         if s.startswith("m:") and s[2:].isdigit():
             session.last_target = int(s[2:])
 
+    # STAFF GATE (one place, so the security posture is reviewable at a glance): these top-level
+    # cmds read/write authored game content — the SkillForge and the map pad editor. The client
+    # only exposes those tools at access 100, but a modded client can send the raw cmd, so the
+    # gate lives here, not in the UI. (Slash-cmd cheats under "cmd" gate themselves on _is_staff
+    # inside that handler, since they share the "cmd" envelope.)
+    if cmd in STAFF_CMDS and not _is_staff(session):
+        print(f"        [gate] REJECTED staff cmd {cmd} from uid="
+              f"{session.member.uid if session.member else '?'}")
+        return
+
     if cmd == "cmd":                        # slash commands: Params=[name, args...]
         sub = params[0] if params else ""
-        if sub == "dbapop" and len(params) > 1 and session.char is not None:
+        if sub == "dbapop" and len(params) > 1 and _is_staff(session):
             try:
                 arg = int(params[1])
             except ValueError:
@@ -313,6 +347,71 @@ async def dispatch(session, writer, raw):
                 await send_obj(writer, game.build_stat_update(session.char, hp=maxhp, bonus=bonus))
             print(f"  [level] {session.char['name']} -> {lvl}")
             return
+        if sub == "item" and _staff:           # /item <itemID> [qty] -> load into inventory
+            try:
+                item_id = int(params[1])
+                qty = int(params[2]) if len(params) > 2 else 1
+            except (ValueError, TypeError, IndexError):
+                return
+            session.char = session.conn.execute(
+                "SELECT * FROM characters WHERE id=?", (session.char["id"],)).fetchone()
+            idef = db.item(session.conn, item_id)
+            if idef is not None and patterns.is_gem_item(idef):
+                # a gem item goes to the enhancement BAG (initPlayer.patterns[]), not the item
+                # inventory — roll one per qty. New bag gems show after a relog (no live add-gem
+                # packet is known), so tell the staffer.
+                made = []
+                for _ in range(max(1, qty)):
+                    pat = patterns.gem_item_pattern(idef)
+                    patterns.grant_gem(session.conn, session.char["id"], pat)
+                    made.append(f"{pat['Name']} Q{pat['Quality']}")
+                session.conn.commit()
+                await send_obj(writer, {"Cmd": "chatm", "Name": "Server", "channel": "server",
+                                        "ID": 0,
+                                        "msg": f"+{len(made)} gem(s) to your bag ({', '.join(made)}). "
+                                               f"Relog to see them in the enhancement menu."})
+                print(f"  [item/gem] {session.char['name']} +{len(made)} bag gems: {made}")
+                return
+            item = game.give_item(session.conn, session.char, item_id, qty)
+            if item is None:
+                await send_obj(writer, {"Cmd": "chatm", "msg": f"No item {item_id} in catalog.",
+                                        "Name": "Server", "channel": "server", "ID": 0})
+                return
+            # ResponseAddOrUpdateItems: shows the new/stacked item live, no relog needed.
+            await send_obj(writer, {"Cmd": "addItems", "items": [item],
+                                    "patternItems": [], "bankedItems": []})
+            print(f"  [item] {session.char['name']} +{qty} of {item_id} "
+                  f"(now {item['Quantity']})")
+            return
+        if sub == "gem" and _staff:            # /gem [archetype] [quality] -> gem every equipped gear
+            arch, q = None, None                # e.g. "/gem warrior 8" -> Epic STR gems on all gear
+            for p in params[1:3]:
+                if str(p).isdigit():
+                    q = int(p)
+                elif str(p).lower() in patterns._ARCHETYPE_PRIMARY:
+                    arch = str(p).lower()
+            rows = session.conn.execute(
+                "SELECT char_item_id, item_id FROM char_items "
+                "WHERE char_id=? AND equipped=1", (session.char["id"],)).fetchall()
+            applied = []
+            for r in rows:
+                idef = db.item(session.conn, r["item_id"])
+                pat = patterns.roll_pattern(idef, archetype=arch, quality=q) if idef else None
+                if pat is None:
+                    continue                    # not enhanceable (materials/class items) -> skip
+                session.conn.execute(
+                    "UPDATE char_items SET pattern_json=?, char_pattern_id=char_item_id "
+                    "WHERE char_item_id=?", (json.dumps(pat), r["char_item_id"]))
+                applied.append(f"{pat['Name']} Q{pat['Quality']}/Base{pat['Base']}")
+            session.conn.commit()
+            su = _refresh_pattern_stats(session, as_statupdate=True)
+            if su is not None:
+                await send_obj(writer, su)      # push the new attack power / HP live
+            note = "; ".join(applied) or "no enhanceable gear equipped"
+            await send_obj(writer, {"Cmd": "chatm", "msg": f"Gemmed: {note}",
+                                    "Name": "Server", "channel": "server", "ID": 0})
+            print(f"  [gem] {session.char['name']} arch={arch} q={q} -> {applied}")
+            return
         # other slash commands: log so we can see what the dev tools send
         print(f"        [cmd] '{sub}' {params[1:]} -> logged")
         try:
@@ -410,8 +509,23 @@ async def dispatch(session, writer, raw):
         combat.set_power(uid, sta, weapon=bonus.get("weapon"))  # gems = damage source
         # per-class resource model: DS builds Determination, others spend mana (P0-2)
         res = forge.resource_for_class(session.conn, session.equipped_class)
-        combat.set_resource_model(uid, res["model"])
+        combat.set_resource_model(uid, res["model"], res.get("MaxRP") or 100)
         combat.set_class_mana(uid, forge.class_mana_costs(session.conn, session.equipped_class))
+        # Double-login / stale reconnect: a second live session on this character would clobber
+        # the first (same uid keys _players, the world room, and combat), and the loser's later
+        # disconnect would tear down the survivor. Evict the old session first — pull it from the
+        # world so no stale room entry lingers, and close its socket.
+        old = _players.get(uid)
+        if old is not None and old is not session:
+            if old.member is not None:
+                oa = world.leave(old.member)
+                if oa:
+                    world.broadcast(oa, {"Cmd": "AreaRemove", "uid": uid,
+                                         "unm": old.member.name})
+            try:
+                old.writer.close()
+            except Exception:
+                pass
         _players[uid] = session             # so the AI loop can sustain auto-attack + reward
         print(f"        [login] {username} -> char#{session.char['id']} uid={uid} "
               f"gold={session.char['gold']} resource={res['model']}")
@@ -604,9 +718,33 @@ async def dispatch(session, writer, raw):
         return
 
     if cmd == "gmah":
-        # RequestMonHit: monster TILE-attack reporting (HitTiles/TileTrack/TileWave via
-        # Node.MonsterInput). Monster tile-skill AI isn't modelled (same system as ragnafluff's
-        # effects); normal player combat runs through gar/gai. Recognized no-op. Flagged.
+        # RequestMonHit: a client reports whether its player was caught by a monster tile skill
+        # (HitTiles/TileWave/... via Node.MonsterInput). Params=[monString, nodeName, *flag].
+        # The flag (GeometryTileReport): absent -> 1 hit; "1" -> escaped (no damage); "0",N -> N
+        # hits (TileCluster). We apply the damage server-side and broadcast the Attack, so the
+        # red bars actually hurt. Damage + multiplier come from the armed skill (combat).
+        if session.char is None or session.member is None or not params:
+            return
+        mon = params[0]
+        hits = _gmah_hits(params)
+        if hits <= 0:                       # player stood clear of the red — no damage
+            return
+        attack, hp, died = combat.monster_tile_hit(session.area, mon, session.member.uid, hits)
+        if attack is None:                  # no armed skill for this monster (stale report)
+            return
+        await send_obj(writer, attack)
+        world.broadcast(session.area, attack, exclude=session.member.uid)
+        print(f"        [mob] {mon} tile-hit {session.char['name']} x{hits} -> {hp} HP")
+        if died:
+            combat.drop_aggro_for(session.member.uid)
+            world.broadcast(session.area, combat.player_death_packet(session.member.uid, mon))
+            print(f"  [death] {session.char['name']} slain by {mon} (tile, 10s respawn)")
+        return
+
+    if cmd == "gmai":
+        # RequestMonReq: client callback when a monster node's MonsterInput returns a chain.
+        # Our tile skills are single-node (MonsterInput returns []), so there's nothing to
+        # continue — recognized no-op (kept so it isn't logged as unhandled).
         return
 
     if cmd == "removeItem":                 # Params=[itemID, qty] — delete from inventory
@@ -756,7 +894,7 @@ async def dispatch(session, writer, raw):
                     # (DS white/orange-at-50; mana classes blue, no threshold)
                     uid = session.member.uid
                     res = forge.resource_for_class(session.conn, new_class)
-                    combat.set_resource_model(uid, res["model"])
+                    combat.set_resource_model(uid, res["model"], res.get("MaxRP") or 100)
                     combat.set_class_mana(uid, forge.class_mana_costs(session.conn, new_class))
                     await send_obj(writer, forge.build_updateclass(session.conn, new_class, uid))
                 await send_obj(writer, forge.build_seact(session.conn, new_class))
@@ -847,6 +985,10 @@ async def dispatch(session, writer, raw):
                 summ = attack_summary(pk)
                 if summ:
                     print(f"        [combat] slot {slot_i}: {summ}")
+        # push a live resource re-sync so a consume (Smite empties Conviction) shows on the bar
+        # THIS cast, not on the next one (the in-Attack Resource node repaints a beat late).
+        if combat.resource_model(uid) == "conviction":
+            await send_obj(writer, combat.resource_packet(uid, session.member.name))
         combat.engage(session.area, target, session.member.uid)   # monster now aggros
         await _handle_kills(session, writer, killed)
         return
@@ -883,7 +1025,13 @@ async def dispatch(session, writer, raw):
                 else:
                     await send_obj(writer, {"Cmd": "chatm", "msg": f'"{params[2]}" is not here.',
                                             "Name": "Server", "channel": "server", "ID": 0})
-            else:                            # zone/party/guild -> everyone in the room (incl. sender)
+            elif channel in ("party", "guild"):
+                # Party/guild membership isn't modelled yet, so broadcasting these to the physical
+                # room would leak "private" chat to strangers who share the cell. Until membership
+                # exists, echo back to the sender only — honest (nobody else is in your party/guild)
+                # and non-leaky. [[party-guild-membership]]
+                await send_obj(writer, pk)
+            else:                            # zone (and any unknown channel) -> everyone in the room
                 world.broadcast(session.area, pk)
             print(f"  [chatm/{channel}] {session.member.name}: {msg}")
         return
@@ -910,7 +1058,8 @@ async def dispatch(session, writer, raw):
         print(f"  [s2c] getDialog ({did}, {len(js)}B from cutscenes store)")
         return
 
-    # --- Skill Forge (class/skill node-graph editor; persists to our DB) ---
+    # --- Skill Forge (class/skill node-graph editor; persists to our DB) — STAFF-gated in
+    # dispatch's central STAFF_CMDS check above ---
     if cmd == "sfInit":                     # FORGE opened: send palette + classes + skills
         init = forge.build_init(session.conn)
         await send_obj(writer, init)
@@ -961,7 +1110,8 @@ async def dispatch(session, writer, raw):
             print(f"  [s2c] changeColor (charedit) uid={session.member.uid} {applied}")
         return
 
-    # --- in-game NPC/pad editor (authoritative; persists to our DB) ---
+    # --- in-game NPC/pad editor (authoritative; persists to our DB) — STAFF-gated in dispatch's
+    # central STAFF_CMDS check above ---
     if cmd == "GetMapSpawns":
         # Opening the NPC editor: seed pads from the captured monBranch (once),
         # then hand the client the pad dict it renders the editor from.
@@ -1031,8 +1181,133 @@ async def dispatch(session, writer, raw):
     return
 
 
+def _gmah_hits(params):
+    """How many tile-skill hits a RequestMonHit (gmah) reports. Params=[mon, node, *flag];
+    flag absent -> 1 hit, "1" -> escaped (0), "0",N -> N hits (TileCluster). See
+    GeometryTileReport in the decomp."""
+    rest = [str(p) for p in params[2:]]
+    if not rest:
+        return 1
+    if rest[0] == "1":
+        return 0
+    if rest[0] == "0" and len(rest) > 1:
+        try:
+            return max(0, int(rest[1]))
+        except (TypeError, ValueError):
+            return 1
+    return 1
+
+
 _mon_swing = {}             # (area, "m:ID") -> last swing time (AI loop pacing)
 _players = {}               # uid -> Session (so the AI loop can reach a player's conn/writer)
+
+# Monster tile-skill resolution for the AI loop. It uses a DEDICATED connection (never a player's
+# session conn — that would leave it idle-in-transaction every tick, the hang pattern we fixed
+# before) and a short cache so a live SkillForge edit still applies within a few seconds without
+# hammering the DB on the 0.5s combat tick.
+_ai_conn = None
+_mon_skill_cache = {}       # mon_id -> (skills_list, expires_at)
+_MON_SKILL_TTL = 10.0
+
+
+def _monster_skills_for(mon_id, now):
+    """The cached telegraphed tile skills for a monster (rotation list, possibly empty), resolved
+    on a dedicated conn. Reconnects on error; never raises (a lookup failure just means 'no skills
+    this tick')."""
+    global _ai_conn
+    hit = _mon_skill_cache.get(mon_id)
+    if hit is not None and hit[1] > now:
+        return hit[0]
+    skills = []
+    try:
+        if _ai_conn is None:
+            _ai_conn = db.connect()
+        skills = forge.monster_skills(_ai_conn, mon_id)
+        _ai_conn.commit()       # close the read txn so the conn never sits idle-in-transaction
+    except Exception:
+        try:
+            if _ai_conn is not None:
+                _ai_conn.close()
+        except Exception:
+            pass
+        _ai_conn = None
+    _mon_skill_cache[mon_id] = (skills, now + _MON_SKILL_TTL)
+    return skills
+
+
+def _clone_monbranch(mon_id, map_map_id, hp, level, frame, x, y):
+    """Build the spawnMob monBranch for a summoned add: the clone's identity template (art/race/
+    element from its catalog row) with the spawn-instance fields applied. Uses the dedicated AI
+    conn; falls back to a minimal stub if the lookup fails (never raises)."""
+    global _ai_conn
+    mb = {}
+    try:
+        if _ai_conn is None:
+            _ai_conn = db.connect()
+        mb = dict(montemplates.template(_ai_conn, mon_id) or {})
+        _ai_conn.commit()
+    except Exception:
+        try:
+            if _ai_conn is not None:
+                _ai_conn.close()
+        except Exception:
+            pass
+        _ai_conn = None
+    mb.update({"MonID": mon_id, "ID": mon_id, "MonMapID": map_map_id,
+               "intHP": hp, "intHPMax": hp, "Level": level, "reactionType": 1, "intState": 1,
+               "strFrame": frame or mb.get("strFrame") or "Enter",
+               "x": x, "y": y, "fx": x, "fy": y})
+    mb.setdefault("Scale", 1.0)
+    mb.setdefault("apopID", -1)
+    mb.setdefault("equippedItems", {})
+    return mb
+
+
+def _spawn_clones(area, boss_ts, uid, cfg):
+    """Summon a boss's adds: register each in combat, broadcast spawnMob so clients render it, and
+    aggro it onto the boss's target. Respects max_alive so a recurring summon can't flood. Returns
+    how many were spawned this cast."""
+    alive = combat.live_summon_count(area, boss_ts)
+    to_spawn = max(0, min(cfg["count"], cfg["max_alive"] - alive))
+    frame = next((m.frame for m in world.members(area) if m.uid == uid), "Enter")
+    spawned = 0
+    for i in range(to_spawn):
+        x = cfg["x"] + (i * 3.0 - 1.5)            # fan multiple clones out so they don't overlap
+        y = cfg["y"]
+        clone_ts = combat.add_summon(area, boss_ts, cfg["mon_id"], cfg["hp"], cfg["level"],
+                                     frame=frame)
+        map_map_id = int(clone_ts.split(":")[1])
+        mb = _clone_monbranch(cfg["mon_id"], map_map_id, cfg["hp"], cfg["level"], frame, x, y)
+        world.broadcast(area, {"Cmd": "spawnMob", "monBranch": mb, "x": x, "y": y})
+        combat.engage(area, clone_ts, uid)        # the add immediately fights the boss's target
+        if cfg.get("self_break_ms"):              # Groglurk's Mirror: boss shatters it -> stun
+            combat.arm_mirror_break(area, clone_ts, uid,
+                                    cfg["self_break_ms"] / 1000.0, cfg.get("stun_secs") or 3.0)
+        spawned += 1
+    return spawned
+
+
+async def _shatter_mirror(area, clone_ts, uid, stun_secs):
+    """The boss breaks its own mirror: broadcast the mirror's death, then stun its target for
+    stun_secs (client-enforced) and clear the stun when it expires. No kill credit/XP (the player
+    didn't kill it). If the target already left, just drop the mirror."""
+    for pk in combat.death_packets(area, clone_ts, uid):
+        world.broadcast(area, pk)
+    combat.forget_summon(area, clone_ts)
+    sess = _players.get(uid)
+    if sess is None or sess.member is None or sess.area != area:
+        return
+    for pk in combat.stun_packets(uid, caster=""):
+        await send_obj(sess.writer, pk)
+        world.broadcast(area, pk, exclude=uid)
+    print(f"        [mob] mirror {clone_ts} shattered -> {stun_secs:.0f}s stun on uid={uid}")
+    await asyncio.sleep(stun_secs)
+    sess = _players.get(uid)                       # re-fetch: they may have left during the stun
+    if sess is None or sess.member is None:
+        return
+    for pk in combat.unstun_packets(uid):
+        await send_obj(sess.writer, pk)
+        world.broadcast(sess.area, pk, exclude=uid)
 
 
 async def _respawn_later(area, target):
@@ -1081,7 +1356,10 @@ async def _handle_kills(session, writer, killed):
         return
     unique = list(dict.fromkeys(killed))        # dedupe if two nodes hit a dying target
     for target in unique:
-        asyncio.create_task(_respawn_later(session.area, target))
+        if combat.is_summoned_ts(target):       # summoned adds (clones) die for good — no respawn
+            combat.forget_summon(session.area, target)
+        else:
+            asyncio.create_task(_respawn_later(session.area, target))
         for pk in combat.death_packets(session.area, target, session.member.uid):
             await send_obj(writer, pk)
             world.broadcast(session.area, pk, exclude=session.member.uid)
@@ -1150,6 +1428,16 @@ async def ai_loop():
                     await send_obj(sess.writer, pk)
                     world.broadcast(sess.area, pk, exclude=uid)
                     print(f"  [aura] Dragonbane expired -> removed for uid={uid}")
+            # Groglurk's Mirror: any mirror whose self-break timer elapsed (and the player didn't
+            # kill it first) is shattered by the boss now, stunning its target.
+            for area, clone_ts, uid, stun_secs in combat.due_mirror_breaks(now):
+                asyncio.create_task(_shatter_mirror(area, clone_ts, uid, stun_secs))
+            # Conviction (Paladin) drains when its owner stops fighting — push the shrinking
+            # bar so the decay is visible (hpmp re-sync; HP untouched)
+            for uid, total in combat.conviction_decay():
+                sess = _players.get(uid)
+                if sess is not None and sess.member is not None:
+                    await send_obj(sess.writer, combat.resource_packet(uid, sess.member.name))
             # monsters swing at the players they've aggro'd (unless stunned)
             for area, mon, uid in combat.engagements():
                 mem = next((m for m in world.members(area) if m.uid == uid), None)
@@ -1159,6 +1447,31 @@ async def ai_loop():
                     continue
                 if combat.is_stunned(area, mon):    # Incapacitate etc. -> can't act
                     continue
+                # Telegraphed tile skills (Ragnafluff's thin bars / scanning cross / firewalls):
+                # rotate through the monster's class skills on each one's cooldown and broadcast a
+                # MonReq per tile node — a single skill may fire several at once (the 4 firewalls
+                # share a ReqTS). Damage lands later, when a caught client reports via gmah.
+                # Resolved on a dedicated cached conn (see _monster_skills_for) so it can't stall
+                # the combat tick.
+                mon_id = combat.monster_catalog_id(area, mon)
+                skills = _monster_skills_for(mon_id, now) if mon_id else []
+                if skills and combat.monster_skill_due(area, mon, now):
+                    idx = (combat.monster_skill_index(area, mon) + 1) % len(skills)
+                    skill = skills[idx]
+                    combat.arm_monster_skill(area, mon, now, skill["cd_ms"] / 1000.0,
+                                             skill.get("multiplier", 1.0), idx)
+                    if "summon" in skill:
+                        n = _spawn_clones(area, mon, uid, skill["summon"])
+                        if n:
+                            print(f"        [mob] {mon} casts {skill['name']} "
+                                  f"(summon {n}x mon {skill['summon']['mon_id']})")
+                    else:
+                        req_ts = int(now * 1000)
+                        for node in skill["nodes"]:
+                            world.broadcast(area, {"Cmd": "MonReq", "TargetString": mon,
+                                                   "ReqTS": req_ts, "Response": node})
+                        print(f"        [mob] {mon} casts {skill['name']} "
+                              f"({len(skill['nodes'])}x {skill['nodes'][0].get('Name')})")
                 if now - _mon_swing.get((area, mon), 0.0) < combat.MON_ATTACK_CD:
                     continue
                 _mon_swing[(area, mon)] = now
@@ -1174,7 +1487,7 @@ async def ai_loop():
                     print(f"  [death] {mem.name} slain by {mon} (10s respawn)")
 
             # players keep auto-attacking their target until it dies or they leave
-            for uid, area, target, data, forge, cd in combat.auto_engagements():
+            for uid, area, target, data, fdata, cd in combat.auto_engagements():
                 sess = _players.get(uid)
                 if sess is None or sess.member is None or \
                         not any(m.uid == uid for m in world.members(area)):
@@ -1186,12 +1499,14 @@ async def ai_loop():
                 if not combat.off_cooldown(uid, 0, cd):
                     continue
                 if data is not None:
-                    attack, killed, _dmg = combat.cast_skill(area, uid, 0, target, data, forge)
+                    attack, killed, _dmg = combat.cast_skill(area, uid, 0, target, data, fdata)
                 else:
                     attack, hit, _ = combat.auto_attack(area, target, uid)
                     killed = [target] if hit else []
                 await send_obj(sess.writer, attack)          # the attacker
                 world.broadcast(area, attack, exclude=uid)   # everyone else in the area
+                if combat.resource_model(uid) == "conviction" and sess.member is not None:
+                    await send_obj(sess.writer, combat.resource_packet(uid, sess.member.name))
                 if killed:
                     await _handle_kills(sess, sess.writer, killed)
                     combat.auto_disengage(uid)               # target dead -> stop auto

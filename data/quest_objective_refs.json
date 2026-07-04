@@ -451,5 +451,73 @@
    ],
    "_via": "name-match:review"
   }
+ },
+ "123": {
+  "206": {
+   "monsters": [
+    190,
+    249
+   ],
+   "_via": "authored:beyond-bot-2026-07-02"
+  }
+ },
+ "124": {
+  "207": {
+   "monsters": [
+    236
+   ],
+   "_via": "authored:beyond-bot-2026-07-02"
+  }
+ },
+ "135": {
+  "227": {
+   "monsters": [
+    190,
+    249
+   ],
+   "_via": "authored:beyond-bot-2026-07-02"
+  }
+ },
+ "157": {
+  "363": {
+   "monsters": [
+    190,
+    249
+   ],
+   "_via": "authored:beyond-bot-2026-07-02"
+  }
+ },
+ "139": {
+  "231": {
+   "monsters": [
+    239
+   ],
+   "_via": "authored:beyond-bot-2026-07-02"
+  }
+ },
+ "142": {
+  "236": {
+   "monsters": [
+    305
+   ],
+   "_via": "authored:beyond-bot-2026-07-02"
+  }
+ },
+ "196": {
+  "427": {
+   "monsters": [
+    231,
+    232
+   ],
+   "_via": "authored:beyond-bot-2026-07-02"
+  }
+ },
+ "199": {
+  "433": {
+   "monsters": [
+    8
+   ],
+   "_via": "authored:beyond-bot-2026-07-02"
+  }
  }
 }

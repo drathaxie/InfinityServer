@@ -180,6 +180,32 @@ def main():
         heal = _dmg_node(142)           # Healing Word stays a HEAL (not overridden by P1-4)
         assert heal.get("Heal") is True, "Healing Word must remain a heal, not get an element"
     print("P1-4 element OK: Holy/Explosion=Magical, Imbalancing=Physical, Healing Word stays heal")
+
+    # --- monster skills: Ragnafluff's class drives the real 3-skill tile rotation (gmah model) ---
+    with db.connect() as conn:
+        assert "Ragnafluff The Ruinous" in forge.classes_object(conn), \
+            "monster class must list in the SkillForge (so it's editable like any class)"
+        for mid in (364, 372):                    # both captured Ragnafluff MonIDs share the class
+            sks = forge.monster_skills(conn, mid)
+            assert len(sks) == 4, f"Ragnafluff {mid} rotates 4 skills, got {len(sks)}"
+            bars, cross, walls, echoes = sks
+            # captured params: thin dodgeable bars (NOT the oversized v7), scanning cross, 4 walls
+            assert bars["nodes"][0]["Name"] == "HitTiles"
+            assert bars["nodes"][0]["Shape"] == "Rectangle" and bars["nodes"][0]["ScaleX"] == 0.6
+            assert cross["nodes"][0]["Shape"] == "Cross" and cross["nodes"][0]["Track"] == "Center"
+            assert walls["nodes"][0]["Name"] == "HitStream" and len(walls["nodes"]) == 4, \
+                "firewalls fire all four HitStream walls at once"
+            # the 4th slot is a SUMMON (server-side), not a tile skill
+            assert "nodes" not in echoes and "summon" in echoes, echoes
+            sm = echoes["summon"]
+            assert sm["mon_id"] == 380 and sm["count"] == 2 and sm["max_alive"] == 2
+            assert sm["hp"] == 4000 and sm["level"] == 5
+            assert [s["cd_ms"] for s in sks] == [4500, 5000, 7000, 18000], "captured rotation cadence"
+        # a monster with no class_id has no skills (basic swings only)
+        plain = conn.execute("SELECT mon_id FROM monsters WHERE class_id IS NULL LIMIT 1").fetchone()
+        assert forge.monster_skills(conn, plain["mon_id"]) == [], "no class -> no tile skills"
+    print("monster skills OK: Ragnafluff rotates 4 captured skills (thin bars / cross / 4 firewalls "
+          "/ summon 2 clones), cadence 4.5/5/7/18s; classless monsters have none")
     print("ALL FORGE TESTS PASSED")
 
 

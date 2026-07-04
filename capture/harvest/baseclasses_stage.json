@@ -1,0 +1,434 @@
+{
+  "items": [
+    {
+      "ID": 15651,
+      "Name": "Healer",
+      "Description": "Recommended enhancement: Healer. Healers are servants of good who use their powers to aid the sick, weak, and injured. Their powerful healing magic is often the difference between a group's victory or doom.",
+      "Filename": "NewHealerR2.swf",
+      "Bundle": {
+        "ID": 15772,
+        "Name": "Healer",
+        "Filename": "armors/15772_NewHealerR2.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 4,
+        "VersionLive": 4
+      },
+      "Linkage": "NewHealerB2",
+      "Level": 1,
+      "StackSize": 1,
+      "ItemType": 21,
+      "EquipSpot": 6,
+      "UpgradeOnly": false,
+      "MobileCompatibility": 1
+    },
+    {
+      "ID": 15652,
+      "Name": "Rogue",
+      "Description": "Recommended enhancement: Thief. Rogues follow their own set of rules. With a combination of speed, cunning and poisons, you take your enemies by surprise.",
+      "Filename": "BaseRogue2xx.swf",
+      "Bundle": {
+        "ID": 15773,
+        "Name": "Rogue",
+        "Filename": "armors/15773_BaseRogue2xx.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 4,
+        "VersionLive": 4
+      },
+      "Linkage": "Rogue2",
+      "Level": 1,
+      "StackSize": 1,
+      "ItemType": 21,
+      "EquipSpot": 6,
+      "UpgradeOnly": false,
+      "MobileCompatibility": 1
+    },
+    {
+      "ID": 15653,
+      "Name": "Mage",
+      "Description": "Recommended enhancement: Wizard. Magic courses through your veins. Your arcane powers enable you to cast powerful spells.",
+      "Filename": "BaseMageRedesign3R2.swf",
+      "Bundle": {
+        "ID": 15774,
+        "Name": "Mage",
+        "Filename": "armors/15774_BaseMageRedesign3R2.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 4,
+        "VersionLive": 4
+      },
+      "Linkage": "BaseMageRedesign3",
+      "Level": 1,
+      "StackSize": 1,
+      "ItemType": 21,
+      "EquipSpot": 6,
+      "UpgradeOnly": false,
+      "MobileCompatibility": 1
+    },
+    {
+      "ID": 15654,
+      "Name": "Warrior",
+      "Description": "Recommended enhancement: Fighter. The heart of a warrior is filled with courage and strength. Your skills with weapons in close combat make you a powerful force on the battlefield.",
+      "Filename": "NewWarriorB2.swf",
+      "Bundle": {
+        "ID": 15775,
+        "Name": "Warrior",
+        "Filename": "armors/15775_NewWarriorB2.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 4,
+        "VersionLive": 4
+      },
+      "Linkage": "NewWarriorB2",
+      "Level": 1,
+      "StackSize": 1,
+      "ItemType": 21,
+      "EquipSpot": 6,
+      "UpgradeOnly": false,
+      "MobileCompatibility": 1
+    }
+  ],
+  "hairs": [
+    {
+      "ID": 18,
+      "Name": "Pig2Bangs2",
+      "Filename": "hair/F/Pig2Bangs2.swf",
+      "Gender": "F",
+      "Bundle": {
+        "ID": 45937,
+        "Name": "Pig2Bangs2",
+        "Filename": "hair/F/45937_Pig2Bangs2_F.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 26,
+      "Name": "Pony2Bangs2",
+      "Filename": "hair/F/Pony2Bangs2.swf",
+      "Gender": "F",
+      "Bundle": {
+        "ID": 45945,
+        "Name": "Pony2Bangs2",
+        "Filename": "hair/F/45945_Pony2Bangs2_F.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 52,
+      "Name": "Default",
+      "Filename": "hair/M/Default.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 45970,
+        "Name": "Default",
+        "Filename": "hair/M/45970_Default_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 55,
+      "Name": "Goku1",
+      "Filename": "hair/M/Goku1.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 45973,
+        "Name": "Goku1",
+        "Filename": "hair/M/45973_Goku1_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 58,
+      "Name": "Goku2",
+      "Filename": "hair/M/Goku2.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 45976,
+        "Name": "Goku2",
+        "Filename": "hair/M/45976_Goku2_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 64,
+      "Name": "Normal2",
+      "Filename": "hair/M/Normal2.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 45982,
+        "Name": "Normal2",
+        "Filename": "hair/M/45982_Normal2_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 83,
+      "Name": "Bangs2Long",
+      "Filename": "hair/F/Bangs2Long.swf",
+      "Gender": "F",
+      "Bundle": {
+        "ID": 46001,
+        "Name": "Bangs2Long",
+        "Filename": "hair/F/46001_Bangs2Long_F.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 84,
+      "Name": "Bangs3Long",
+      "Filename": "hair/F/Bangs3Long.swf",
+      "Gender": "F",
+      "Bundle": {
+        "ID": 46002,
+        "Name": "Bangs3Long",
+        "Filename": "hair/F/46002_Bangs3Long_F.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 92,
+      "Name": "Ponytail8",
+      "Filename": "hair/M/Ponytail8.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 46003,
+        "Name": "Ponytail8",
+        "Filename": "hair/M/46003_Ponytail8_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 275,
+      "Name": "FauxHawk",
+      "Filename": "hair/M/FauxHawk3.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 46180,
+        "Name": "FauxHawk",
+        "Filename": "hair/M/46180_FauxHawk3_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 3,
+        "VersionLive": 3
+      }
+    },
+    {
+      "ID": 277,
+      "Name": "Dragonhawk",
+      "Filename": "hair/F/Dragonhawk.swf",
+      "Gender": "F",
+      "Bundle": {
+        "ID": 46182,
+        "Name": "Dragonhawk",
+        "Filename": "hair/F/46182_Dragonhawk_F.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 284,
+      "Name": "SandBoy",
+      "Filename": "hair/M/SandBoy.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 46189,
+        "Name": "SandBoy",
+        "Filename": "hair/M/46189_SandBoy_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 285,
+      "Name": "SandHairGirl",
+      "Filename": "hair/F/SandHairGirl.swf",
+      "Gender": "F",
+      "Bundle": {
+        "ID": 46190,
+        "Name": "SandHairGirl",
+        "Filename": "hair/F/46190_SandHairGirl_F.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 324,
+      "Name": "Troll3Human",
+      "Filename": "hair/M/Troll3Human.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 46226,
+        "Name": "Troll3Human",
+        "Filename": "hair/M/46226_Troll3Human_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 328,
+      "Name": "TrollFem1HumanFix",
+      "Filename": "hair/F/TrollFem1HumanFix.swf",
+      "Gender": "F",
+      "Bundle": {
+        "ID": 46230,
+        "Name": "TrollFem1HumanFix",
+        "Filename": "hair/F/46230_TrollFem1HumanFix_F.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 330,
+      "Name": "TrollFem3Human",
+      "Filename": "hair/F/TrollFem3Human.swf",
+      "Gender": "F",
+      "Bundle": {
+        "ID": 46232,
+        "Name": "TrollFem3Human",
+        "Filename": "hair/F/46232_TrollFem3Human_F.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 349,
+      "Name": "SuggestedHair",
+      "Filename": "hair/M/SuggestedHair.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 46251,
+        "Name": "SuggestedHair",
+        "Filename": "hair/M/46251_SuggestedHair_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 375,
+      "Name": "AQCasual",
+      "Filename": "hair/F/AQCasual.swf",
+      "Gender": "F",
+      "Bundle": {
+        "ID": 46273,
+        "Name": "AQCasual",
+        "Filename": "hair/F/46273_AQCasual_F.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 379,
+      "Name": "MQGalaxyBuns",
+      "Filename": "hair/F/MQGalaxyBuns.swf",
+      "Gender": "F",
+      "Bundle": {
+        "ID": 46277,
+        "Name": "MQGalaxyBuns",
+        "Filename": "hair/F/46277_MQGalaxyBuns_F.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 380,
+      "Name": "MQRibbon",
+      "Filename": "hair/F/MQRibbon.swf",
+      "Gender": "F",
+      "Bundle": {
+        "ID": 46278,
+        "Name": "MQRibbon",
+        "Filename": "hair/F/46278_MQRibbon_F.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 383,
+      "Name": "AQDemonHunter1",
+      "Filename": "hair/M/AQDemonHunter1.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 46281,
+        "Name": "AQDemonHunter1",
+        "Filename": "hair/M/46281_AQDemonHunter1_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 390,
+      "Name": "DFWarStyle",
+      "Filename": "hair/M/DFWarStyle.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 46288,
+        "Name": "DFWarStyle",
+        "Filename": "hair/M/46288_DFWarStyle_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 396,
+      "Name": "MQElegant",
+      "Filename": "hair/M/MQElegant.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 46292,
+        "Name": "MQElegant",
+        "Filename": "hair/M/46292_MQElegant_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    },
+    {
+      "ID": 398,
+      "Name": "MQSwift",
+      "Filename": "hair/M/MQSwift.swf",
+      "Gender": "M",
+      "Bundle": {
+        "ID": 46294,
+        "Name": "MQSwift",
+        "Filename": "hair/M/46294_MQSwift_M.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 6,
+        "VersionLive": 6
+      }
+    }
+  ],
+  "character_bundle": {
+    "ID": 70955,
+    "Name": "Characters",
+    "Filename": "gameassets/70955_characters.unity3d",
+    "VersionContent": 0,
+    "VersionStage": 16,
+    "VersionLive": 16
+  }
+}

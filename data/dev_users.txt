@@ -1,7 +1,0 @@
-# Accounts granted dev/staff access (access_level 50) on login — this unlocks the in-game
-# authoring tools (Dialogger cutscene editor, apop "+"/editor, charedit, /cutscene, /devon, ...).
-# One username per line (case-insensitive); '#' comments. Everyone else stays a normal player
-# (access 0), so normal play is still 1=1 with AE. Edit freely and re-login to apply.
-drathaxie
-gravelyn booba
-redux

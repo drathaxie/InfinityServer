@@ -205,6 +205,15 @@ def _compile_pad(conn, pad_row, npc_rows):
                 mb[jk] = npc[col]
             elif cat.get(jk) is not None:
                 mb[jk] = cat[jk]
+        # Head slot: the client's Monster never sets showHelm (Monster ctor leaves it false), so
+        # HelmLoader ignores the equipped Helm and always renders customization.HairBundle (forced
+        # prefab "HelmGO"). We only sent HairID (which alone renders nothing) → no head piece. Feed
+        # the equipped head item's (spot 3) bundle as HairBundle so it shows — the monster analogue
+        # of a player's showHelm putting the helm over the hair.
+        head = (mb.get("equippedItems") or {}).get("3") or (mb.get("equippedItems") or {}).get(3)
+        if isinstance(head, dict) and head.get("Bundle"):
+            mb["HairBundle"] = head["Bundle"]
+            mb.setdefault("HairName", head.get("Name"))
         out.append(mb)
     return out
 

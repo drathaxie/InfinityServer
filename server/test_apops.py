@@ -42,6 +42,22 @@ def main():
     assert json.loads(game.load_apops(conn, [5001])["5001"])["name"] == "Authored", \
         "in-game authored apop is served live"
 
+    # an invalid `lockedMode` (RequirementLockType enum) must be coerced to "Hide" on serve —
+    # one bad value crashes the client's whole-batch getApop parse and bricks every NPC in the
+    # area (this is the bug that made BattleOn un-joinable). Valid values pass through untouched.
+    bad = json.dumps({"ID": 5002, "name": "Bad",
+                      "panels": [{"elements": [{"type": "Button", "lockedMode": "Show"},
+                                               {"type": "Button", "lockedMode": "Lock"}]}]},
+                     separators=(",", ":"))
+    conn.execute("INSERT INTO apops(apop_id, name, raw) VALUES(5002,'Bad',?) "
+                 "ON CONFLICT(apop_id) DO UPDATE SET raw=excluded.raw", (bad,))
+    conn.commit()
+    served = game.load_apops(conn, [5002])["5002"]
+    assert '"lockedMode":"Show"' not in served, "invalid lockedMode coerced away on serve"
+    assert '"lockedMode":"Hide"' in served and '"lockedMode":"Lock"' in served, \
+        "bad value -> Hide; valid value (Lock) preserved"
+    assert json.loads(served), "sanitized apop is still valid JSON"
+
     print("apops OK: DB-backed catalog seeded, served as JSON strings, live-editable in place")
     print("ALL APOP TESTS PASSED")
 
