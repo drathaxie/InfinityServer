@@ -883,11 +883,14 @@ EQUIP_SPOT_HOUSE_ITEM = 9
 # sType == "House"; the house UI buckets furniture by WallItem/FloorItem.
 _HOUSE_STYPE = {23: "House", 24: "WallItem", 25: "FloorItem"}
 
-# Which MAP a house deed opens. Only two house maps work right now: the cottage (the
-# captured `house` map — the default every deed falls back to) and `infinityhousepreview`.
+# Which MAP a house deed opens. Two house maps work right now: the cottage (the captured
+# `house` map — the default every deed falls back to) and the Kickstarter backers' flying
+# castle (`housekickstarterflyingcastle`, opened by OUR minted deed 200001 — AE shipped the
+# map but never a deed item for it, so the deed is custom, sold in the Infinity Backer Shop).
 # Overridable without code via kv 'house_maps' = {"<itemID>": "<mapName>"} (staff/SQL).
-_DEFAULT_HOUSE_MAPS = {48363: "infinityhousepreview"}   # Infinity Titan Base
-HOUSE_DEFAULT_MAP = "house"                              # the cottage
+KICKSTARTER_CASTLE_DEED = 200001
+_DEFAULT_HOUSE_MAPS = {KICKSTARTER_CASTLE_DEED: "housekickstarterflyingcastle"}
+HOUSE_DEFAULT_MAP = "house"                              # the cottage (deed 1286 + fallback)
 
 
 def house_map_for(conn, item_id):

@@ -1,8 +1,9 @@
-"""
+﻿"""
 Houses v1: deeds + furniture live in initPlayer.houseItems (not the bag), a deed equips via
-the equipHouse flow, each deed resolves to its house map (cottage default, infinityhouse for
-the Infinity Titan Base, kv-overridable), housesave merges per-frame placement saves into the
-stored {frame:[...]} dict, and build_house_data serves it back as AreaJoin houseData.
+the equipHouse flow, each deed resolves to its house map (cottage default; the minted
+Kickstarter Flying Castle deed opens housekickstarterflyingcastle; kv-overridable), housesave
+merges per-frame placement saves into the stored {frame:[...]} dict, and build_house_data
+serves it back as AreaJoin houseData.
 """
 import json
 
@@ -11,7 +12,7 @@ import seed
 import game
 
 DEED = 5291          # Hollowsoul Castle (equip_spot 8) -> default map (the cottage)
-DEED_INF = 48363     # Infinity Titan Base -> infinityhousepreview
+DEED_KS = 200001     # Kickstarter Flying Castle (OUR minted deed) -> housekickstarterflyingcastle
 FURNITURE = 1407     # Pactagonal Knight Statue (equip_spot 9, FloorItem)
 
 
@@ -43,15 +44,15 @@ def main():
     resp = game.equip_house(conn, char, DEED)
     assert resp and resp["Cmd"] == "equipHouse" and resp["ItemID"] == DEED, resp
     assert game.equipped_house_id(conn, cid) == DEED
-    game.give_item(conn, char, DEED_INF, 1)
-    assert game.equip_house(conn, char, DEED_INF)["ItemID"] == DEED_INF
-    assert game.equipped_house_id(conn, cid) == DEED_INF, "equipping a deed swaps the old one"
+    game.give_item(conn, char, DEED_KS, 1)
+    assert game.equip_house(conn, char, DEED_KS)["ItemID"] == DEED_KS
+    assert game.equipped_house_id(conn, cid) == DEED_KS, "equipping a deed swaps the old one"
     assert game.equip_house(conn, char, FURNITURE) is None, "furniture isn't equippable"
     assert game.equip_house(conn, char, 8736) is None, "unowned deed refuses"
 
-    # deed -> map: cottage default, Infinity Titan Base -> infinityhousepreview, kv override wins
+    # deed -> map: cottage default, the minted KS deed -> flying castle, kv override wins
     assert game.house_map_for(conn, DEED) == "house", "unmapped deeds open the cottage"
-    assert game.house_map_for(conn, DEED_INF) == "infinityhousepreview"
+    assert game.house_map_for(conn, DEED_KS) == "housekickstarterflyingcastle"
     db.kv_set(conn, "house_maps", json.dumps({str(DEED): "clubhouse"}))
     assert game.house_map_for(conn, DEED) == "clubhouse", "kv override wins"
     db.kv_set(conn, "house_maps", "{}")
@@ -59,22 +60,22 @@ def main():
     # housesave merges PER-FRAME saves into one layout dict; '*' clears the whole house
     place = lambda n: json.dumps([{"ItemID": FURNITURE, "x": float(n), "y": 0.0,
                                    "scaleX": 1.0, "scaleY": 1.0, "layerName": "BGFront"}])
-    assert game.house_save(conn, char, DEED_INF, "Enter", place(1))["success"]
-    assert game.house_save(conn, char, DEED_INF, "Bedroom", place(2))["success"]
-    layout = game._house_layout(conn, cid, DEED_INF)
+    assert game.house_save(conn, char, DEED_KS, "Enter", place(1))["success"]
+    assert game.house_save(conn, char, DEED_KS, "Bedroom", place(2))["success"]
+    layout = game._house_layout(conn, cid, DEED_KS)
     assert set(layout) == {"Enter", "Bedroom"}, "per-frame saves merge, not overwrite"
     assert layout["Enter"][0]["x"] == 1.0 and layout["Bedroom"][0]["x"] == 2.0
-    assert game.house_save(conn, char, DEED_INF, "Bedroom", "[]")["success"]
-    assert set(game._house_layout(conn, cid, DEED_INF)) == {"Enter"}, "emptied room drops out"
-    assert not game.house_save(conn, char, DEED_INF, "Enter", "{bad json")["success"]
-    assert game.house_save(conn, char, DEED_INF, "*", "[]")["success"]
-    assert game._house_layout(conn, cid, DEED_INF) == {}, "'*' clears the whole house"
+    assert game.house_save(conn, char, DEED_KS, "Bedroom", "[]")["success"]
+    assert set(game._house_layout(conn, cid, DEED_KS)) == {"Enter"}, "emptied room drops out"
+    assert not game.house_save(conn, char, DEED_KS, "Enter", "{bad json")["success"]
+    assert game.house_save(conn, char, DEED_KS, "*", "[]")["success"]
+    assert game._house_layout(conn, cid, DEED_KS) == {}, "'*' clears the whole house"
 
     # build_house_data: the AreaJoin houseData — saved placements round-trip, owner lowercase
-    game.house_save(conn, char, DEED_INF, "Enter", place(7))
+    game.house_save(conn, char, DEED_KS, "Enter", place(7))
     hd = game.build_house_data(conn, char)
     assert hd["unm"] == "__homeowner__", "unm is the lowercase owner name (ownership check)"
-    assert {h["ItemID"] for h in hd["items"]} == {DEED, FURNITURE, DEED_INF}
+    assert {h["ItemID"] for h in hd["items"]} == {DEED, FURNITURE, DEED_KS}
     got = json.loads(hd["sHouseInfo"])
     assert got["Enter"][0]["x"] == 7.0, "saved placements ride back in sHouseInfo"
 
