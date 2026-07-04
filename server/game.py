@@ -883,11 +883,11 @@ EQUIP_SPOT_HOUSE_ITEM = 9
 # sType == "House"; the house UI buckets furniture by WallItem/FloorItem.
 _HOUSE_STYPE = {23: "House", 24: "WallItem", 25: "FloorItem"}
 
-# Which MAP a house deed opens. Only two house maps exist right now: the cottage (the
-# captured `house` map — the default every deed falls back to) and `infinityhouse`.
+# Which MAP a house deed opens. Only two house maps work right now: the cottage (the
+# captured `house` map — the default every deed falls back to) and `infinityhousepreview`.
 # Overridable without code via kv 'house_maps' = {"<itemID>": "<mapName>"} (staff/SQL).
-_DEFAULT_HOUSE_MAPS = {48363: "infinityhouse"}      # Infinity Titan Base
-HOUSE_DEFAULT_MAP = "house"                          # the cottage
+_DEFAULT_HOUSE_MAPS = {48363: "infinityhousepreview"}   # Infinity Titan Base
+HOUSE_DEFAULT_MAP = "house"                              # the cottage
 
 
 def house_map_for(conn, item_id):

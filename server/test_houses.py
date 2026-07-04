@@ -11,7 +11,7 @@ import seed
 import game
 
 DEED = 5291          # Hollowsoul Castle (equip_spot 8) -> default map (the cottage)
-DEED_INF = 48363     # Infinity Titan Base -> infinityhouse
+DEED_INF = 48363     # Infinity Titan Base -> infinityhousepreview
 FURNITURE = 1407     # Pactagonal Knight Statue (equip_spot 9, FloorItem)
 
 
@@ -49,9 +49,9 @@ def main():
     assert game.equip_house(conn, char, FURNITURE) is None, "furniture isn't equippable"
     assert game.equip_house(conn, char, 8736) is None, "unowned deed refuses"
 
-    # deed -> map: cottage default, Infinity Titan Base -> infinityhouse, kv override wins
+    # deed -> map: cottage default, Infinity Titan Base -> infinityhousepreview, kv override wins
     assert game.house_map_for(conn, DEED) == "house", "unmapped deeds open the cottage"
-    assert game.house_map_for(conn, DEED_INF) == "infinityhouse"
+    assert game.house_map_for(conn, DEED_INF) == "infinityhousepreview"
     db.kv_set(conn, "house_maps", json.dumps({str(DEED): "clubhouse"}))
     assert game.house_map_for(conn, DEED) == "clubhouse", "kv override wins"
     db.kv_set(conn, "house_maps", "{}")
