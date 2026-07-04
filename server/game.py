@@ -904,35 +904,58 @@ def house_map_for(conn, item_id):
             or HOUSE_DEFAULT_MAP)
 
 
+def _house_item_wire(conn, ci):
+    """One owned char_items row as the wire houseItem dict (or None if it isn't a house/
+    furniture item). MobileCompatibility MUST be 1 — UIMiniMenu refuses to enter a house
+    that 'hasn't been converted'."""
+    item = db.item(conn, ci["item_id"])
+    if item is None or int(item.get("EquipSpot", 0) or 0) not in (
+            EQUIP_SPOT_HOUSE, EQUIP_SPOT_HOUSE_ITEM):
+        return None
+    return {
+        "ItemID": int(item.get("ID", ci["item_id"])),
+        "CharItemID": int(ci["char_item_id"]),
+        "Bundle": item.get("Bundle"),
+        "PrefabName": item.get("PrefabName"),
+        "sType": _HOUSE_STYPE.get(int(item.get("ItemType", 0) or 0), "FloorItem"),
+        "iQty": int(ci["quantity"] or 1),
+        "bEquip": 1 if ci["equipped"] else 0,
+        "sName": item.get("Name") or "",
+        "iCost": int(item.get("Cost", 0) or 0),
+        "bCoins": bool(item.get("Coins")),
+        "sDesc": item.get("Description") or "",
+        "bHouse": True,
+        "bTemp": False,
+        "MobileCompatibility": 1,
+    }
+
+
 def house_items(conn, char_id):
     """The character's houses + furniture as wire houseItem dicts (initPlayer.houseItems and
-    houseData.items). MobileCompatibility MUST be 1 — UIMiniMenu refuses to enter a house
-    that 'hasn't been converted'."""
+    houseData.items)."""
     out = []
     for ci in conn.execute(
             "SELECT * FROM char_items WHERE char_id=? AND banked=0 ORDER BY char_item_id",
             (char_id,)).fetchall():
-        item = db.item(conn, ci["item_id"])
-        if item is None or int(item.get("EquipSpot", 0) or 0) not in (
-                EQUIP_SPOT_HOUSE, EQUIP_SPOT_HOUSE_ITEM):
-            continue
-        out.append({
-            "ItemID": int(item.get("ID", ci["item_id"])),
-            "CharItemID": int(ci["char_item_id"]),
-            "Bundle": item.get("Bundle"),
-            "PrefabName": item.get("PrefabName"),
-            "sType": _HOUSE_STYPE.get(int(item.get("ItemType", 0) or 0), "FloorItem"),
-            "iQty": int(ci["quantity"] or 1),
-            "bEquip": 1 if ci["equipped"] else 0,
-            "sName": item.get("Name") or "",
-            "iCost": int(item.get("Cost", 0) or 0),
-            "bCoins": bool(item.get("Coins")),
-            "sDesc": item.get("Description") or "",
-            "bHouse": True,
-            "bTemp": False,
-            "MobileCompatibility": 1,
-        })
+        hw = _house_item_wire(conn, ci)
+        if hw is not None:
+            out.append(hw)
     return out
+
+
+def auto_equip_first_house(conn, char, item_id):
+    """A player's FIRST house auto-equips on acquisition: if item_id is a house deed and the
+    character has no equipped house yet, equip it. Returns the equipHouse packet to push, or
+    None (not a deed / already has a home)."""
+    try:
+        item = db.item(conn, int(item_id))
+    except (TypeError, ValueError):
+        return None
+    if item is None or int(item.get("EquipSpot", 0) or 0) != EQUIP_SPOT_HOUSE:
+        return None
+    if equipped_house_id(conn, char["id"]) > 0:
+        return None
+    return equip_house(conn, char, item_id)
 
 
 def equipped_house_id(conn, char_id):
@@ -1767,6 +1790,13 @@ def buy(conn, char, params):
     conn.execute(f"UPDATE characters SET {field}={field}-? WHERE id=?", (cost, char["id"]))
     cid = _grant_item(conn, char["id"], item)
     conn.commit()
+    # A HOUSE/furniture purchase replies with the `houseItem` field, NOT `item` —
+    # ResponseBuyItem routes houseItem to playerInventory.buyHouseItem (the house list);
+    # sending it as `item` would wrongly land it in the client's regular bag dict.
+    if int(item.get("EquipSpot", 0) or 0) in (EQUIP_SPOT_HOUSE, EQUIP_SPOT_HOUSE_ITEM):
+        ci = conn.execute("SELECT * FROM char_items WHERE char_item_id=?", (cid,)).fetchone()
+        return {"Cmd": "buyItem", "Success": True, "Show": True, "IsDrop": False,
+                "Cost": cost, "houseItem": _house_item_wire(conn, ci)}
     item["CharItemID"] = cid
     item["LootID"] = -1
     item["Quantity"] = 1

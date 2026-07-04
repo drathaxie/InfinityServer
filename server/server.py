@@ -377,12 +377,19 @@ async def dispatch(session, writer, raw):
                 # houses/furniture live in the houseItems list, not the bag — granting one
                 # via addItems would wrongly insert it into the client's regular inventory
                 # dict. Grant + tell the staffer (the house menu picks it up on relog).
+                # A first house deed auto-equips, same as the buy path.
                 game.give_item(session.conn, session.char, item_id, qty)
+                eq = game.auto_equip_first_house(session.conn, session.char, item_id)
+                if eq is not None:
+                    await send_obj(writer, eq)
+                note = " Equipped as your home!" if eq is not None else ""
                 await send_obj(writer, {"Cmd": "chatm", "Name": "Server", "channel": "server",
                                         "ID": 0,
                                         "msg": f"+{qty} {idef.get('Name') or item_id} "
-                                               f"(house item). Relog to see it in the house menu."})
-                print(f"  [item/house] {session.char['name']} +{qty} of {item_id}")
+                                               f"(house item).{note} Relog to see it in the "
+                                               f"house menu."})
+                print(f"  [item/house] {session.char['name']} +{qty} of {item_id}"
+                      f"{' (auto-equipped)' if eq is not None else ''}")
                 return
             item = game.give_item(session.conn, session.char, item_id, qty)
             if item is None:
@@ -570,6 +577,17 @@ async def dispatch(session, writer, raw):
         if cmd == "buyItem" and resp.get("Success") and resp.get("item"):
             await send_obj(writer, {"Cmd": "addItems", "items": [resp["item"]],
                                     "patternItems": [], "bankedItems": []})
+        # First house auto-equips: buying a deed with no home yet immediately makes it home
+        # (equipHouse sets EquippedHouseItemID + flips bEquip on the just-bought list entry).
+        if cmd == "buyItem" and resp.get("Success") and resp.get("houseItem"):
+            session.char = session.conn.execute(
+                "SELECT * FROM characters WHERE id=?", (session.char["id"],)).fetchone()
+            eq = game.auto_equip_first_house(session.conn, session.char,
+                                             resp["houseItem"]["ItemID"])
+            if eq is not None:
+                await send_obj(writer, eq)
+                print(f"  [s2c] equipHouse (first house auto-equip: "
+                      f"{resp['houseItem']['ItemID']})")
         print(f"  [s2c] {cmd} (Success={resp.get('Success')})")
         return
 
@@ -743,22 +761,24 @@ async def dispatch(session, writer, raw):
         return
 
     if cmd == "house":
-        # Enter a house (RequestHouse: no params = your own; Params=[name] = visit an ONLINE
-        # player's). A house is a normal AreaJoin carrying area.houseData (mapHouseData:
-        # saved placements + the owner's furniture list + owner name) — the client builds the
-        # map like any area and HouseItemManager places the furniture. Instanced per owner as
-        # <houseMap>-<ownerUID>, matching AE's captured "house-508915". [[houses-doable]]
+        # Enter a house (RequestHouse: no params = your own; Params=[name] = visit ANY
+        # player's — the owner does NOT need to be online, their house lives in the DB).
+        # A house is a normal AreaJoin carrying area.houseData (mapHouseData: saved
+        # placements + the owner's furniture list + owner name) — the client builds the
+        # map like any area and HouseItemManager places the furniture. Instanced per owner
+        # as <houseMap>-<ownerUID>, matching AE's captured "house-508915". [[houses-doable]]
         if session.char is None or session.member is None:
             return
         owner_char = session.char
         if params and str(params[0]).strip():           # /house <name> -> visit
-            target = world.find_member(str(params[0]).strip())
-            tsess = _players.get(target.uid) if target is not None else None
-            if tsess is None or tsess.char is None:
-                await send_obj(writer, {"Cmd": "chatm", "msg": f'"{params[0]}" is not online.',
+            owner_char = session.conn.execute(
+                "SELECT * FROM characters WHERE LOWER(name)=LOWER(?) ORDER BY id LIMIT 1",
+                (str(params[0]).strip(),)).fetchone()
+            if owner_char is None:
+                await send_obj(writer, {"Cmd": "chatm",
+                                        "msg": f'There is no player named "{params[0]}".',
                                         "Name": "Server", "channel": "server", "ID": 0})
                 return
-            owner_char = tsess.char
         hid = game.equipped_house_id(session.conn, owner_char["id"])
         if hid <= 0:
             whose = "You don't" if owner_char["id"] == session.char["id"] else \

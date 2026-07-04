@@ -79,9 +79,74 @@ def main():
     got = json.loads(hd["sHouseInfo"])
     assert got["Enter"][0]["x"] == 7.0, "saved placements ride back in sHouseInfo"
 
+    # --- buying a house: the reply carries houseItem (never the bag `item`), and a player's
+    # FIRST deed auto-equips; a second one never steals the equipped home
+    buyer = game.login(conn, "__firsthome__", "pw")
+    resp = game.buy(conn, buyer, ["0", "2688", "200001"])   # the free Backer Shop castle deed
+    assert resp["Success"] and resp.get("houseItem"), resp
+    assert resp["houseItem"]["ItemID"] == 200001 and "item" not in resp, \
+        "house purchases reply with houseItem, never a bag item"
+    eq = game.auto_equip_first_house(conn, buyer, 200001)
+    assert eq is not None and eq["Cmd"] == "equipHouse", "first deed auto-equips"
+    assert game.equipped_house_id(conn, buyer["id"]) == 200001
+    game.give_item(conn, buyer, DEED, 1)
+    assert game.auto_equip_first_house(conn, buyer, DEED) is None, \
+        "a second deed must NOT steal the equipped home"
+    assert game.equipped_house_id(conn, buyer["id"]) == 200001, "home unchanged"
+    assert game.auto_equip_first_house(conn, buyer, FURNITURE) is None, "furniture never equips"
+
+    # --- offline visiting: /house <name> serves ANY player's house from the DB — the owner
+    # (__homeowner__, equipped castle + saved layout above) is never connected here
+    _visit_offline_house(conn)
+
     print("houses OK: houseItems list + bag exclusion, equipHouse swap, deed->map mapping, "
-          "per-frame save merge + '*' clear, houseData round-trip")
+          "per-frame save merge + '*' clear, houseData round-trip, first-house auto-equip, "
+          "offline visit")
     print("ALL HOUSE TESTS PASSED")
+
+
+def _visit_offline_house(conn):
+    import asyncio
+
+    import server
+    import world
+
+    class FakeWriter:
+        def __init__(self):
+            self.data = bytearray()
+            self.closed = False
+
+        def write(self, b):
+            self.data.extend(b)
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    visitor = game.login(conn, "__tourist__", "pw")
+
+    async def run():
+        w = FakeWriter()
+        s = server.Session(w)
+        s.char = s.conn.execute("SELECT * FROM characters WHERE id=?",
+                                (visitor["id"],)).fetchone()
+        s.member = world.Member(game.uid_for(visitor), visitor["name"], {}, w)
+        s.area = "battleon-1"
+        world.join(s.member, s.area)
+        await server.dispatch(s, w, json.dumps(
+            {"Cmd": "house", "Params": ["__HomeOwner__"]}).encode())   # case-insensitive
+        pkts = [json.loads(p) for p in bytes(w.data).split(b"\x00") if p]
+        join = next((p for p in pkts if p.get("houseData") is not None), None)
+        assert join is not None, f"no houseData AreaJoin served: {[p.get('Cmd') for p in pkts]}"
+        assert join["houseData"]["unm"] == "__homeowner__", "owner rides in houseData.unm"
+        assert json.loads(join["houseData"]["sHouseInfo"])["Enter"][0]["x"] == 7.0, \
+            "the OFFLINE owner's saved layout is served"
+        assert join["areaName"].startswith("housekickstarterflyingcastle-"), join["areaName"]
+        s.close()
+
+    asyncio.run(run())
 
 
 if __name__ == "__main__":
