@@ -82,7 +82,10 @@ def main():
     # --- buying a house: the reply carries houseItem (never the bag `item`), and a player's
     # FIRST deed auto-equips; a second one never steals the equipped home
     buyer = game.login(conn, "__firsthome__", "pw")
-    resp = game.buy(conn, buyer, ["0", "2688", "200001"])   # the free Backer Shop castle deed
+    conn.execute("UPDATE characters SET gold=200000 WHERE id=?", (buyer["id"],))
+    conn.commit()
+    buyer = conn.execute("SELECT * FROM characters WHERE id=?", (buyer["id"],)).fetchone()
+    resp = game.buy(conn, buyer, ["0", "2688", "200001"])   # the Backer Shop's castle deed
     assert resp["Success"] and resp.get("houseItem"), resp
     assert resp["houseItem"]["ItemID"] == 200001 and "item" not in resp, \
         "house purchases reply with houseItem, never a bag item"

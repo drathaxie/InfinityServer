@@ -51,13 +51,20 @@ def main():
     start_inv = len(game.inventory(conn, char["id"]))
     print(f"login: char#{char['id']} gold={start_gold} inventory={start_inv}")
 
-    # pick a real, NON-class shop item to buy (class items are non-sellable now - P2-1)
+    # pick a real, NON-class, NON-house/furniture shop item to buy: class items are
+    # non-sellable (P2-1), and houses/furniture (EquipSpot 8/9) deliberately never land in the
+    # regular inventory (they reply houseItem, not item — see game.buy) — this test wants an
+    # ordinary bag item, so skip both.
     row = None
     for r in conn.execute("SELECT shop_id, shop_item_id, cost, item_id FROM shop_items "
                           "ORDER BY shop_item_id"):
-        if not game._is_class_item(conn, r["item_id"]):
-            row = r
-            break
+        idef = db.item(conn, r["item_id"]) or {}
+        if game._is_class_item(conn, r["item_id"]):
+            continue
+        if int(idef.get("EquipSpot", 0) or 0) in (game.EQUIP_SPOT_HOUSE, game.EQUIP_SPOT_HOUSE_ITEM):
+            continue
+        row = r
+        break
     assert row is not None, "need a non-class shop item to test buy/sell"
     print(f"buying shop={row['shop_id']} item={row['shop_item_id']} cost={row['cost']}")
     resp = game.buy(conn, char, ["0", str(row["shop_id"]), str(row["shop_item_id"])])

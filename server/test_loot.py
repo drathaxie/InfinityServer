@@ -13,7 +13,8 @@ import patterns
 
 
 def main():
-    db.init()
+    db.use_throwaway()      # isolated store — this test mints a throwaway catalog item (970001)
+                            # that must never leak into the real dev/prod DB or its JSON export
     seed.run()
     conn = db.connect()
     conn.execute("DELETE FROM char_items WHERE char_id IN "

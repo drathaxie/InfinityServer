@@ -1739,7 +1739,11 @@ def build_stat_update(char, hp=None, bonus=None):
 
 def shop_listing(conn, shop_item):
     """Rebuild one shop entry: the shared catalog item def re-joined with this
-    shop's instance fields (ShopItemID, QuantityRemain)."""
+    shop's instance fields (ShopItemID, QuantityRemain). An item's Cost/Coins is a property
+    of the ITEM, not the listing — every captured shop (incl. the founder-reward shops, where
+    a "free" item is Cost 0 in the catalog, not specially zeroed per-listing) shows one
+    canonical price wherever an item is sold. A shop's own shop_items.cost/coins columns
+    exist to seed/import from a capture, not to diverge from the catalog at serve time."""
     item = db.item(conn, shop_item["item_id"]) or {"ID": shop_item["item_id"]}
     item["ShopItemID"] = shop_item["shop_item_id"]
     item["QuantityRemain"] = shop_item["quantity_remain"]
