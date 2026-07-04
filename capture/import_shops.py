@@ -15,10 +15,8 @@ The capture path defaults to the live Steam playtest log (same as the other
 extract_*.py scripts) and can be overridden as the first argument so you can
 point it at a fresh capture anywhere.
 """
-import collections
 import glob
 import json
-import os
 import pathlib
 import sys
 

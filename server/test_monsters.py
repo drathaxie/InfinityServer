@@ -7,7 +7,6 @@ is the authoritative, editable store. No CDN.
 - montemplates.get() returns a spawnable monBranch from `raw` - captured-rich where we have it,
   or derived from the crawled def for monsters we never captured in a map.
 """
-import json
 
 import db
 import seed

@@ -9,8 +9,6 @@ echoed the captured account ("Drathaxie") for everyone; the fix echoes the typed
 and get-or-creates that user's own character. Proven: two different usernames resolve
 to two different characters, and the same username is stable across logins.
 """
-import pathlib
-import tempfile
 import db
 import seed
 import game

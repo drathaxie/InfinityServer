@@ -28,14 +28,13 @@ import json
 import pathlib
 import re
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "server"))
 import db          # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 DEFAULT_CATALOG = HERE / "harvest" / "bundles_catalog.json"
-ITEMS_JSON = HERE.parent / "data" / "items.json"
 SYNTHETIC_ID_BASE = 900000
 
 # Per-slot template. equip_spot/item_type/icon derived from the known items sharing each folder

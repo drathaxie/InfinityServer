@@ -15,7 +15,6 @@ Pending loot lives server-side per uid until the player keeps it (getDrop / bulk
 discards it, or leaves. Drops roll from a flagged material loot table — no per-monster drop
 table was captured, so the table + per-kill chance are OUR design (the MECHANIC is 1=1).
 """
-import json
 import random
 
 import db

@@ -10,7 +10,6 @@ Re-runnable: rebuilds the shop's listing from whatever is currently in `items`
 
 Usage:  python server/fill_dev_shop.py [shopID]      (default 2722)
 """
-import json
 import sys
 
 import db

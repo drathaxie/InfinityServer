@@ -24,7 +24,6 @@ from its MonID's canonical captured Monbranch (montemplates).
 import json
 import pathlib
 
-import db
 import montemplates
 
 MAPS_DIR = pathlib.Path(__file__).resolve().parent.parent / "data" / "maps"

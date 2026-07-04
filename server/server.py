@@ -6,12 +6,12 @@ Transport (reverse-engineered from Assembly-CSharp.dll, class AEC):
   - raw TCP; messages are UTF-8 JSON terminated by a single 0x00 byte
   - every message carries a "Cmd"; the client routes s2c via ResponseTypes
 
-State: SQLite (db.py / game.py). No connection to Artix — accounts, characters,
-gold, and inventory all live in the local database.
+State: SQLite or Postgres (db.py / game.py). No connection to Artix — accounts,
+characters, gold, and inventory all live in the local database.
 
-Login and the economy (buyItem/sellItem) are now authoritative and persistent.
-The remaining cmds still replay genuine captured payloads (capture/samples)
-until each is made generative in turn.
+Fully generative: every cmd is served live from the DB (no captured payloads are
+replayed). dispatch() is the c2s command router; game/combat/forge/world hold the
+actual logic.
 """
 import asyncio
 import json

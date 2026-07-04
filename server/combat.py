@@ -1223,12 +1223,6 @@ def player_hp(uid):
     return _php.get(uid, PLAYER_MAXHP)
 
 
-def set_player_hp(uid, hp):
-    """Force a player's current HP (e.g. /die -> 0). Clamped to their max."""
-    _php[uid] = max(0, min(int(hp), _pmax.get(uid, PLAYER_MAXHP)))
-    return _php[uid]
-
-
 def kill_monster(area, target):
     """Force a monster to 0 HP (/kill). Returns True if it was alive (so the caller credits
     the kill exactly once); the normal death/respawn flow takes it from here."""

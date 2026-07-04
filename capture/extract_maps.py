@@ -11,7 +11,7 @@ order and bucket each CellJoin under the most-recent AreaJoin's map. Output:
      "cells": { "<Frame>": <CellJoin payload>, ... }
   }
 """
-import json, pathlib, collections
+import json, pathlib
 
 CAP = pathlib.Path(r"C:\Program Files (x86)\Steam\steamapps\common"
                    r"\AdventureQuest Worlds Unity Playtest\UserData\Beyond\packets.jsonl")

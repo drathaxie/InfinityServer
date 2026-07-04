@@ -7,9 +7,6 @@ a gem. Verifies: a weapon gem carries a damage Base, gear gems carry stat bonuse
 applied gem persists on the item (shows in initPlayer so it stays equipped on relog), and
 removePattern clears it.
 """
-import json
-import pathlib
-import tempfile
 import db
 import seed
 import game

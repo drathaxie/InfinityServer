@@ -8,7 +8,6 @@ all persisted in SQLite and surfaced through maps.area_payload exactly as the
 client would receive it on a map reload.
 """
 import pathlib
-import tempfile
 import json as _json
 
 import db

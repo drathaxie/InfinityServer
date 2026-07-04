@@ -8,8 +8,6 @@ by id, every skill carrying a valid two-element Data/ForgeData graph, and the wh
 thing JSON-serializable (it goes out on the wire as JSON).
 """
 import json
-import pathlib
-import tempfile
 import db
 import seed
 import forge

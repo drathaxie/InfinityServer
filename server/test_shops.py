@@ -8,7 +8,6 @@ the captured one, and buy/sell still work against the catalog.
 """
 import json
 import pathlib
-import tempfile
 
 import db
 
