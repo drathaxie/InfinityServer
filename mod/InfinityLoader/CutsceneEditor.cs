@@ -48,6 +48,7 @@ public class CutsceneEditorController : MonoBehaviour
     private string _bufSig = "";                      // (kind:id:page) the field buffers were loaded for
     private readonly System.Collections.Generic.Dictionary<string, string> _buf =
         new System.Collections.Generic.Dictionary<string, string>();
+    private string _timerSec = "2";                  // Phase 3: add-timer duration field
 
     /// <summary>Create the persistent controller GameObject (idempotent). Called from Boot()
     /// and, as a fallback, once chat is up — whichever fires first while Unity is ready.</summary>
@@ -83,11 +84,11 @@ public class CutsceneEditorController : MonoBehaviour
 
     private void DrawMainPanel()
     {
-        GUILayout.BeginArea(new Rect(12, 12, 300, 96), GUI.skin.box);
-        GUILayout.Label("Cutscene Editor — Phase 2");
+        GUILayout.BeginArea(new Rect(12, 12, 300, _loaded ? 232 : 92), GUI.skin.box);
+        GUILayout.Label("Cutscene Editor — Phase 3");
         GUILayout.BeginHorizontal();
         GUILayout.Label("id", GUILayout.Width(16));
-        _idText = GUILayout.TextField(_idText ?? "", GUILayout.Width(64));
+        _idText = GUILayout.TextField(_idText ?? "", GUILayout.Width(56));
         if (GUILayout.Button("Load")) StartCoroutine(LoadAndRender());
         if (GUILayout.Button("Close")) CloseEditor();
         GUILayout.EndHorizontal();
@@ -97,9 +98,34 @@ public class CutsceneEditorController : MonoBehaviour
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("|<")) Goto(1);
             if (GUILayout.Button("<")) Goto(_page - 1);
-            GUILayout.Label(" pg " + _page + "/" + (total - 1) + " ", GUILayout.Width(66));
+            GUILayout.Label(" pg " + _page + "/" + (total - 1) + " ", GUILayout.Width(60));
             if (GUILayout.Button(">")) Goto(_page + 1);
             if (GUILayout.Button(">|")) Goto(total - 1);
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(2); GUILayout.Label("Pages");
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Clone")) ClonePage();
+            if (GUILayout.Button("Blank")) BlankPage();
+            if (GUILayout.Button("Delete")) DeletePage();
+            GUILayout.EndHorizontal();
+
+            GUILayout.Label("Add to this page");
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Bubble")) AddBubble();
+            if (GUILayout.Button("Timer")) AddCmd("Timer{" + (_timerSec ?? "2") + "}");
+            _timerSec = GUILayout.TextField(_timerSec ?? "2", GUILayout.Width(30));
+            GUILayout.Label("s", GUILayout.Width(8));
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Fade To")) AddCmd("FadeToBlack");
+            if (GUILayout.Button("Fade From")) AddCmd("FadeFromBlack");
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(2);
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Save")) SaveScene(false);
+            if (GUILayout.Button("Save as NEW")) SaveScene(true);
             GUILayout.EndHorizontal();
         }
         GUILayout.Label(_status);
@@ -109,7 +135,7 @@ public class CutsceneEditorController : MonoBehaviour
     // ---- object tree ---------------------------------------------------------
     private void DrawTree()
     {
-        GUILayout.BeginArea(new Rect(12, 114, 226, Mathf.Max(160, Screen.height - 150)), GUI.skin.box);
+        GUILayout.BeginArea(new Rect(12, 250, 226, Mathf.Max(150, Screen.height - 284)), GUI.skin.box);
         GUILayout.Label("OBJECTS");
         _treeScroll = GUILayout.BeginScrollView(_treeScroll);
         GUILayout.Label("Camera");
@@ -439,5 +465,83 @@ public class CutsceneEditorController : MonoBehaviour
         var m = System.Text.RegularExpressions.Regex.Match(nameplate, "<size=42>(.*?)</size>",
             System.Text.RegularExpressions.RegexOptions.Singleline);
         return m.Success ? m.Groups[1].Value : nameplate;
+    }
+
+    // ---- Phase 3: page management + authoring + save ------------------------
+    private void ClonePage()
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.dData == null || _page < 0 || _page >= dm.dData.frames.Count) return;
+        dm.dData.frames.Insert(_page + 1, new System.Collections.Generic.List<string>(dm.dData.frames[_page]));
+        Goto(_page + 1); _status = "cloned page";
+    }
+
+    private void BlankPage()
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.dData == null) return;
+        dm.dData.frames.Insert(_page + 1, new System.Collections.Generic.List<string>());
+        Goto(_page + 1); _status = "blank page added";
+    }
+
+    private void DeletePage()
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.dData == null) return;
+        if (_page <= 0) { _status = "page 0 is the required setup page"; return; }
+        if (dm.dData.frames.Count <= 2) { _status = "can't delete the only content page"; return; }
+        dm.dData.frames.RemoveAt(_page);
+        Goto(Mathf.Min(_page, dm.dData.frames.Count - 1)); _status = "page deleted";
+    }
+
+    private void AddCmd(string cmd)
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.dData == null) return;
+        if (_page < 1) { _status = "go to a page >= 1 first"; return; }
+        dm.dData.frames[_page].Add(cmd);
+        try { dm.LoadPage(_page); } catch (Exception ex) { _status = "render err: " + ex.Message; }
+        _status = "added " + cmd;
+    }
+
+    private void AddBubble()
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.dData == null) return;
+        if (_page < 1) { _status = "go to a page >= 1 first"; return; }
+        int id = dm.dData.boxCount; dm.dData.boxCount = id + 1;
+        dm.dData.frames[0].Add("SpawnBox{" + id + "}");        // persist the spawn on the setup frame
+        try { dm.ReadCommand_SpawnBox(id, false); } catch { }  // create it live now (no page-0 re-run)
+        dm.dData.frames[_page].Add("Box{" + id + "|0|0|1|1|0.5|0.862069|<size=42>Name</size>\n<size=24></size>|New line.|1|0|38|000000|FFFFFF|FFFFFF|000000|-1|0|0}");
+        try { dm.LoadPage(_page); } catch { }
+        _selKind = "box"; _selId = id.ToString(); _bufSig = "";
+        _status = "added bubble #" + id;
+    }
+
+    // Serialize the in-memory scene and POST it to tweak/DialoggerSave (ungated, same storage the
+    // web editor + AE's native Dialogger use). asNew blanks the id so the server mints the next one.
+    // After this, /cutscene <id> plays the edits. WARNING: a plain Save overwrites the loaded id.
+    private void SaveScene(bool asNew)
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.dData == null) { _status = "nothing to save"; return; }
+        string json;
+        try { json = Newtonsoft.Json.JsonConvert.SerializeObject(dm.dData); }
+        catch (Exception ex) { _status = "serialize error: " + ex.Message; return; }
+        string id = asNew ? "" : (_idText ?? "").Trim();
+        try
+        {
+            using (var wc = new WebClient())
+            {
+                var form = new System.Collections.Specialized.NameValueCollection();
+                form["id"] = id; form["json"] = json;
+                byte[] resp = wc.UploadValues(Main.WebApiURL + "tweak/DialoggerSave", form);
+                string savedId = Encoding.UTF8.GetString(resp).Trim();
+                if (!string.IsNullOrEmpty(savedId)) _idText = savedId;
+                _status = "saved cutscene " + savedId + " (" + json.Length + " bytes)";
+                InfinityLoaderMod.SafeLog("[cutedit] saved id " + savedId + " (" + json.Length + " bytes)");
+            }
+        }
+        catch (Exception ex) { _status = "save failed: " + ex.Message; InfinityLoaderMod.SafeLog("[cutedit] save fail " + ex.Message); }
     }
 }
