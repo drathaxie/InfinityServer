@@ -50,6 +50,8 @@ public class CutsceneEditorController : MonoBehaviour
         new System.Collections.Generic.Dictionary<string, string>();
     private string _timerSec = "2";                  // Phase 3: add-timer duration field
     private string _frameGoto = "";                  // "Go To" page field
+    private string _addType = "npc";                 // Add-object: selected type
+    private string _addInput = "";                   // Add-object: id/name entry
 
     // ---- styling (built once, lazily, inside OnGUI where GUI.skin is valid) ----
     private bool _stylesReady;
@@ -181,6 +183,9 @@ public class CutsceneEditorController : MonoBehaviour
             _treeScroll = GUILayout.BeginScrollView(_treeScroll, GUILayout.Height(listH));
             DrawList();
             GUILayout.EndScrollView();
+
+            GUILayout.Space(4);
+            DrawAddObject();
 
             GUILayout.Space(4);
             _inspScroll = GUILayout.BeginScrollView(_inspScroll);
@@ -346,6 +351,59 @@ public class CutsceneEditorController : MonoBehaviour
         string k = "f" + idx; if (!_buf.ContainsKey(k)) return;
         bool cur = _buf[k] == onVal;
         if (GUILayout.Button((cur ? "✓ " : "  ") + label, cur ? _sBtnOrange : _sBtn)) { _buf[k] = cur ? offVal : onVal; ApplyBuf(); }
+    }
+
+    // ---- add a NEW asset to the scene (Load on frame 0 + Object on this page) --
+    private static readonly string[] _addTypes = { "actor", "npc", "player", "bg" };
+    private static string AddHint(string t)
+    {
+        if (t == "actor") return "bundleId,PrefabName  (e.g. 66131,actor-veddrian)";
+        if (t == "npc") return "monster / npc id  (e.g. 262)";
+        if (t == "bg") return "image filename";
+        return "";
+    }
+
+    private void DrawAddObject()
+    {
+        GUILayout.Label("ADD OBJECT", _sSection);
+        GUILayout.BeginHorizontal();
+        foreach (var t in _addTypes)
+            if (GUILayout.Button(t, _addType == t ? _sBtnBlue : _sBtn, GUILayout.Width(58))) _addType = t;
+        GUILayout.EndHorizontal();
+        if (_addType != "player")
+        {
+            _addInput = GUILayout.TextField(_addInput ?? "", _sField);
+            GUILayout.Label(AddHint(_addType), _sMuted);
+        }
+        if (GUILayout.Button("+ Add " + _addType, _sBtnBlue))
+        {
+            string link = _addType == "player" ? "" : (_addInput ?? "").Trim();
+            if (_addType == "player" || link.Length > 0) StartCoroutine(AddObject(link, _addType));
+            else _status = "enter a value first";
+        }
+    }
+
+    private IEnumerator AddObject(string link, string type)
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.dData == null) yield break;
+        int id = dm.dData.idCount; dm.dData.idCount = id + 1;
+        dm.dData.frames[0].Add("Load{" + id + "|" + link + "|" + type + "}");
+        // load the asset live: ReadCommand_Load only acts when pageNumber==0, so flip it briefly
+        int savedPage = dm.pageNumber;
+        dm.pageNumber = 0;
+        try { dm.ReadCommand_Load(id, link, type); }
+        catch (Exception ex) { InfinityLoaderMod.SafeLog("[cutedit] add load err " + ex.Message); }
+        dm.pageNumber = savedPage;
+        _status = "loading " + type + " #" + id + "…";
+        float t = 0f; while (t < 3f) { if (dm.IsAssetLoadInProgress) break; t += Time.deltaTime; yield return null; }
+        float t2 = 0f; while (dm.IsAssetLoadInProgress && t2 < 30f) { t2 += Time.deltaTime; yield return null; }
+        yield return new WaitForSeconds(0.3f);
+        if (_page >= 1) dm.dData.frames[_page].Add("Object{" + id + "|1|1|0|1|0|0|0|-1 0|FFFFFFFF|0|0|1}");
+        try { dm.LoadPage(_page); } catch { }
+        _selKind = "obj"; _selId = id.ToString(); _bufSig = "";
+        _status = "added " + type + " #" + id + " — position it in the inspector";
+        InfinityLoaderMod.SafeLog("[cutedit] added " + type + " #" + id + " (" + link + ")");
     }
 
     // ---- bottom toolbar: pager + page/authoring actions ----------------------
