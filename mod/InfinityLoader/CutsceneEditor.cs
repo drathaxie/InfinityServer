@@ -49,6 +49,72 @@ public class CutsceneEditorController : MonoBehaviour
     private readonly System.Collections.Generic.Dictionary<string, string> _buf =
         new System.Collections.Generic.Dictionary<string, string>();
     private string _timerSec = "2";                  // Phase 3: add-timer duration field
+    private string _frameGoto = "";                  // "Go To" page field
+
+    // ---- styling (built once, lazily, inside OnGUI where GUI.skin is valid) ----
+    private bool _stylesReady;
+    private GUIStyle _sPanel, _sHeader, _sSection, _sLabel, _sMuted, _sField,
+                     _sBtn, _sBtnBlue, _sBtnYellow, _sBtnOrange, _sRow, _sRowSel, _sEye, _sBadge;
+    private Texture2D _txDark, _txPanel, _txRow, _txRowSel, _txBtn, _txBtnH, _txBlue, _txYellow, _txOrange;
+
+    private static Texture2D Tex(Color c)
+    {
+        var t = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+        t.SetPixel(0, 0, c); t.Apply(); t.hideFlags = HideFlags.HideAndDontSave;
+        return t;
+    }
+
+    private GUIStyle MkBtn(Texture2D bg, Texture2D hover, Color text, TextAnchor align = TextAnchor.MiddleCenter)
+    {
+        var s = new GUIStyle(GUI.skin.button);
+        s.normal.background = bg; s.normal.textColor = text;
+        s.hover.background = hover; s.hover.textColor = Color.white;
+        s.active.background = hover; s.active.textColor = Color.white;
+        s.focused.background = bg; s.focused.textColor = text;
+        s.border = new RectOffset(2, 2, 2, 2); s.margin = new RectOffset(2, 2, 2, 2);
+        s.padding = new RectOffset(6, 6, 3, 3); s.fontSize = 12; s.alignment = align;
+        return s;
+    }
+
+    private void EnsureStyles()
+    {
+        if (_stylesReady) return;
+        _txDark = Tex(new Color(0.09f, 0.09f, 0.11f, 0.97f));
+        _txPanel = Tex(new Color(0.14f, 0.14f, 0.17f, 0.99f));
+        _txRow = Tex(new Color(0.20f, 0.20f, 0.24f, 1f));
+        _txRowSel = Tex(new Color(0.18f, 0.42f, 0.84f, 1f));
+        _txBtn = Tex(new Color(0.24f, 0.24f, 0.29f, 1f));
+        _txBtnH = Tex(new Color(0.33f, 0.35f, 0.44f, 1f));
+        _txBlue = Tex(new Color(0.20f, 0.44f, 0.82f, 1f));
+        _txYellow = Tex(new Color(0.86f, 0.72f, 0.12f, 1f));
+        _txOrange = Tex(new Color(0.80f, 0.46f, 0.16f, 1f));
+
+        _sPanel = new GUIStyle(GUI.skin.box) { border = new RectOffset(4, 4, 4, 4), padding = new RectOffset(8, 8, 8, 8) };
+        _sPanel.normal.background = _txDark;
+        _sHeader = new GUIStyle(GUI.skin.label) { fontSize = 14, fontStyle = FontStyle.Bold };
+        _sHeader.normal.textColor = Color.white;
+        _sSection = new GUIStyle(GUI.skin.label) { fontSize = 11, fontStyle = FontStyle.Bold, padding = new RectOffset(2, 2, 6, 2) };
+        _sSection.normal.textColor = new Color(0.55f, 0.72f, 1f);
+        _sLabel = new GUIStyle(GUI.skin.label) { fontSize = 12 };
+        _sLabel.normal.textColor = new Color(0.82f, 0.86f, 0.92f);
+        _sMuted = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
+        _sMuted.normal.textColor = new Color(0.60f, 0.65f, 0.72f);
+        _sField = new GUIStyle(GUI.skin.textField) { fontSize = 12, padding = new RectOffset(5, 5, 3, 3) };
+        _sField.normal.background = _txRow; _sField.normal.textColor = Color.white;
+        _sField.focused.background = _txRow; _sField.focused.textColor = Color.white;
+        _sBtn = MkBtn(_txBtn, _txBtnH, new Color(0.90f, 0.92f, 0.96f));
+        _sBtnBlue = MkBtn(_txBlue, _txBtnH, Color.white);
+        _sBtnYellow = MkBtn(_txYellow, _txBtnH, new Color(0.10f, 0.10f, 0.10f));
+        _sBtnOrange = MkBtn(_txOrange, _txBtnH, Color.white);
+        _sRow = MkBtn(_txRow, _txBtnH, new Color(0.88f, 0.90f, 0.95f), TextAnchor.MiddleLeft);
+        _sRow.padding = new RectOffset(8, 4, 4, 4);
+        _sRowSel = MkBtn(_txRowSel, _txRowSel, Color.white, TextAnchor.MiddleLeft);
+        _sRowSel.padding = new RectOffset(8, 4, 4, 4);
+        _sEye = MkBtn(_txBtn, _txBtnH, new Color(0.9f, 0.95f, 1f)); _sEye.fontSize = 13; _sEye.padding = new RectOffset(0, 0, 0, 0);
+        _sBadge = new GUIStyle(GUI.skin.label) { fontSize = 9, fontStyle = FontStyle.Bold };
+        _sBadge.normal.textColor = new Color(1f, 0.80f, 0.30f);
+        _stylesReady = true;
+    }
 
     /// <summary>Create the persistent controller GameObject (idempotent). Called from Boot()
     /// and, as a fallback, once chat is up — whichever fires first while Unity is ready.</summary>
@@ -71,75 +137,63 @@ public class CutsceneEditorController : MonoBehaviour
         catch { }
     }
 
+    private static readonly string[] _cats = { "Actors", "BGs", "Boxes" };
+
     private void OnGUI()
     {
         if (!_open) return;
         try
         {
-            DrawMainPanel();
-            if (_loaded) { DrawTree(); DrawInspector(); }
+            EnsureStyles();
+            DrawLeftPanel();
+            if (_loaded) DrawBottomBar();
         }
         catch (Exception ex) { InfinityLoaderMod.SafeLog("[cutedit] OnGUI " + ex.Message); }
     }
 
-    private void DrawMainPanel()
+    // ---- left panel: header + object list + inspector ------------------------
+    private void DrawLeftPanel()
     {
-        GUILayout.BeginArea(new Rect(12, 12, 300, _loaded ? 232 : 92), GUI.skin.box);
-        GUILayout.Label("Cutscene Editor — Phase 3");
+        const float w = 276f;
+        GUILayout.BeginArea(new Rect(0, 0, w, Screen.height), _sPanel);
+
+        GUILayout.Label("Cutscene Editor", _sHeader);
         GUILayout.BeginHorizontal();
-        GUILayout.Label("id", GUILayout.Width(16));
-        _idText = GUILayout.TextField(_idText ?? "", GUILayout.Width(56));
-        if (GUILayout.Button("Load")) StartCoroutine(LoadAndRender());
-        if (GUILayout.Button("Close")) CloseEditor();
+        GUILayout.Label("id", _sMuted, GUILayout.Width(14));
+        _idText = GUILayout.TextField(_idText ?? "", _sField, GUILayout.Width(46));
+        if (GUILayout.Button("Load", _sBtnBlue, GUILayout.Width(50))) StartCoroutine(LoadAndRender());
+        if (GUILayout.Button("Close", _sBtn, GUILayout.Width(50))) CloseEditor();
         GUILayout.EndHorizontal();
+
         if (_loaded)
         {
-            int total = FrameCount();
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("|<")) Goto(1);
-            if (GUILayout.Button("<")) Goto(_page - 1);
-            GUILayout.Label(" pg " + _page + "/" + (total - 1) + " ", GUILayout.Width(60));
-            if (GUILayout.Button(">")) Goto(_page + 1);
-            if (GUILayout.Button(">|")) Goto(total - 1);
-            GUILayout.EndHorizontal();
-
-            GUILayout.Space(2); GUILayout.Label("Pages");
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Clone")) ClonePage();
-            if (GUILayout.Button("Blank")) BlankPage();
-            if (GUILayout.Button("Delete")) DeletePage();
-            GUILayout.EndHorizontal();
-
-            GUILayout.Label("Add to this page");
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Bubble")) AddBubble();
-            if (GUILayout.Button("Timer")) AddCmd("Timer{" + (_timerSec ?? "2") + "}");
-            _timerSec = GUILayout.TextField(_timerSec ?? "2", GUILayout.Width(30));
-            GUILayout.Label("s", GUILayout.Width(8));
-            GUILayout.EndHorizontal();
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Fade To")) AddCmd("FadeToBlack");
-            if (GUILayout.Button("Fade From")) AddCmd("FadeFromBlack");
-            GUILayout.EndHorizontal();
-
-            GUILayout.Space(2);
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Save")) SaveScene(false);
-            if (GUILayout.Button("Save as NEW")) SaveScene(true);
+            if (GUILayout.Button("Save", _sBtnYellow, GUILayout.Width(74))) SaveScene(false);
+            if (GUILayout.Button("Save as NEW", _sBtn)) SaveScene(true);
             GUILayout.EndHorizontal();
         }
-        GUILayout.Label(_status);
+        GUILayout.Label(_status ?? "", _sMuted);
+
+        if (_loaded)
+        {
+            GUILayout.Space(4);
+            float listH = Mathf.Max(120f, (Screen.height - 210f) * 0.45f);
+            _treeScroll = GUILayout.BeginScrollView(_treeScroll, GUILayout.Height(listH));
+            DrawList();
+            GUILayout.EndScrollView();
+
+            GUILayout.Space(4);
+            _inspScroll = GUILayout.BeginScrollView(_inspScroll);
+            DrawInspectorBody();
+            GUILayout.EndScrollView();
+        }
         GUILayout.EndArea();
     }
 
-    // ---- object tree ---------------------------------------------------------
-    private void DrawTree()
+    private void DrawList()
     {
-        GUILayout.BeginArea(new Rect(12, 250, 226, Mathf.Max(150, Screen.height - 284)), GUI.skin.box);
-        GUILayout.Label("OBJECTS");
-        _treeScroll = GUILayout.BeginScrollView(_treeScroll);
-        GUILayout.Label("Camera");
-        TreeRow("cam", "", "Camera");
+        GUILayout.Label("CAMERA", _sSection);
+        ListRow("cam", "", "Camera", false);
         var roster = Roster();
         foreach (var cat in _cats)
         {
@@ -147,81 +201,187 @@ public class CutsceneEditorController : MonoBehaviour
             foreach (var o in roster)
             {
                 if (Category(o) != cat) continue;
-                if (!header) { GUILayout.Space(4); GUILayout.Label(cat); header = true; }
-                TreeRow(o.kind, o.id, o.name);
+                if (!header) { GUILayout.Label(cat.ToUpper(), _sSection); header = true; }
+                ListRow(o.kind, o.id, o.name, o.kind == "obj" && FindIdx(_page, "Actor{" + o.id + "|") >= 0);
             }
         }
-        GUILayout.EndScrollView();
-        GUILayout.EndArea();
     }
-    private static readonly string[] _cats = { "Actors", "BGs", "Boxes" };
 
-    private void TreeRow(string kind, string id, string name)
+    private void ListRow(string kind, string id, string name, bool animated)
     {
         bool sel = _selKind == kind && _selId == id;
-        var prev = GUI.color;
-        if (sel) GUI.color = Color.cyan;
-        string label = kind == "cam" ? "Camera" : ("#" + id + " " + name);
-        if (GUILayout.Button(label)) { _selKind = kind; _selId = id; _bufSig = ""; }
-        GUI.color = prev;
-    }
-
-    // ---- inspector -----------------------------------------------------------
-    private void DrawInspector()
-    {
-        if (_selKind == null) return;
-        float w = 320f;
-        GUILayout.BeginArea(new Rect(Screen.width - w - 10, 12, w, Mathf.Max(200, Screen.height - 40)), GUI.skin.box);
-
-        string sig = _selKind + ":" + _selId + ":" + _page;
-        if (sig != _bufSig) { LoadBuf(); _bufSig = sig; }
-
-        string title = _selKind == "cam" ? "Camera" : (_selKind == "box" ? "Box " + _selId : "Object #" + _selId);
-        GUILayout.Label(title + "   ·   page " + _page);
-
-        if (_buf.ContainsKey("__missing"))
-        {
-            GUILayout.Label("Not present on this page.");
-            if (GUILayout.Button("Add to this page")) { AddToPage(); _bufSig = ""; }
-            GUILayout.EndArea();
-            return;
-        }
-
-        _inspScroll = GUILayout.BeginScrollView(_inspScroll);
-        if (_selKind == "obj") { BufToggle("Visible", 1, "1", "0"); BufField("X", 5); BufField("Y", 6);
-            BufField("Scale", 4); BufField("Rotation", 10); BufField("Z-order", 3);
-            BufToggle("Face left", 2, "-1", "1"); BufField("Tint hex", 9); BufField("Tween", 8); }
-        else if (_selKind == "box") { BufToggle("Visible", 4, "1", "0");
-            if (_buf.ContainsKey("speaker")) { GUILayout.Label("Speaker"); _buf["speaker"] = GUILayout.TextField(_buf["speaker"] ?? ""); }
-            if (_buf.ContainsKey("f8")) { GUILayout.Label("Dialog text"); _buf["f8"] = GUILayout.TextArea(_buf["f8"] ?? "", GUILayout.Height(56)); }
-            BufField("X", 1); BufField("Y", 2); BufField("Scale", 3); BufField("Font size", 11); }
-        else if (_selKind == "cam") { int len = _buf.ContainsKey("__len") ? int.Parse(_buf["__len"]) : 0;
-            if (len >= 7) { BufField("Zoom", 0); BufField("X", 1); BufField("Y", 2); BufField("Rotation", 4); BufField("Tween", 5); }
-            else { BufField("X", 0); BufField("Y", 1); BufField("Scale", 3); BufField("Speed", 4); } }
-        GUILayout.EndScrollView();
-
-        GUILayout.Space(6);
-        if (GUILayout.Button("Apply + render")) ApplyBuf();
-        GUILayout.EndArea();
-    }
-
-    private void BufField(string label, int idx)
-    {
-        string key = "f" + idx;
-        if (!_buf.ContainsKey(key)) return;
+        bool isCam = kind == "cam";
         GUILayout.BeginHorizontal();
-        GUILayout.Label(label, GUILayout.Width(84));
-        _buf[key] = GUILayout.TextField(_buf[key] ?? "", GUILayout.Width(150));
+        string label = isCam ? "Camera" : ("#" + id + "  " + name);
+        if (GUILayout.Button(label, sel ? _sRowSel : _sRow)) { _selKind = kind; _selId = id; _bufSig = ""; }
+        if (animated) GUILayout.Label("AN", _sBadge, GUILayout.Width(16));
+        if (!isCam)
+        {
+            bool vis = IsVisibleOnPage(kind, id);
+            if (GUILayout.Button(vis ? "◉" : "○", _sEye, GUILayout.Width(24))) ToggleVisible(kind, id);
+        }
         GUILayout.EndHorizontal();
     }
 
-    private void BufToggle(string label, int idx, string onVal, string offVal)
+    private bool IsVisibleOnPage(string kind, string id)
     {
-        string key = "f" + idx;
-        if (!_buf.ContainsKey(key)) return;
-        bool cur = _buf[key] == onVal;
-        bool nv = GUILayout.Toggle(cur, " " + label);
-        if (nv != cur) _buf[key] = nv ? onVal : offVal;
+        var dm = Dialogger_Manager.instance;
+        int i = FindIdx(_page, (kind == "box" ? "Box{" : "Object{") + id + "|");
+        if (i < 0) return false;
+        var f = Body(dm.dData.frames[_page][i]); int vi = kind == "box" ? 4 : 1;
+        return f != null && f.Length > vi && f[vi] != "0";
+    }
+
+    private void ToggleVisible(string kind, string id)
+    {
+        var dm = Dialogger_Manager.instance;
+        int i = FindIdx(_page, (kind == "box" ? "Box{" : "Object{") + id + "|");
+        if (i < 0) { _status = "not on this page — select it and Add"; return; }
+        var f = Body(dm.dData.frames[_page][i]); int vi = kind == "box" ? 4 : 1;
+        if (f == null || f.Length <= vi) return;
+        f[vi] = f[vi] == "0" ? "1" : "0";
+        dm.dData.frames[_page][i] = Rebuild(kind == "box" ? "Box" : "Object", f);
+        try { dm.LoadPage(_page); } catch { }
+        _bufSig = "";
+    }
+
+    // ---- inspector (AE-style: Center + nudge arrows, per-field Set, slider) ---
+    private void DrawInspectorBody()
+    {
+        if (_selKind == null) { GUILayout.Label("Select an object above.", _sMuted); return; }
+        string sig = _selKind + ":" + _selId + ":" + _page;
+        if (sig != _bufSig) { LoadBuf(); _bufSig = sig; }
+
+        string title = _selKind == "cam" ? "CAMERA" : (_selKind == "box" ? "BOX " + _selId : "OBJECT #" + _selId);
+        GUILayout.Label(title + "   ·   page " + _page, _sSection);
+
+        if (_buf.ContainsKey("__missing"))
+        {
+            GUILayout.Label("Not on this page.", _sMuted);
+            if (GUILayout.Button("Add to this page", _sBtnBlue)) { AddToPage(); _bufSig = ""; }
+            return;
+        }
+
+        if (_selKind == "obj")
+        {
+            NudgeRow(5, 6);
+            PosRow(5, 6);
+            SliderRow("Rotation", 10, -180f, 180f);
+            FieldSet("Scale", 4); FieldSet("Z Order", 3); FieldSet("Tween", 8); FieldSet("Tint", 9);
+            GUILayout.BeginHorizontal(); ToggleBtn("Visible", 1, "1", "0"); ToggleBtn("Face L", 2, "-1", "1"); GUILayout.EndHorizontal();
+        }
+        else if (_selKind == "box")
+        {
+            if (_buf.ContainsKey("speaker")) { GUILayout.Label("Speaker", _sLabel); _buf["speaker"] = GUILayout.TextField(_buf["speaker"] ?? "", _sField); }
+            if (_buf.ContainsKey("f8")) { GUILayout.Label("Dialog text", _sLabel); _buf["f8"] = GUILayout.TextArea(_buf["f8"] ?? "", _sField, GUILayout.Height(52)); }
+            if (GUILayout.Button("Apply text", _sBtnBlue)) ApplyBuf();
+            GUILayout.Space(3);
+            NudgeRow(1, 2);
+            PosRow(1, 2);
+            FieldSet("Scale", 3); FieldSet("Font size", 11);
+            GUILayout.BeginHorizontal(); ToggleBtn("Visible", 4, "1", "0"); GUILayout.EndHorizontal();
+        }
+        else // cam
+        {
+            int len = _buf.ContainsKey("__len") ? int.Parse(_buf["__len"]) : 0;
+            if (len >= 7) { FieldSet("Zoom", 0); PosRow(1, 2); FieldSet("Rotation", 4); FieldSet("Tween", 5); }
+            else { PosRow(0, 1); FieldSet("Scale", 3); FieldSet("Speed", 4); }
+        }
+    }
+
+    private void NudgeRow(int xi, int yi)
+    {
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("Center", _sBtn, GUILayout.Width(60))) { _buf["f" + xi] = "0"; _buf["f" + yi] = "0"; ApplyBuf(); }
+        if (GUILayout.Button("◀", _sBtn, GUILayout.Width(28))) Nudge(xi, -20);
+        if (GUILayout.Button("▶", _sBtn, GUILayout.Width(28))) Nudge(xi, +20);
+        if (GUILayout.Button("▲", _sBtn, GUILayout.Width(28))) Nudge(yi, +20);
+        if (GUILayout.Button("▼", _sBtn, GUILayout.Width(28))) Nudge(yi, -20);
+        GUILayout.EndHorizontal();
+    }
+
+    private void Nudge(int idx, float delta)
+    {
+        string k = "f" + idx; if (!_buf.ContainsKey(k)) return;
+        float v; float.TryParse(_buf[k], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v);
+        _buf[k] = (v + delta).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        ApplyBuf();
+    }
+
+    private void PosRow(int xi, int yi)
+    {
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Position", _sLabel, GUILayout.Width(60));
+        if (_buf.ContainsKey("f" + xi)) _buf["f" + xi] = GUILayout.TextField(_buf["f" + xi], _sField, GUILayout.Width(66));
+        if (_buf.ContainsKey("f" + yi)) _buf["f" + yi] = GUILayout.TextField(_buf["f" + yi], _sField, GUILayout.Width(66));
+        if (GUILayout.Button("Set", _sBtnBlue, GUILayout.Width(40))) ApplyBuf();
+        GUILayout.EndHorizontal();
+    }
+
+    private void FieldSet(string label, int idx)
+    {
+        string k = "f" + idx; if (!_buf.ContainsKey(k)) return;
+        GUILayout.BeginHorizontal();
+        GUILayout.Label(label, _sLabel, GUILayout.Width(60));
+        _buf[k] = GUILayout.TextField(_buf[k] ?? "", _sField, GUILayout.Width(98));
+        if (GUILayout.Button("Set", _sBtnBlue, GUILayout.Width(40))) ApplyBuf();
+        GUILayout.EndHorizontal();
+    }
+
+    private void SliderRow(string label, int idx, float min, float max)
+    {
+        string k = "f" + idx; if (!_buf.ContainsKey(k)) return;
+        float v; float.TryParse(_buf[k], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v);
+        GUILayout.BeginHorizontal();
+        GUILayout.Label(label, _sLabel, GUILayout.Width(60));
+        float nv = GUILayout.HorizontalSlider(v, min, max, GUILayout.Width(96));
+        _buf[k] = GUILayout.TextField(_buf[k] ?? "", _sField, GUILayout.Width(44));
+        if (GUILayout.Button("Set", _sBtnBlue, GUILayout.Width(40))) ApplyBuf();
+        GUILayout.EndHorizontal();
+        if (Mathf.Abs(nv - v) > 0.05f) { _buf[k] = nv.ToString("F1", System.Globalization.CultureInfo.InvariantCulture); ApplyBuf(); }
+    }
+
+    private void ToggleBtn(string label, int idx, string onVal, string offVal)
+    {
+        string k = "f" + idx; if (!_buf.ContainsKey(k)) return;
+        bool cur = _buf[k] == onVal;
+        if (GUILayout.Button((cur ? "✓ " : "  ") + label, cur ? _sBtnOrange : _sBtn)) { _buf[k] = cur ? offVal : onVal; ApplyBuf(); }
+    }
+
+    // ---- bottom toolbar: pager + page/authoring actions ----------------------
+    private void DrawBottomBar()
+    {
+        const float x = 276f, h = 78f;
+        int total = FrameCount();
+        GUILayout.BeginArea(new Rect(x, Screen.height - h, Screen.width - x, h), _sPanel);
+
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("Setup", _sBtn, GUILayout.Width(52))) Goto(0);
+        if (GUILayout.Button("First", _sBtn, GUILayout.Width(48))) Goto(1);
+        if (GUILayout.Button("Back", _sBtn, GUILayout.Width(48))) Goto(_page - 1);
+        _frameGoto = GUILayout.TextField(_frameGoto ?? "", _sField, GUILayout.Width(38));
+        if (GUILayout.Button("Go To", _sBtn, GUILayout.Width(48))) { int g; if (int.TryParse(_frameGoto, out g)) Goto(g); }
+        if (GUILayout.Button("Next", _sBtn, GUILayout.Width(48))) Goto(_page + 1);
+        if (GUILayout.Button("End", _sBtn, GUILayout.Width(48))) Goto(total - 1);
+        if (GUILayout.Button("New page", _sBtnYellow, GUILayout.Width(80))) ClonePage();
+        GUILayout.Label("  " + _page + " / " + (total - 1), _sHeader, GUILayout.Width(84));
+        GUILayout.FlexibleSpace();
+        GUILayout.EndHorizontal();
+
+        GUILayout.Space(3);
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("Add Bubble", _sBtn, GUILayout.Width(90))) AddBubble();
+        if (GUILayout.Button("Blank Page", _sBtn, GUILayout.Width(84))) BlankPage();
+        if (GUILayout.Button("Delete Page", _sBtnOrange, GUILayout.Width(92))) DeletePage();
+        if (GUILayout.Button("Add Timer", _sBtn, GUILayout.Width(78))) AddCmd("Timer{" + (_timerSec ?? "2") + "}");
+        _timerSec = GUILayout.TextField(_timerSec ?? "2", _sField, GUILayout.Width(32));
+        GUILayout.Label("s", _sMuted, GUILayout.Width(10));
+        if (GUILayout.Button("Fade To", _sBtn, GUILayout.Width(62))) AddCmd("FadeToBlack");
+        if (GUILayout.Button("Fade From", _sBtn, GUILayout.Width(72))) AddCmd("FadeFromBlack");
+        GUILayout.FlexibleSpace();
+        GUILayout.EndHorizontal();
+
+        GUILayout.EndArea();
     }
 
     private static int FrameCount()
