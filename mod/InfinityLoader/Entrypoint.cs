@@ -100,6 +100,16 @@ public static class InfinityLoaderMod
             AccessTools.Method(typeof(WebEditButton), "OnMouseDown"),
             prefix: nameof(WebEditButton_OnMouseDown_Prefix));
 
+        // 6) In-client cutscene editor (Phase 1): drives the shipped Dialogger_Manager to render
+        //    saved cutscenes under our control. IMGUI panel, F8 to toggle.
+        //    IMPORTANT: do NOT spawn it here. Boot() runs at the Doorstop entrypoint, BEFORE Unity's
+        //    scripting runtime is initialized — touching any UnityEngine type (e.g. `new GameObject`)
+        //    forces UnityEngine.Object's static initializer to run too early, it throws
+        //    (GetOffsetOfInstanceIDInCPlusPlusObject native binding not ready), and a type initializer
+        //    that throws once POISONS that type for the whole process -> every Unity object is then
+        //    dead -> black screen. So the editor is spawned lazily from UIChat.SetText (below), which
+        //    only ever runs well after the game is up.
+
         SafeLog("[InfinityLoader] booted; WebApiURL -> " + (ReadWebApiUrl() ?? "(live AE, no marker)")
             + "; BaseURL -> " + (ReadContentUrl() ?? "(live AE, no marker)")
             + "; UserData=" + _beyondDir);
@@ -287,6 +297,7 @@ public static class InfinityLoaderMod
 
     public static void UIChat_SetText_Prefix(UIChat __instance, ref string s)
     {
+        CutsceneEditorController.Spawn();      // lazy fallback: guaranteed in-game, Unity ready
         EnsureEmoji();
         if (_emojiAsset != null && __instance != null)
         {

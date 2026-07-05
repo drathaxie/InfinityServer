@@ -17,6 +17,7 @@ rescan 40 maps per request.
 """
 import json
 import pathlib
+import re
 import time
 
 import db
@@ -34,6 +35,17 @@ _cache = {"at": 0.0, "data": None}
 
 def _ref_ints(refids):
     return [int(t) for t in str(refids or "").split(",") if t.strip().lstrip("-").isdigit()]
+
+
+def _name_in_objective(mon_name, objective_name):
+    """WHOLE-WORD (plural-tolerant) monster-name-in-objective-name match. Keep in sync with
+    game._name_in_objective (not imported to avoid a cycle, same as QOT_*) — the bot KB must
+    hunt exactly what record_kill credits, and the substring version mis-matched ('rat' is
+    inside 'piRATe')."""
+    if not mon_name or not objective_name:
+        return False
+    return re.search(r"(?<![a-z0-9])" + re.escape(mon_name.lower()) + r"(?:e?s)?(?![a-z0-9])",
+                     objective_name.lower()) is not None
 
 
 def _captured_monbranch(map_name):
@@ -103,9 +115,9 @@ def _kill_targets(conn, t, mon_names):
     refs = _ref_ints(t.get("RefIDs"))
     if refs:
         return sorted(set(refs)), "refids", None
-    oname = (t.get("Name") or "").lower()
+    oname = t.get("Name") or ""
     if oname:
-        by_name = {mid for mid, n in mon_names.items() if n and n.lower() in oname}
+        by_name = {mid for mid, n in mon_names.items() if _name_in_objective(n, oname)}
         if by_name:
             return sorted(by_name), "name", None
     return [], "none", None

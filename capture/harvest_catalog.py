@@ -26,7 +26,7 @@ Usage:
     python harvest_catalog.py bundles --max-id 60000 # sweep the bundle catalog
     python harvest_catalog.py all --max-id 60000
 """
-import argparse, json, pathlib, sys, time
+import argparse, json, pathlib, time
 import requests
 
 ENVS = {

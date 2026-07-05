@@ -66,5 +66,15 @@
       <HintPath>$(AqwiManaged)\UnityEngine.UI.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <!-- OnGUI / GUILayout — the in-client cutscene editor's immediate-mode panel (CutsceneEditor.cs). -->
+      <HintPath>$(AqwiManaged)\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <!-- Input.GetKeyDown for the editor's toggle hotkey (the game uses legacy Input, e.g. Dialogger_Manager.Update). -->
+      <HintPath>$(AqwiManaged)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
   </ItemGroup>
 </Project>

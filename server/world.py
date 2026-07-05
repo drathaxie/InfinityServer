@@ -165,7 +165,3 @@ def broadcast_all(obj):
         for m in list(room.values()):
             if not _deliver(m.writer, data):
                 room.pop(m.uid, None)
-
-
-def population():
-    return {a: len(r) for a, r in _rooms.items() if r}

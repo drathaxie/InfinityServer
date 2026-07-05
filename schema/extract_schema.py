@@ -7,7 +7,7 @@ members and the [JsonProperty]/Cmd wire name.
 
 Output: schema/schema.json  { "responses": {cmd: {...}}, "requests": {cmd: {...}} }
 """
-import re, json, pathlib, sys
+import re, json, pathlib
 
 DECOMP = pathlib.Path(__file__).resolve().parent.parent / "docs" / "decomp"
 OUT = pathlib.Path(__file__).resolve().parent / "schema.json"
