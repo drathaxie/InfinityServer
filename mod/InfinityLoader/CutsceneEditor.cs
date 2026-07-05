@@ -42,6 +42,13 @@ public class CutsceneEditorController : MonoBehaviour
     private bool _prevEditorFlag;
     private float _savedOrtho = -1f;
 
+    // Phase 2 — object tree + property inspector
+    private string _selKind, _selId;                 // selected tree row: kind in {obj,box,cam}
+    private Vector2 _treeScroll, _inspScroll;
+    private string _bufSig = "";                      // (kind:id:page) the field buffers were loaded for
+    private readonly System.Collections.Generic.Dictionary<string, string> _buf =
+        new System.Collections.Generic.Dictionary<string, string>();
+
     /// <summary>Create the persistent controller GameObject (idempotent). Called from Boot()
     /// and, as a fallback, once chat is up — whichever fires first while Unity is ready.</summary>
     public static void Spawn()
@@ -66,30 +73,129 @@ public class CutsceneEditorController : MonoBehaviour
     private void OnGUI()
     {
         if (!_open) return;
-        GUILayout.BeginArea(new Rect(12, 12, 340, 150), GUI.skin.box);
-        GUILayout.Label("Cutscene Editor — Phase 1 (render preview)");
+        try
+        {
+            DrawMainPanel();
+            if (_loaded) { DrawTree(); DrawInspector(); }
+        }
+        catch (Exception ex) { InfinityLoaderMod.SafeLog("[cutedit] OnGUI " + ex.Message); }
+    }
 
+    private void DrawMainPanel()
+    {
+        GUILayout.BeginArea(new Rect(12, 12, 300, 96), GUI.skin.box);
+        GUILayout.Label("Cutscene Editor — Phase 2");
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Cutscene id", GUILayout.Width(74));
-        _idText = GUILayout.TextField(_idText ?? "", GUILayout.Width(90));
+        GUILayout.Label("id", GUILayout.Width(16));
+        _idText = GUILayout.TextField(_idText ?? "", GUILayout.Width(64));
         if (GUILayout.Button("Load")) StartCoroutine(LoadAndRender());
         if (GUILayout.Button("Close")) CloseEditor();
         GUILayout.EndHorizontal();
-
         if (_loaded)
         {
             int total = FrameCount();
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("|< First")) Goto(1);
-            if (GUILayout.Button("< Back")) Goto(_page - 1);
-            GUILayout.Label(" page " + _page + " / " + (total - 1) + " ", GUILayout.Width(96));
-            if (GUILayout.Button("Next >")) Goto(_page + 1);
-            if (GUILayout.Button("End >|")) Goto(total - 1);
+            if (GUILayout.Button("|<")) Goto(1);
+            if (GUILayout.Button("<")) Goto(_page - 1);
+            GUILayout.Label(" pg " + _page + "/" + (total - 1) + " ", GUILayout.Width(66));
+            if (GUILayout.Button(">")) Goto(_page + 1);
+            if (GUILayout.Button(">|")) Goto(total - 1);
             GUILayout.EndHorizontal();
         }
-
         GUILayout.Label(_status);
         GUILayout.EndArea();
+    }
+
+    // ---- object tree ---------------------------------------------------------
+    private void DrawTree()
+    {
+        GUILayout.BeginArea(new Rect(12, 114, 226, Mathf.Max(160, Screen.height - 150)), GUI.skin.box);
+        GUILayout.Label("OBJECTS");
+        _treeScroll = GUILayout.BeginScrollView(_treeScroll);
+        GUILayout.Label("Camera");
+        TreeRow("cam", "", "Camera");
+        var roster = Roster();
+        foreach (var cat in _cats)
+        {
+            bool header = false;
+            foreach (var o in roster)
+            {
+                if (Category(o) != cat) continue;
+                if (!header) { GUILayout.Space(4); GUILayout.Label(cat); header = true; }
+                TreeRow(o.kind, o.id, o.name);
+            }
+        }
+        GUILayout.EndScrollView();
+        GUILayout.EndArea();
+    }
+    private static readonly string[] _cats = { "Actors", "BGs", "Boxes" };
+
+    private void TreeRow(string kind, string id, string name)
+    {
+        bool sel = _selKind == kind && _selId == id;
+        var prev = GUI.color;
+        if (sel) GUI.color = Color.cyan;
+        string label = kind == "cam" ? "Camera" : ("#" + id + " " + name);
+        if (GUILayout.Button(label)) { _selKind = kind; _selId = id; _bufSig = ""; }
+        GUI.color = prev;
+    }
+
+    // ---- inspector -----------------------------------------------------------
+    private void DrawInspector()
+    {
+        if (_selKind == null) return;
+        float w = 320f;
+        GUILayout.BeginArea(new Rect(Screen.width - w - 10, 12, w, Mathf.Max(200, Screen.height - 40)), GUI.skin.box);
+
+        string sig = _selKind + ":" + _selId + ":" + _page;
+        if (sig != _bufSig) { LoadBuf(); _bufSig = sig; }
+
+        string title = _selKind == "cam" ? "Camera" : (_selKind == "box" ? "Box " + _selId : "Object #" + _selId);
+        GUILayout.Label(title + "   ·   page " + _page);
+
+        if (_buf.ContainsKey("__missing"))
+        {
+            GUILayout.Label("Not present on this page.");
+            if (GUILayout.Button("Add to this page")) { AddToPage(); _bufSig = ""; }
+            GUILayout.EndArea();
+            return;
+        }
+
+        _inspScroll = GUILayout.BeginScrollView(_inspScroll);
+        if (_selKind == "obj") { BufToggle("Visible", 1, "1", "0"); BufField("X", 5); BufField("Y", 6);
+            BufField("Scale", 4); BufField("Rotation", 10); BufField("Z-order", 3);
+            BufToggle("Face left", 2, "-1", "1"); BufField("Tint hex", 9); BufField("Tween", 8); }
+        else if (_selKind == "box") { BufToggle("Visible", 4, "1", "0");
+            if (_buf.ContainsKey("speaker")) { GUILayout.Label("Speaker"); _buf["speaker"] = GUILayout.TextField(_buf["speaker"] ?? ""); }
+            if (_buf.ContainsKey("f8")) { GUILayout.Label("Dialog text"); _buf["f8"] = GUILayout.TextArea(_buf["f8"] ?? "", GUILayout.Height(56)); }
+            BufField("X", 1); BufField("Y", 2); BufField("Scale", 3); BufField("Font size", 11); }
+        else if (_selKind == "cam") { int len = _buf.ContainsKey("__len") ? int.Parse(_buf["__len"]) : 0;
+            if (len >= 7) { BufField("Zoom", 0); BufField("X", 1); BufField("Y", 2); BufField("Rotation", 4); BufField("Tween", 5); }
+            else { BufField("X", 0); BufField("Y", 1); BufField("Scale", 3); BufField("Speed", 4); } }
+        GUILayout.EndScrollView();
+
+        GUILayout.Space(6);
+        if (GUILayout.Button("Apply + render")) ApplyBuf();
+        GUILayout.EndArea();
+    }
+
+    private void BufField(string label, int idx)
+    {
+        string key = "f" + idx;
+        if (!_buf.ContainsKey(key)) return;
+        GUILayout.BeginHorizontal();
+        GUILayout.Label(label, GUILayout.Width(84));
+        _buf[key] = GUILayout.TextField(_buf[key] ?? "", GUILayout.Width(150));
+        GUILayout.EndHorizontal();
+    }
+
+    private void BufToggle(string label, int idx, string onVal, string offVal)
+    {
+        string key = "f" + idx;
+        if (!_buf.ContainsKey(key)) return;
+        bool cur = _buf[key] == onVal;
+        bool nv = GUILayout.Toggle(cur, " " + label);
+        if (nv != cur) _buf[key] = nv ? onVal : offVal;
     }
 
     private static int FrameCount()
@@ -202,5 +308,136 @@ public class CutsceneEditorController : MonoBehaviour
             byte[] resp = wc.UploadData(url, "POST", Encoding.UTF8.GetBytes("id=" + Uri.EscapeDataString(id ?? "")));
             return Encoding.UTF8.GetString(resp);
         }
+    }
+
+    // ---- Dialogger_Data command model ---------------------------------------
+    // The scene is dm.dData.frames: a list of frames, each a list of "Name{a|b|c}" command
+    // strings. We edit those strings in place and LoadPage(n) to re-render. (Save = Phase 3.)
+
+    private struct RObj { public string kind, id, type, name;
+        public RObj(string k, string i, string t, string n) { kind = k; id = i; type = t; name = n; } }
+
+    private System.Collections.Generic.List<RObj> Roster()
+    {
+        var list = new System.Collections.Generic.List<RObj>();
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.dData == null || dm.dData.frames == null || dm.dData.frames.Count == 0) return list;
+        foreach (var cmd in dm.dData.frames[0])
+        {
+            if (string.IsNullOrEmpty(cmd)) continue;
+            if (cmd.StartsWith("Load{"))
+            {
+                var f = Body(cmd); if (f == null || f.Length < 3) continue;
+                list.Add(new RObj("obj", f[0], f[2], LoadName(f[0], f[1], f[2])));
+            }
+            else if (cmd.StartsWith("SpawnBox{"))
+            {
+                var f = Body(cmd); if (f == null || f.Length < 1) continue;
+                list.Add(new RObj("box", f[0], "box", "Box " + f[0]));
+            }
+        }
+        return list;
+    }
+
+    private static string LoadName(string id, string link, string type)
+    {
+        if (type == "player") return "Player";
+        if (type == "npc") return "NPC " + link;
+        if (type == "bg") return string.IsNullOrEmpty(link) ? ("BG " + id) : link;
+        if (type == "music") return "Music " + link;
+        if ((type == "actor" || type == "sfx") && !string.IsNullOrEmpty(link))
+        { int c = link.IndexOf(','); return c >= 0 ? link.Substring(c + 1) : link; }
+        return type + " " + id;
+    }
+
+    private static string Category(RObj o)
+    {
+        if (o.kind == "box") return "Boxes";
+        if (o.type == "music" || o.type == "sfx") return "Audio";
+        if (o.type == "bg") return "BGs";
+        if (o.type == "actor" && o.name.IndexOf("bg", StringComparison.OrdinalIgnoreCase) >= 0) return "BGs";
+        return "Actors";
+    }
+
+    private static string[] Body(string cmd)
+    {
+        if (string.IsNullOrEmpty(cmd)) return null;
+        int b = cmd.IndexOf('{'); int e = cmd.LastIndexOf('}');
+        if (b < 0 || e <= b) return null;
+        return cmd.Substring(b + 1, e - b - 1).Split('|');
+    }
+    private static string Rebuild(string name, string[] f) { return name + "{" + string.Join("|", f) + "}"; }
+
+    private string SelPrefix()
+    {
+        if (_selKind == "obj") return "Object{" + _selId + "|";
+        if (_selKind == "box") return "Box{" + _selId + "|";
+        if (_selKind == "cam") return "Camera{";
+        return null;
+    }
+
+    private int FindIdx(int p, string prefix)
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.dData == null || dm.dData.frames == null || prefix == null
+            || p < 0 || p >= dm.dData.frames.Count) return -1;
+        var fr = dm.dData.frames[p];
+        for (int i = 0; i < fr.Count; i++) if (fr[i] != null && fr[i].StartsWith(prefix)) return i;
+        return -1;
+    }
+
+    private void LoadBuf()
+    {
+        _buf.Clear();
+        var dm = Dialogger_Manager.instance;
+        int i = FindIdx(_page, SelPrefix());
+        if (i < 0) { _buf["__missing"] = "1"; return; }
+        var f = Body(dm.dData.frames[_page][i]);
+        if (f == null) { _buf["__missing"] = "1"; return; }
+        for (int k = 0; k < f.Length; k++) _buf["f" + k] = f[k];
+        _buf["__len"] = f.Length.ToString();
+        if (_selKind == "box" && f.Length > 7) _buf["speaker"] = ExtractSpeaker(f[7]);
+    }
+
+    private void ApplyBuf()
+    {
+        var dm = Dialogger_Manager.instance;
+        int i = FindIdx(_page, SelPrefix());
+        if (i < 0) return;
+        var f = Body(dm.dData.frames[_page][i]);
+        if (f == null) return;
+        if (_selKind == "box" && _buf.ContainsKey("speaker") && f.Length > 7)
+        {
+            string sp = _buf["speaker"] ?? "";
+            _buf["f7"] = sp.Length == 0 ? "" : "<size=42>" + sp + "</size>\n<size=24></size>";
+        }
+        for (int k = 0; k < f.Length; k++) if (_buf.ContainsKey("f" + k)) f[k] = _buf["f" + k];
+        string name = _selKind == "obj" ? "Object" : (_selKind == "box" ? "Box" : "Camera");
+        dm.dData.frames[_page][i] = Rebuild(name, f);
+        try { dm.LoadPage(_page); } catch (Exception ex) { _status = "render err: " + ex.Message; }
+        _bufSig = "";                                // reload buffers from the now-canonical command
+    }
+
+    private void AddToPage()
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null) return;
+        string prefix = SelPrefix(); string cmd = null;
+        for (int k = _page - 1; k >= 1; k--) { int i = FindIdx(k, prefix); if (i >= 0) { cmd = dm.dData.frames[k][i]; break; } }
+        if (cmd == null)
+        {
+            if (_selKind == "obj") cmd = "Object{" + _selId + "|1|1|0|1|0|0|0|-1 0|FFFFFFFF|0|0|1}";
+            else if (_selKind == "box") cmd = "Box{" + _selId + "|0|0|1|1|0.5|0.862069|<size=42></size>\n<size=24></size>||1|0|38|000000|FFFFFF|FFFFFF|000000|-1|0|0}";
+            else if (_selKind == "cam") cmd = "Camera{1|0|0|1|0|-1 0|0}";
+        }
+        if (cmd != null) { dm.dData.frames[_page].Add(cmd); try { dm.LoadPage(_page); } catch { } }
+    }
+
+    private static string ExtractSpeaker(string nameplate)
+    {
+        if (string.IsNullOrEmpty(nameplate)) return "";
+        var m = System.Text.RegularExpressions.Regex.Match(nameplate, "<size=42>(.*?)</size>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        return m.Success ? m.Groups[1].Value : nameplate;
     }
 }
