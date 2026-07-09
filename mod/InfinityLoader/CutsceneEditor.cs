@@ -145,7 +145,27 @@ public class CutsceneEditorController : MonoBehaviour
     private void Update()
     {
         try { if (Input.GetKeyDown(ToggleKey)) _open = !_open; } catch { }
-        if (_open && _loaded) { try { HandleDrag(); } catch { } }
+        if (_open && _loaded) { try { HandleDrag(); } catch { } try { HideBoxChrome(); } catch { } }
+    }
+
+    // Each dialog box carries AE's own editor overlay (the MV/AP/AT buttons + arrow popups) because
+    // we run with editor=true. They're wired to Dialogger_EditorManager, which we don't have, so
+    // they NRE / don't persist — pure confusion. Deactivate that editor-component object on every
+    // box; the box body/nameplate/tail render from Dialogger_BoxController (a separate object), so
+    // the bubble itself is untouched. Our inspector's Tail anchor / Arrow style drive it instead.
+    private void HideBoxChrome()
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.boxList == null) return;
+        for (int i = 0; i < dm.boxList.Count; i++)
+        {
+            var mt = dm.boxList[i];
+            if (mt != null && mt.decb != null && mt.decb.decb != null)
+            {
+                var go = mt.decb.decb.gameObject;
+                if (go != null && go.activeSelf) go.SetActive(false);
+            }
+        }
     }
 
     // Drag a selected actor/BG on the render: grab near its screen position, then map the cursor
@@ -347,6 +367,8 @@ public class CutsceneEditorController : MonoBehaviour
             NudgeRow(1, 2);
             PosRow(1, 2);
             FieldSet("Scale", 3); FieldSet("Font size", 11);
+            StepRow("Tail anchor", 16, -1, 24);   // f16 shownLead: -1 = no tail, else which anchor point
+            StepRow("Arrow style", 17, 0, 4);      // f17 leadPos: the tail/arrow style
             GUILayout.BeginHorizontal(); ToggleBtn("Visible", 4, "1", "0"); GUILayout.EndHorizontal();
         }
         else // cam
@@ -417,6 +439,19 @@ public class CutsceneEditorController : MonoBehaviour
             ApplyBuf();
         }
         if (GUILayout.Button("Set", _sBtnBlue, GUILayout.Width(40))) ApplyBuf();
+        GUILayout.EndHorizontal();
+    }
+
+    // Integer stepper (− value +) — for the box tail anchor / arrow style, which are small ints.
+    private void StepRow(string label, int idx, int min, int max)
+    {
+        string k = "f" + idx; if (!_buf.ContainsKey(k)) return;
+        int v; int.TryParse(_buf[k], out v);
+        GUILayout.BeginHorizontal();
+        GUILayout.Label(label, _sLabel, GUILayout.Width(80));
+        if (GUILayout.Button("−", _sBtn, GUILayout.Width(28))) { _buf[k] = Mathf.Clamp(v - 1, min, max).ToString(); ApplyBuf(); }
+        GUILayout.Label(v.ToString(), _sLabel, GUILayout.Width(34));
+        if (GUILayout.Button("+", _sBtn, GUILayout.Width(28))) { _buf[k] = Mathf.Clamp(v + 1, min, max).ToString(); ApplyBuf(); }
         GUILayout.EndHorizontal();
     }
 
