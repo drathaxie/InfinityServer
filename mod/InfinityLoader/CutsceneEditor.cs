@@ -53,6 +53,14 @@ public class CutsceneEditorController : MonoBehaviour
     private string _frameGoto = "";                  // "Go To" page field
     private string _addType = "npc";                 // Add-object: selected type
     private string _addInput = "";                   // Add-object: id/name entry
+    // Asset browser (searches the ungated tweak/csnpcs + tweak/csassets endpoints)
+    private bool _browseOpen;
+    private string _browseMode = "npc";
+    private string _browseQuery = "";
+    private string _browseStatus = "type a query and Search";
+    private Vector2 _browseScroll;
+    private readonly List<string[]> _browseResults = new List<string[]>();  // [type, link, name]
+    private bool _dragging;                           // drag-to-move on the render
 
     // ---- styling (built once, lazily, inside OnGUI where GUI.skin is valid) ----
     private bool _stylesReady;
@@ -136,8 +144,51 @@ public class CutsceneEditorController : MonoBehaviour
 
     private void Update()
     {
-        try { if (Input.GetKeyDown(ToggleKey)) _open = !_open; }
-        catch { }
+        try { if (Input.GetKeyDown(ToggleKey)) _open = !_open; } catch { }
+        if (_open && _loaded) { try { HandleDrag(); } catch { } }
+    }
+
+    // Drag a selected actor/BG on the render: grab near its screen position, then map the cursor
+    // through Camera.main into the actor's parent-local space (its Object x/y). Orthographic, so
+    // the z we pass to ScreenToWorldPoint doesn't affect x/y. Writes the command + re-renders.
+    private Transform SelectedTransform()
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || _selKind != "obj" || _selId == null) return null;
+        int id; if (!int.TryParse(_selId, out id)) return null;
+        var mt = dm.GetActorFromID(id);
+        return (mt != null) ? mt.tt : null;
+    }
+
+    private void HandleDrag()
+    {
+        if (_browseOpen || Camera.main == null) return;
+        var tt = SelectedTransform();
+        if (tt == null || tt.parent == null) { _dragging = false; return; }
+        Vector3 mp = Input.mousePosition;
+        if (Input.GetMouseButtonDown(0) && mp.x >= 280f)
+        {
+            Vector3 sp = Camera.main.WorldToScreenPoint(tt.position);
+            if (Vector2.Distance(new Vector2(mp.x, mp.y), new Vector2(sp.x, sp.y)) < 140f) _dragging = true;
+        }
+        if (!Input.GetMouseButton(0)) { if (_dragging) { _dragging = false; _bufSig = ""; } return; }
+        if (!_dragging) return;
+        Vector3 world = Camera.main.ScreenToWorldPoint(new Vector3(mp.x, mp.y, 10f));
+        Vector3 local = tt.parent.InverseTransformPoint(world);
+        SetSelectedPos(local.x, local.y);
+    }
+
+    private void SetSelectedPos(float x, float y)
+    {
+        var dm = Dialogger_Manager.instance;
+        int i = FindIdx(_page, SelPrefix());
+        if (i < 0) return;
+        var f = Body(dm.dData.frames[_page][i]);
+        if (f == null || f.Length < 7) return;
+        f[5] = x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+        f[6] = y.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+        dm.dData.frames[_page][i] = Rebuild("Object", f);
+        try { dm.LoadPage(_page); } catch { }
     }
 
     private static readonly string[] _cats = { "Actors", "BGs", "Boxes" };
@@ -150,6 +201,7 @@ public class CutsceneEditorController : MonoBehaviour
             EnsureStyles();
             DrawLeftPanel();
             if (_loaded) DrawBottomBar();
+            if (_browseOpen) DrawBrowser();
         }
         catch (Exception ex) { InfinityLoaderMod.SafeLog("[cutedit] OnGUI " + ex.Message); }
     }
@@ -178,10 +230,19 @@ public class CutsceneEditorController : MonoBehaviour
         }
         GUILayout.Label(_status ?? "", _sMuted);
 
+        var dmN = Dialogger_Manager.instance;
+        if (_loaded && dmN != null && dmN.dData != null)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("name", _sMuted, GUILayout.Width(34));
+            dmN.dData.cutsceneName = GUILayout.TextField(dmN.dData.cutsceneName ?? "", _sField);
+            GUILayout.EndHorizontal();
+        }
+
         if (_loaded)
         {
             GUILayout.Space(4);
-            float listH = Mathf.Max(120f, (Screen.height - 210f) * 0.45f);
+            float listH = Mathf.Max(120f, (Screen.height - 232f) * 0.45f);
             _treeScroll = GUILayout.BeginScrollView(_treeScroll, GUILayout.Height(listH));
             DrawList();
             GUILayout.EndScrollView();
@@ -274,7 +335,7 @@ public class CutsceneEditorController : MonoBehaviour
             NudgeRow(5, 6);
             PosRow(5, 6);
             SliderRow("Rotation", 10, -180f, 180f);
-            FieldSet("Scale", 4); FieldSet("Z Order", 3); FieldSet("Tween", 8); FieldSet("Tint", 9);
+            FieldSet("Scale", 4); FieldSet("Z Order", 3); TweenRow(8); FieldSet("Tint", 9);
             GUILayout.BeginHorizontal(); ToggleBtn("Visible", 1, "1", "0"); ToggleBtn("Face L", 2, "-1", "1"); GUILayout.EndHorizontal();
         }
         else if (_selKind == "box")
@@ -291,7 +352,7 @@ public class CutsceneEditorController : MonoBehaviour
         else // cam
         {
             int len = _buf.ContainsKey("__len") ? int.Parse(_buf["__len"]) : 0;
-            if (len >= 7) { FieldSet("Zoom", 0); PosRow(1, 2); FieldSet("Rotation", 4); FieldSet("Tween", 5); }
+            if (len >= 7) { FieldSet("Zoom", 0); PosRow(1, 2); FieldSet("Rotation", 4); TweenRow(5); }
             else { PosRow(0, 1); FieldSet("Scale", 3); FieldSet("Speed", 4); }
         }
     }
@@ -331,6 +392,30 @@ public class CutsceneEditorController : MonoBehaviour
         GUILayout.BeginHorizontal();
         GUILayout.Label(label, _sLabel, GUILayout.Width(60));
         _buf[k] = GUILayout.TextField(_buf[k] ?? "", _sField, GUILayout.Width(98));
+        if (GUILayout.Button("Set", _sBtnBlue, GUILayout.Width(40))) ApplyBuf();
+        GUILayout.EndHorizontal();
+    }
+
+    // Tween field ("speed easetype [shake…]"): a speed text field + a cycle button that names the
+    // ease curve (per Dialogger_MovementTransform.Easinator), preserving any trailing shake tokens.
+    private static readonly string[] _easeNames = { "linear*", "easeIn", "linear", "easeOut", "smooth", "bounce", "elastic", "outIn" };
+    private void TweenRow(int idx)
+    {
+        string k = "f" + idx; if (!_buf.ContainsKey(k)) return;
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Tween", _sLabel, GUILayout.Width(60));
+        _buf[k] = GUILayout.TextField(_buf[k] ?? "", _sField, GUILayout.Width(64));
+        var toks = (_buf[k] ?? "").Split(' ');
+        int ease = 0; if (toks.Length > 1) int.TryParse(toks[1], out ease);
+        string en = (ease >= 0 && ease < _easeNames.Length) ? _easeNames[ease] : ("" + ease);
+        if (GUILayout.Button(en, _sBtn, GUILayout.Width(64)))
+        {
+            int ne = (ease + 1) % _easeNames.Length;
+            string speed = toks.Length > 0 ? toks[0] : "-1";
+            string rest = toks.Length > 2 ? " " + string.Join(" ", toks, 2, toks.Length - 2) : "";
+            _buf[k] = speed + " " + ne + rest;
+            ApplyBuf();
+        }
         if (GUILayout.Button("Set", _sBtnBlue, GUILayout.Width(40))) ApplyBuf();
         GUILayout.EndHorizontal();
     }
@@ -377,12 +462,90 @@ public class CutsceneEditorController : MonoBehaviour
             _addInput = GUILayout.TextField(_addInput ?? "", _sField);
             GUILayout.Label(AddHint(_addType), _sMuted);
         }
+        GUILayout.BeginHorizontal();
         if (GUILayout.Button("+ Add " + _addType, _sBtnBlue))
         {
             string link = _addType == "player" ? "" : (_addInput ?? "").Trim();
             if (_addType == "player" || link.Length > 0) AddObject(link, _addType);
             else _status = "enter a value first";
         }
+        if (GUILayout.Button("Browse…", _sBtn, GUILayout.Width(72)))
+        { _browseOpen = true; if (_browseResults.Count == 0) BrowseSearch(); }
+        GUILayout.EndHorizontal();
+    }
+
+    // ---- asset browser: search NPCs / harvested actor-BG assets, click to add -----------------
+    private void DrawBrowser()
+    {
+        float w = 400f, h = Mathf.Min(470f, Screen.height - 90f);
+        float x = 276f + Mathf.Max(12f, (Screen.width - 276f - w) * 0.5f);
+        GUILayout.BeginArea(new Rect(x, 46f, w, h), _sPanel);
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Asset Browser", _sHeader);
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button("✕", _sBtn, GUILayout.Width(30))) _browseOpen = false;
+        GUILayout.EndHorizontal();
+        GUILayout.BeginHorizontal();
+        if (GUILayout.Button("NPCs", _browseMode == "npc" ? _sBtnBlue : _sBtn)) { _browseMode = "npc"; BrowseSearch(); }
+        if (GUILayout.Button("Actors / BGs", _browseMode == "asset" ? _sBtnBlue : _sBtn)) { _browseMode = "asset"; BrowseSearch(); }
+        GUILayout.EndHorizontal();
+        GUILayout.BeginHorizontal();
+        _browseQuery = GUILayout.TextField(_browseQuery ?? "", _sField);
+        if (GUILayout.Button("Search", _sBtnBlue, GUILayout.Width(64))) BrowseSearch();
+        GUILayout.EndHorizontal();
+        GUILayout.Label(_browseStatus ?? "", _sMuted);
+        _browseScroll = GUILayout.BeginScrollView(_browseScroll);
+        foreach (var r in _browseResults)
+        {
+            string label = r[0] == "npc" ? ("#" + r[1] + "   " + r[2]) : (r[0] + "  ·  " + r[2] + "   [" + r[1] + "]");
+            if (GUILayout.Button(label, _sRow)) { AddObject(r[1], r[0]); _status = "added from browser: " + label; }
+        }
+        if (_browseResults.Count == 0) GUILayout.Label("no results — try another query", _sMuted);
+        GUILayout.EndScrollView();
+        GUILayout.EndArea();
+    }
+
+    private void BrowseSearch()
+    {
+        try
+        {
+            string ep = _browseMode == "npc" ? "tweak/csnpcs" : "tweak/csassets";
+            string url = Main.WebApiURL + ep + "?q=" + Uri.EscapeDataString(_browseQuery ?? "");
+            string json;
+            using (var wc = new WebClient()) json = Encoding.UTF8.GetString(wc.DownloadData(url));
+            _browseResults.Clear();
+            _browseResults.AddRange(ParseBrowse(json, _browseMode));
+            _browseStatus = _browseResults.Count + " result(s)";
+        }
+        catch (Exception ex) { _browseStatus = "search failed: " + ex.Message; }
+    }
+
+    private static List<string[]> ParseBrowse(string json, string mode)
+    {
+        var list = new List<string[]>();
+        try
+        {
+            var arr = Newtonsoft.Json.JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(json);
+            if (arr == null) return list;
+            foreach (var m in arr)
+            {
+                if (mode == "npc")
+                {
+                    string id = m.ContainsKey("id") ? Convert.ToString(m["id"]) : "";
+                    string name = m.ContainsKey("name") ? Convert.ToString(m["name"]) : "";
+                    if (id.Length > 0) list.Add(new[] { "npc", id, name });
+                }
+                else
+                {
+                    string link = m.ContainsKey("link") ? Convert.ToString(m["link"]) : "";
+                    string type = m.ContainsKey("type") ? Convert.ToString(m["type"]) : "actor";
+                    string name = m.ContainsKey("name") ? Convert.ToString(m["name"]) : link;
+                    if (link.Length > 0) list.Add(new[] { type, link, name });
+                }
+            }
+        }
+        catch { }
+        return list;
     }
 
     private void AddObject(string link, string type)
