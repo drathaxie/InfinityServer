@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Net;
 using System.Text;
 using Pixelplacement;   // Singleton<Game>.Instance (the layer-visibility toggles)
@@ -161,10 +162,11 @@ public class CutsceneEditorController : MonoBehaviour
 
         GUILayout.Label("Cutscene Editor", _sHeader);
         GUILayout.BeginHorizontal();
-        GUILayout.Label("id", _sMuted, GUILayout.Width(14));
-        _idText = GUILayout.TextField(_idText ?? "", _sField, GUILayout.Width(46));
-        if (GUILayout.Button("Load", _sBtnBlue, GUILayout.Width(50))) StartCoroutine(LoadAndRender());
-        if (GUILayout.Button("Close", _sBtn, GUILayout.Width(50))) CloseEditor();
+        GUILayout.Label("id", _sMuted, GUILayout.Width(12));
+        _idText = GUILayout.TextField(_idText ?? "", _sField, GUILayout.Width(38));
+        if (GUILayout.Button("Load", _sBtnBlue, GUILayout.Width(44))) StartCoroutine(LoadAndRender());
+        if (GUILayout.Button("New", _sBtn, GUILayout.Width(40))) NewScene();
+        if (GUILayout.Button("Close", _sBtn, GUILayout.Width(46))) CloseEditor();
         GUILayout.EndHorizontal();
 
         if (_loaded)
@@ -378,32 +380,88 @@ public class CutsceneEditorController : MonoBehaviour
         if (GUILayout.Button("+ Add " + _addType, _sBtnBlue))
         {
             string link = _addType == "player" ? "" : (_addInput ?? "").Trim();
-            if (_addType == "player" || link.Length > 0) StartCoroutine(AddObject(link, _addType));
+            if (_addType == "player" || link.Length > 0) AddObject(link, _addType);
             else _status = "enter a value first";
         }
     }
 
-    private IEnumerator AddObject(string link, string type)
+    private void AddObject(string link, string type)
     {
         var dm = Dialogger_Manager.instance;
-        if (dm == null || dm.dData == null) yield break;
+        if (dm == null || dm.dData == null) return;
+        if (type == "actor" && !link.Contains(",")) { _status = "actor needs 'bundleId,PrefabName' (e.g. 66131,actor-veddrian)"; return; }
         int id = dm.dData.idCount; dm.dData.idCount = id + 1;
         dm.dData.frames[0].Add("Load{" + id + "|" + link + "|" + type + "}");
-        // load the asset live: ReadCommand_Load only acts when pageNumber==0, so flip it briefly
-        int savedPage = dm.pageNumber;
-        dm.pageNumber = 0;
-        try { dm.ReadCommand_Load(id, link, type); }
-        catch (Exception ex) { InfinityLoaderMod.SafeLog("[cutedit] add load err " + ex.Message); }
-        dm.pageNumber = savedPage;
+        // z-order 20 so it renders in FRONT of the background layers (a fresh object at z 0 hides
+        // behind the BG). Placed at origin; the author positions it in the inspector.
+        if (_page >= 1) dm.dData.frames[_page].Add("Object{" + id + "|1|1|20|1|0|0|0|-1 0|FFFFFFFF|0|0|1}");
+        _selKind = "obj"; _selId = id.ToString(); _bufSig = "";
+
+        // Load exactly the way the scene loads its own assets (Dialogger_Manager.ProcessLoadCommands):
+        // preload any actor/sfx bundle metadata via AssetBundleDataLoader.Load, THEN ReadCommand_Load
+        // in its callback (which only acts while pageNumber==0, so flip it for that call).
+        var bundleIds = new List<int>();
+        if (type == "actor" || type == "sfx")
+        { var p = link.Split(','); int bid; if (p.Length > 0 && int.TryParse(p[0], out bid)) bundleIds.Add(bid); }
+        AssetBundleDataLoader.Load(bundleIds, delegate
+        {
+            int saved = dm.pageNumber; dm.pageNumber = 0;
+            try { dm.ReadCommand_Load(id, link, type); }
+            catch (Exception ex) { InfinityLoaderMod.SafeLog("[cutedit] add load err " + ex.Message); }
+            dm.pageNumber = saved;
+        });
         _status = "loading " + type + " #" + id + "…";
+        InfinityLoaderMod.SafeLog("[cutedit] add " + type + " #" + id + " (" + link + ")");
+        StartCoroutine(WaitThenRender(id));
+    }
+
+    private IEnumerator WaitThenRender(int id)
+    {
+        var dm = Dialogger_Manager.instance;
         float t = 0f; while (t < 3f) { if (dm.IsAssetLoadInProgress) break; t += Time.deltaTime; yield return null; }
         float t2 = 0f; while (dm.IsAssetLoadInProgress && t2 < 30f) { t2 += Time.deltaTime; yield return null; }
-        yield return new WaitForSeconds(0.3f);
-        if (_page >= 1) dm.dData.frames[_page].Add("Object{" + id + "|1|1|0|1|0|0|0|-1 0|FFFFFFFF|0|0|1}");
+        yield return new WaitForSeconds(0.25f);
         try { dm.LoadPage(_page); } catch { }
-        _selKind = "obj"; _selId = id.ToString(); _bufSig = "";
-        _status = "added " + type + " #" + id + " — position it in the inspector";
-        InfinityLoaderMod.SafeLog("[cutedit] added " + type + " #" + id + " (" + link + ")");
+        _bufSig = "";
+        bool ok = false; try { ok = dm.GetActorFromID(id) != null; } catch { }
+        InfinityLoaderMod.SafeLog("[cutedit] add #" + id + " loaded=" + ok + " actors=" + SafeCount(dm.actorList));
+        _status = ok ? ("added #" + id + " — position it in the inspector") : ("#" + id + " didn't load — check the id / bundle,prefab");
+    }
+
+    // Start a BLANK cutscene from scratch: a setup frame + one content page (fade in + a default
+    // camera). Author it with Add Object / Add Bubble / pages, then Save as NEW to mint an id.
+    private void NewScene()
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null) { _status = "enter a map first"; return; }
+        var data = new Dialogger_Data
+        {
+            ID = "", cutsceneName = "New Cutscene", cutsceneDescription = "",
+            idCount = 0, boxCount = 0, trackCount = 0, sfxCount = 0,
+            completeActions = new List<string>(),
+            frames = new List<List<string>>
+            {
+                new List<string> { "" },
+                new List<string> { "FadeFromBlack", "Camera{1|0|0|1|0|-1 0|0}" }
+            }
+        };
+        string json;
+        try { json = Newtonsoft.Json.JsonConvert.SerializeObject(data); }
+        catch (Exception ex) { _status = "new err: " + ex.Message; return; }
+        _idText = "";
+        if (!_driving) { _prevEditorFlag = dm.editor; _savedOrtho = Camera.main != null ? Camera.main.orthographicSize : -1f; _driving = true; }
+        dm.editor = true;
+        try { dm.LoadJson(json); } catch (Exception ex) { _status = "new load err: " + ex.Message; return; }
+        _loaded = true; _selKind = null; _selId = null; _bufSig = "";
+        StartCoroutine(NewSceneRender());
+    }
+
+    private IEnumerator NewSceneRender()
+    {
+        yield return new WaitForSeconds(0.3f);
+        SetCutsceneView(true);
+        Goto(1);
+        _status = "new blank scene — add objects, author pages, then Save as NEW";
     }
 
     // ---- bottom toolbar: pager + page/authoring actions ----------------------
