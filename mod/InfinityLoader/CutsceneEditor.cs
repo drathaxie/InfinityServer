@@ -60,7 +60,10 @@ public class CutsceneEditorController : MonoBehaviour
     private string _browseStatus = "type a query and Search";
     private Vector2 _browseScroll;
     private readonly List<string[]> _browseResults = new List<string[]>();  // [type, link, name]
+    private Rect _browseRect;                          // draggable window rect (0 w => not yet placed)
+    private const int BROWSE_WIN_ID = 918273;
     private bool _dragging;                           // drag-to-move on the render
+    private float _dragOffX, _dragOffY;               // grab offset so the grab point stays under the cursor
 
     // ---- styling (built once, lazily, inside OnGUI where GUI.skin is valid) ----
     private bool _stylesReady;
@@ -145,7 +148,11 @@ public class CutsceneEditorController : MonoBehaviour
     private void Update()
     {
         try { if (Input.GetKeyDown(ToggleKey)) _open = !_open; } catch { }
-        if (_open && _loaded) { try { HandleDrag(); } catch { } try { HideBoxChrome(); } catch { } }
+        if (_open && _loaded)
+        {
+            try { HandleDrag(); } catch (Exception ex) { InfinityLoaderMod.SafeLog("[cutedit] drag ex " + ex.Message); }
+            try { HideBoxChrome(); } catch { }
+        }
     }
 
     // Each dialog box carries AE's own editor overlay (the MV/AP/AT buttons + arrow popups) because
@@ -183,19 +190,72 @@ public class CutsceneEditorController : MonoBehaviour
     private void HandleDrag()
     {
         if (_browseOpen || Camera.main == null) return;
+        Vector3 mp = Input.mousePosition;
+        bool inRender = mp.x >= 280f && mp.y < Screen.height - 82f;
+
+        if (Input.GetMouseButtonDown(0) && inRender)
+        {
+            // Click-to-select: pick the front-most actor under the cursor (backgrounds excluded).
+            var picked = ScreenPick(mp);
+            if (picked != null) { _selKind = "obj"; _selId = picked.ID.ToString(); _bufSig = ""; }
+            var tt0 = SelectedTransform();
+            if (tt0 != null && tt0.parent != null)
+            {
+                _dragging = true;
+                Vector3 cl = tt0.parent.InverseTransformPoint(Camera.main.ScreenToWorldPoint(new Vector3(mp.x, mp.y, 10f)));
+                Vector2 cur = CurrentObjPos();
+                _dragOffX = cur.x - cl.x; _dragOffY = cur.y - cl.y;   // keep the grabbed point under the cursor
+                InfinityLoaderMod.SafeLog("[cutedit] grab #" + _selId + (picked != null ? " (picked on screen)" : ""));
+            }
+        }
+        if (!Input.GetMouseButton(0)) { if (_dragging) { _dragging = false; _bufSig = ""; _status = "moved #" + _selId; } return; }
+        if (!_dragging) return;
         var tt = SelectedTransform();
         if (tt == null || tt.parent == null) { _dragging = false; return; }
-        Vector3 mp = Input.mousePosition;
-        if (Input.GetMouseButtonDown(0) && mp.x >= 280f)
-        {
-            Vector3 sp = Camera.main.WorldToScreenPoint(tt.position);
-            if (Vector2.Distance(new Vector2(mp.x, mp.y), new Vector2(sp.x, sp.y)) < 140f) _dragging = true;
-        }
-        if (!Input.GetMouseButton(0)) { if (_dragging) { _dragging = false; _bufSig = ""; } return; }
-        if (!_dragging) return;
         Vector3 world = Camera.main.ScreenToWorldPoint(new Vector3(mp.x, mp.y, 10f));
         Vector3 local = tt.parent.InverseTransformPoint(world);
-        SetSelectedPos(local.x, local.y);
+        SetSelectedPos(local.x + _dragOffX, local.y + _dragOffY);
+    }
+
+    // Pick the front-most (highest z-order) actor whose sprite bounds contain the cursor. Excludes
+    // backgrounds (they cover the whole screen — select those from the tree). World-space AABB test,
+    // exact enough for the orthographic cutscene camera.
+    private Dialogger_MovementTransform ScreenPick(Vector3 mp)
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.actorList == null) return null;
+        Vector3 w = Camera.main.ScreenToWorldPoint(new Vector3(mp.x, mp.y, 10f));
+        Dialogger_MovementTransform best = null; int bestZ = int.MinValue;
+        for (int k = 0; k < dm.actorList.Count; k++)
+        {
+            var mt = dm.actorList[k];
+            if (mt == null || mt.isBG || !mt.isVisible) continue;
+            var rs = mt.GetComponentsInChildren<Renderer>();
+            if (rs == null || rs.Length == 0) continue;
+            Bounds b = default(Bounds); bool any = false;
+            foreach (var r in rs)
+            {
+                if (!(r is SpriteRenderer) && !(r is MeshRenderer)) continue;
+                if (!any) { b = r.bounds; any = true; } else b.Encapsulate(r.bounds);
+            }
+            if (!any) continue;
+            if (w.x >= b.min.x && w.x <= b.max.x && w.y >= b.min.y && w.y <= b.max.y && mt.zStore >= bestZ)
+            { bestZ = mt.zStore; best = mt; }
+        }
+        return best;
+    }
+
+    private Vector2 CurrentObjPos()
+    {
+        var dm = Dialogger_Manager.instance;
+        int i = FindIdx(_page, SelPrefix());
+        if (i < 0) return Vector2.zero;
+        var f = Body(dm.dData.frames[_page][i]);
+        if (f == null || f.Length < 7) return Vector2.zero;
+        float x, y;
+        float.TryParse(f[5], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out x);
+        float.TryParse(f[6], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out y);
+        return new Vector2(x, y);
     }
 
     private void SetSelectedPos(float x, float y)
@@ -510,11 +570,18 @@ public class CutsceneEditorController : MonoBehaviour
     }
 
     // ---- asset browser: search NPCs / harvested actor-BG assets, click to add -----------------
+    // A draggable GUI.Window (grab the title bar to move it). Content lives in DrawBrowserWindow.
     private void DrawBrowser()
     {
         float w = 400f, h = Mathf.Min(470f, Screen.height - 90f);
-        float x = 276f + Mathf.Max(12f, (Screen.width - 276f - w) * 0.5f);
-        GUILayout.BeginArea(new Rect(x, 46f, w, h), _sPanel);
+        if (_browseRect.width < 1f)      // first open: centre it in the render area, then it persists
+            _browseRect = new Rect(276f + Mathf.Max(12f, (Screen.width - 276f - w) * 0.5f), 46f, w, h);
+        _browseRect.width = w; _browseRect.height = h;   // keep size stable across resolution changes
+        _browseRect = GUI.Window(BROWSE_WIN_ID, _browseRect, DrawBrowserWindow, "", _sPanel);
+    }
+
+    private void DrawBrowserWindow(int id)
+    {
         GUILayout.BeginHorizontal();
         GUILayout.Label("Asset Browser", _sHeader);
         GUILayout.FlexibleSpace();
@@ -532,12 +599,15 @@ public class CutsceneEditorController : MonoBehaviour
         _browseScroll = GUILayout.BeginScrollView(_browseScroll);
         foreach (var r in _browseResults)
         {
-            string label = r[0] == "npc" ? ("#" + r[1] + "   " + r[2]) : (r[0] + "  ·  " + r[2] + "   [" + r[1] + "]");
-            if (GUILayout.Button(label, _sRow)) { AddObject(r[1], r[0]); _status = "added from browser: " + label; }
+            // Just the name — no "type ·" prefix or "[link]" suffix. NPCs keep a small #id (names
+            // repeat); the link is only needed internally and gets passed to AddObject.
+            string name = string.IsNullOrEmpty(r[2]) ? r[1] : r[2];
+            string label = r[0] == "npc" ? (name + "   #" + r[1]) : name;
+            if (GUILayout.Button(label, _sRow)) { AddObject(r[1], r[0]); _status = "added: " + name; }
         }
         if (_browseResults.Count == 0) GUILayout.Label("no results — try another query", _sMuted);
         GUILayout.EndScrollView();
-        GUILayout.EndArea();
+        GUI.DragWindow(new Rect(0, 0, _browseRect.width, 30f));   // only the title strip drags
     }
 
     private void BrowseSearch()
@@ -558,6 +628,7 @@ public class CutsceneEditorController : MonoBehaviour
     private static List<string[]> ParseBrowse(string json, string mode)
     {
         var list = new List<string[]>();
+        var seen = new HashSet<string>();           // dedupe by id/link — endpoints repeat entries
         try
         {
             var arr = Newtonsoft.Json.JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(json);
@@ -568,14 +639,14 @@ public class CutsceneEditorController : MonoBehaviour
                 {
                     string id = m.ContainsKey("id") ? Convert.ToString(m["id"]) : "";
                     string name = m.ContainsKey("name") ? Convert.ToString(m["name"]) : "";
-                    if (id.Length > 0) list.Add(new[] { "npc", id, name });
+                    if (id.Length > 0 && seen.Add("n:" + id)) list.Add(new[] { "npc", id, name });
                 }
                 else
                 {
                     string link = m.ContainsKey("link") ? Convert.ToString(m["link"]) : "";
                     string type = m.ContainsKey("type") ? Convert.ToString(m["type"]) : "actor";
                     string name = m.ContainsKey("name") ? Convert.ToString(m["name"]) : link;
-                    if (link.Length > 0) list.Add(new[] { type, link, name });
+                    if (link.Length > 0 && seen.Add("a:" + link)) list.Add(new[] { type, link, name });
                 }
             }
         }
