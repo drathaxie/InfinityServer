@@ -56,6 +56,11 @@
       <HintPath>$(AqwiManaged)\UnityEngine.AssetBundleModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <!-- Texture2D.LoadImage(byte[]) to build custom portrait-frame sprites from PNGs. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="Unity.TextMeshPro">
       <!-- TMP_SpriteAsset / TMP_Settings / TMP_Text for chat emoji. -->
       <HintPath>$(AqwiManaged)\Unity.TextMeshPro.dll</HintPath>

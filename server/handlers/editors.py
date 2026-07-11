@@ -4,6 +4,8 @@ dispatch's STAFF_CMDS check — no per-handler gates here."""
 import forge
 import montemplates
 import placements
+import combat
+import world
 
 from .registry import register
 from .context import send_obj, _base_area
@@ -69,4 +71,48 @@ async def pad_edit(session, writer, cmd, params, msg):
         placements.pad_delete(session.conn, m, params[0])
     n = len(placements.compiled_monbranch(session.conn, m))
     print(f"  [edit] {cmd} {params} -> {m}: {n} NPCs now (reload map to see)")
+    return
+
+
+# --- dev spawn tools: drop a live monster into the room (staff-gated) ---
+@register("spawnMob", "spawnMapMob")
+async def spawn_mob(session, writer, cmd, params, msg):
+    # Params=[monID, x, y]. Build a transient monBranch entry, register it for combat/kill
+    # resolution, and broadcast spawnMob {monBranch, x, y, reload} so every client spawns it.
+    # RequestSpawnMob/SpawnMapMob -> ResponseSpawnMob.
+    if session.member is None or len(params) < 3:
+        return
+    try:
+        mon_id, x, y = int(params[0]), float(params[1]), float(params[2])
+    except (ValueError, TypeError):
+        return
+    frame = session.member.frame or "Enter"
+    mb = placements.single_monbranch(session.conn, mon_id, x, y, frame)
+    # Learn its HP/identity/level so it's attackable and killable (kill-credit name too).
+    combat.register_monster(session.area, f"m:{mb['MonMapID']}", mb.get("intHPMax"),
+                            mon_id=mon_id, frame=frame, level=mb.get("Level"))
+    moncat = combat._area_moncat.setdefault(session.area, {})
+    moncat[mb["MonMapID"]] = (mon_id, mb.get("strMonName") or mb.get("Name") or "")
+    reload = (cmd == "spawnMapMob")
+    world.broadcast(session.area, {"Cmd": "spawnMob", "monBranch": mb,
+                                   "x": x, "y": y, "reload": reload})
+    print(f"  [spawn] {session.member.name} spawned mon {mon_id} @ {frame} ({x},{y})")
+    return
+
+
+@register("mapCapture")
+async def map_capture(session, writer, cmd, params, msg):
+    # Params=[geometryJson, footprintJson]. The map-geometry capture tool. We persist the raw
+    # payload keyed by map so it's not lost; there's no s2c contract (client fires and forgets).
+    if session.member is None or session.area is None or len(params) < 2:
+        return
+    m = _base_area(session.area)
+    session.conn.execute(
+        "INSERT INTO kv(k, v) VALUES(?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+        (f"mapgeom:{m}", params[0]))
+    session.conn.execute(
+        "INSERT INTO kv(k, v) VALUES(?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+        (f"mapfoot:{m}", params[1]))
+    session.conn.commit()
+    print(f"  [mapCapture] {session.member.name} saved geometry for {m}")
     return

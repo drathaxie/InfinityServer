@@ -15,6 +15,7 @@ from .registry import register
 from .context import (send_obj, _base_area, _is_staff, _refresh_pattern_stats,
                       log_unhandled)
 from . import social
+from . import guild_cmds
 
 
 @register("cmd")
@@ -49,6 +50,13 @@ async def slash_cmd(session, writer, cmd, params, msg):   # slash commands: Para
         return
     if sub in ("modyell", "moderatoryell", "yell"):
         await social.modyell(session, writer, params)
+        return
+    # guild extras that have no native client command -> arrive here via the `cmd` envelope.
+    if sub in ("gleave", "guildleave", "gquit"):
+        await guild_cmds.guild_leave(session, writer, params[1:])
+        return
+    if sub in ("guildhall", "gh"):
+        await guild_cmds.guild_hall(session, writer, params[1:])
         return
     if sub == "genderswap" and session.char is not None and session.member is not None:
         # Player gender swap (fired by an apop "chat" button, e.g. Bev). Flips M<->F, resets to
@@ -91,6 +99,26 @@ async def slash_cmd(session, writer, cmd, params, msg):   # slash commands: Para
             await send_obj(writer, {"Cmd": "addGoldXP", "ExpTotal": int(session.char["exp"] or 0),
                                     "Gold": {"val": new - old}})
             print(f"  [addgold] {session.char['name']} {amt:+d} -> {new}")
+        return
+    if sub == "addcoin" and _staff:
+        # /addcoin n -> grant AdventureCoins (the `coins` column). ResponseUpgradeSync
+        # does Info.SetCoins(Coins) — an ABSOLUTE set — so echo the new TOTAL, not a delta
+        # (unlike /addgold, which adds Gold.val). Negative n subtracts (clamped at 0).
+        try:
+            amt = int(params[1]) if len(params) > 1 else 0
+        except (ValueError, TypeError):
+            amt = 0
+        if amt:
+            old = int(session.char["coins"] or 0)
+            new = max(0, old + amt)
+            session.conn.execute("UPDATE characters SET coins=? WHERE id=?",
+                                 (new, session.char["id"]))
+            session.conn.commit()
+            session.char = session.conn.execute("SELECT * FROM characters WHERE id=?",
+                                                (session.char["id"],)).fetchone()
+            await send_obj(writer, {"Cmd": "upgradeSync", "Coins": new, "UpgradeDays": 0,
+                                    "UpgradeExpires": game.DEFAULT_UPGRADE_EXPIRES})
+            print(f"  [addcoin] {session.char['name']} {amt:+d} -> {new}")
         return
     if sub == "level" and _staff:
         try:

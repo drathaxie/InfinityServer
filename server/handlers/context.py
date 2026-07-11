@@ -38,6 +38,7 @@ class Session:
         self.member = None             # world.Member once logged in
         self.last_target = None        # last m:<MonMapID> the client acted on (dev attach)
         self.equipped_class = forge.EQUIPPED_CLASS_ID   # whose skills are live (sEAct/combat)
+        self.guildhall_gid = None      # guild id if currently inside a guild hall (routes housesave)
 
     def close(self):
         try:
@@ -189,6 +190,7 @@ async def _enter_area(session, writer, base, room, house_data=None):
     firstJoin/tfer (client-initiated) and /goto + summon-accept (server-initiated).
     `house_data` (mapHouseData dict) makes the join a HOUSE: Area.isHouse keys on it."""
     area_name = f"{base}-{room}"
+    session.guildhall_gid = None       # any area entry leaves a guild hall; the /guildhall handler re-sets it
     area = (maps.area_payload(base, session.conn)
             or maps.area_payload("infinityportal", session.conn))
     area["areaName"] = area_name               # tell the client which room it's in

@@ -448,6 +448,25 @@ CREATE TABLE IF NOT EXISTS map_state (
     next_pad_id INTEGER NOT NULL DEFAULT 9000,  -- new pads start high to avoid
     area_id     INTEGER NOT NULL DEFAULT 0      -- colliding with captured MonMapIDs
 );
+
+-- Mutual friendships (two rows per pair). friend_id is the other character's id;
+-- the client's FriendObject is {Level,ID,Name,Server} rebuilt from that char row.
+CREATE TABLE IF NOT EXISTS friends (
+    char_id   INTEGER NOT NULL,
+    friend_id INTEGER NOT NULL,
+    PRIMARY KEY (char_id, friend_id)
+);
+
+-- Guilds. One row per guild; members carry a guild_id + rank on the character row
+-- (added below via ensure-column). ip25/founder is unrelated. [[name-plates]]
+CREATE TABLE IF NOT EXISTS guilds (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    name      TEXT NOT NULL UNIQUE,
+    motd      TEXT NOT NULL DEFAULT '',
+    owner     INTEGER NOT NULL DEFAULT 0,        -- owning character id
+    hall_map  TEXT NOT NULL DEFAULT '',          -- guild hall map ('' = default), like a house map
+    hall_data TEXT NOT NULL DEFAULT ''           -- JSON {frame:[PlacedHouseItem]} the leader decorates
+);
 """
 
 
@@ -728,6 +747,8 @@ _CHARACTER_COLUMNS = [
     "tracked_quest INTEGER NOT NULL DEFAULT 0",
     "achievements TEXT NOT NULL DEFAULT '{}'",
     "prefs TEXT NOT NULL DEFAULT '{}'",
+    "guild_id INTEGER NOT NULL DEFAULT 0",       # 0 = no guild
+    "guild_rank INTEGER NOT NULL DEFAULT 0",     # 0 member, 1 officer, 2 leader
 ]
 
 
@@ -916,6 +937,14 @@ def _migrate(c):
     # accounts.session_token: API-issued token the game-server Login must present (auth)
     if _table_exists(c, "accounts") and "session_token" not in _columns(c, "accounts"):
         c.execute("ALTER TABLE accounts ADD COLUMN session_token TEXT")
+    # guilds.hall_map / hall_data: the guild hall's map + the leader's saved furniture layout
+    # (guildhall system — the guild's decoratable shared house). Additive for pre-existing DBs.
+    if _table_exists(c, "guilds"):
+        g_cols = _columns(c, "guilds")
+        if "hall_map" not in g_cols:
+            c.execute("ALTER TABLE guilds ADD COLUMN hall_map TEXT NOT NULL DEFAULT ''")
+        if "hall_data" not in g_cols:
+            c.execute("ALTER TABLE guilds ADD COLUMN hall_data TEXT NOT NULL DEFAULT ''")
     _migrate_items(c)
     _migrate_inventory(c)
     _migrate_characters(c)

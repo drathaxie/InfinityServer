@@ -107,6 +107,58 @@ async def unequip_item(session, writer, cmd, params, msg):
 
 
 # --- /charedit : persist appearance (colours + hair), recolour avatars live ----
+@register("savePortrait")
+async def save_portrait(session, writer, cmd, params, msg):
+    # Name-plate style picker. Params=[pref]. Persist it, then broadcast portraitChange to the
+    # WHOLE area (incl. self) so every client swaps this player's overhead name-plate live.
+    if session.char is None or session.member is None:
+        return
+    try:
+        want = int(params[0]) if params else 0
+    except (TypeError, ValueError):
+        want = 0
+    # Server-authoritative: the client only shows owned frames, but never trust it — a locked
+    # frame falls back to Default(0) rather than being persisted/broadcast. [[name-plates]]
+    ach = {}
+    try:
+        import json as _json
+        ach = _json.loads(session.char["achievements"] or "{}")
+    except (ValueError, TypeError):
+        ach = {}
+    uname = game.account_username(session.conn, session.char)
+    if want not in game.owned_portrait_frames(uname, ach):
+        want = 0
+    pref = game.save_portrait_pref(session.conn, session.char, want)
+    session.conn.commit()
+    session.char = session.conn.execute(
+        "SELECT * FROM characters WHERE id=?", (session.char["id"],)).fetchone()
+    # keep the render object current so late-joiners (AreaAdd/uoBranch) see the new plate.
+    session.member.user_obj["portraitPref"] = pref
+    world.broadcast(session.area,
+                    {"Cmd": "portraitChange", "uid": session.member.uid, "portraitPref": pref})
+    print(f"  [s2c] portraitChange uid={session.member.uid} pref={pref}")
+    return
+
+
+@register("savePrefs")
+async def save_prefs(session, writer, cmd, params, msg):
+    # userPrefs UI toggle. Params=[name, "True"/"False"]. Persist so it survives relog; keep the
+    # render object's showHelm/showCloak current so late-joiners (AreaAdd/uoBranch) see it.
+    if session.char is None or session.member is None or len(params) < 2:
+        return
+    val = game.save_user_pref(session.conn, session.char, params[0], params[1])
+    if val is None:                       # unknown pref key — ignore
+        return
+    session.conn.commit()
+    session.char = session.conn.execute(
+        "SELECT * FROM characters WHERE id=?", (session.char["id"],)).fetchone()
+    if params[0] == "ShowHelm":
+        session.member.user_obj["showHelm"] = val
+    elif params[0] == "ShowCloak":
+        session.member.user_obj["showCloak"] = val
+    return
+
+
 @register("changeColor")
 async def change_color(session, writer, cmd, params, msg):
     # Params=[Skin,Eye,Hair,Base,Trim,Accessory,HairID]

@@ -269,6 +269,37 @@ def pad_dict(conn, map_name):
             for pad in _pad_rows(conn, map_name)}
 
 
+_transient_mmid = 700000            # dev spawnMob: transient MonMapIDs, above pad/captured ranges
+
+
+def single_monbranch(conn, mon_id, x, y, frame, level=None):
+    """A one-off monBranch entry for a MonID at (x,y) in `frame` — the dev spawnMob tool.
+    Same shape _compile_pad produces, but with a fresh transient MonMapID (not persisted)."""
+    global _transient_mmid
+    _transient_mmid += 1
+    mb = montemplates.template(conn, mon_id)
+    hp = mb.get("intHPMax") or 100
+    lvl = level if level is not None else mb.get("Level", 1)
+    mb.update({
+        "MonID": int(mon_id), "ID": int(mon_id), "MonMapID": _transient_mmid,
+        "x": float(x), "y": float(y), "strFrame": frame, "direction": 1,
+        "intState": 1, "apopID": -1, "Level": lvl, "intHP": hp, "intHPMax": hp,
+    })
+    mb.setdefault("equippedItems", {})
+    cat = montemplates.catalog(conn, mon_id) or {}
+    for jk, ck in (("SkinColor", "SkinColor"), ("HairColor", "HairColor"),
+                   ("EyeColor", "EyeColor"), ("BaseColor", "BaseColor"),
+                   ("TrimColor", "TrimColor"), ("AccessoryColor", "AccessoryColor"),
+                   ("HairID", "HairID")):
+        if cat.get(ck) is not None:
+            mb[jk] = cat[ck]
+    head = (mb.get("equippedItems") or {}).get("3") or (mb.get("equippedItems") or {}).get(3)
+    if isinstance(head, dict) and head.get("Bundle"):
+        mb["HairBundle"] = head["Bundle"]
+        mb.setdefault("HairName", head.get("Name"))
+    return mb
+
+
 def compiled_monbranch(conn, map_name):
     """The full monBranch compiled from a map's pads (authored maps only)."""
     out = []

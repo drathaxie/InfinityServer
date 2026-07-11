@@ -27,6 +27,8 @@ import combat
 import montemplates
 import forge
 import loot
+import parties
+import guilds
 
 import handlers
 from handlers.context import (Session, send_str, send_obj, _players, _is_staff,  # noqa: F401
@@ -47,6 +49,7 @@ NOOP_CMDS = {"MoveOK", "mv"}
 STAFF_CMDS = {
     "sfInit", "GetMapSpawns", "getMonBranch",
     "SavePad", "AddMon", "AddNewPad", "monDelete", "padDelete",
+    "spawnMob", "spawnMapMob", "mapCapture",
 } | set(forge.MUTATIONS)
 
 
@@ -86,9 +89,18 @@ def cleanup_session(session):
         _players.pop(m.uid, None)
         combat.forget_player(m.uid)   # stop monsters chasing a ghost
         loot.clear(m.uid)             # drop their un-kept pending loot
+        parties.leave(m)              # pull them from any party (resyncs the rest)
         area = world.leave(m)
         if area:
             world.broadcast(area, {"Cmd": "AreaRemove", "uid": m.uid, "unm": m.name})
+        # refresh online guildmates' rosters so this member flips to "Offline" for them (they see
+        # it on their next guild-panel open — the client doesn't live-refresh that panel). Done
+        # AFTER world.leave so guild_object recomputes this member as offline.
+        gid = session.char["guild_id"] if session.char is not None else 0
+        if gid:
+            gobj = guilds.guild_object(session.conn, gid)
+            if gobj is not None:
+                guilds.broadcast(session.conn, gid, {"Cmd": "newGuild", "guild": gobj})
     session.close()
 
 

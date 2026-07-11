@@ -1,8 +1,9 @@
-"""Chat / emote / whisper / modyell / summon / goto — player-to-player commands."""
+"""Chat / emote / whisper / modyell / summon / goto / party — player-to-player commands."""
 import json
 
 import game
 import world
+import parties
 
 from .registry import register
 from .context import send_obj, _enter_area
@@ -60,6 +61,47 @@ async def summon_answer(session, writer, cmd, params, msg):  # summon accept / d
     return
 
 
+# --- party: invite / accept / decline / leave ---
+@register("pi")
+async def party_invite(session, writer, cmd, params, msg):   # Params=[targetName]
+    if session.member is None or not params:
+        return
+    target = world.find_member(params[0])
+    if target is None:
+        await send_obj(writer, {"Cmd": "chatm", "msg": f'"{params[0]}" is not online.',
+                                "Name": "Server", "channel": "server", "ID": 0})
+        return
+    if target.uid != session.member.uid:
+        parties.invite(session.member, target)
+        print(f"  [party] {session.member.name} invited {target.name}")
+    return
+
+
+@register("pa")
+async def party_accept(session, writer, cmd, params, msg):   # Params=[ownerID]
+    if session.member is None or not params:
+        return
+    try:
+        parties.accept(session.member, int(params[0]))
+    except (ValueError, TypeError):
+        return
+    print(f"  [party] {session.member.name} accepted -> owner {params[0]}")
+    return
+
+
+@register("pd")
+async def party_decline(session, writer, cmd, params, msg):  # Params=[ownerID] — no state change
+    return
+
+
+@register("pl")
+async def party_leave(session, writer, cmd, params, msg):
+    if session.member is not None:
+        parties.leave(session.member)
+        print(f"  [party] {session.member.name} left")
+    return
+
+
 @register("message", "chat")
 async def chat(session, writer, cmd, params, msg):  # RequestChat -> Params = [msg, channel, target?]
     if session.member is not None and params:
@@ -78,12 +120,15 @@ async def chat(session, writer, cmd, params, msg):  # RequestChat -> Params = [m
             else:
                 await send_obj(writer, {"Cmd": "chatm", "msg": f'"{params[2]}" is not here.',
                                         "Name": "Server", "channel": "server", "ID": 0})
-        elif channel in ("party", "guild"):
-            # Party/guild membership isn't modelled yet, so broadcasting these to the physical
-            # room would leak "private" chat to strangers who share the cell. Until membership
-            # exists, echo back to the sender only — honest (nobody else is in your party/guild)
-            # and non-leaky. [[party-guild-membership]]
-            await send_obj(writer, pk)
+        elif channel == "party":
+            # Deliver to every online party member (incl. self). Partyless => just the sender.
+            for uid in parties.member_uids(session.member.uid):
+                world.send(world.find_uid(uid), pk)
+        elif channel == "guild":
+            # Guild chat: fan out to online guildmates (incl. self). Solo => just the sender.
+            import guilds
+            for uid in guilds.online_member_uids(session.conn, session.member.uid):
+                world.send(world.find_uid(uid), pk)
         else:                            # zone (and any unknown channel) -> everyone in the room
             world.broadcast(session.area, pk)
         print(f"  [chatm/{channel}] {session.member.name}: {msg_text}")

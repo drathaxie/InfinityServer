@@ -2,6 +2,7 @@
 in-cell movement (mv), and NPC dialogue/cutscene serving (getApop/getDialog)."""
 import combat
 import game
+import guilds
 import maps
 import world
 
@@ -27,6 +28,18 @@ async def join_area(session, writer, cmd, params, msg):
         room = inst or (raw.split("-", 1)[1] if "-" in raw else "1")
         await send_obj(writer, game.change_state(session.char))
     await _enter_area(session, writer, base, room)
+    # The guild panel is a snapshot (the client only re-reads Info.guild on reopen — it doesn't
+    # live-subscribe like the friends panel). At initPlayer the player isn't in a room yet, so their
+    # own roster row showed blank/"Offline". Now that they're in an area, push a FRESH guild object
+    # to EVERY online member (newGuild wholesale-replaces Info.guild) so this player flips to online
+    # with a location for everyone — visible the next time each opens the panel.
+    if cmd == "firstJoin" and session.char is not None and session.char["guild_id"]:
+        gid = session.char["guild_id"]
+        gobj = guilds.guild_object(session.conn, gid)
+        if gobj is not None:
+            if session.member is not None:
+                session.member.user_obj["guild"] = gobj
+            guilds.broadcast(session.conn, gid, {"Cmd": "newGuild", "guild": gobj})
     return
 
 

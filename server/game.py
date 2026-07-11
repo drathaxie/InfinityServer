@@ -23,6 +23,8 @@ import seed
 import patterns
 import combat        # weapon-damage coefficients (WEAPON_MIN/MAX) shared with the damage roll
 import forge         # build_seact: the class's skill bar + particle list (initPlayer.Actions)
+import friends       # initPlayer.friends (mutual persistent friends list)
+import guilds         # playerInfo.guild (persistent guild membership)
 
 
 # Wire field (user.customization / user.stats) -> character column. Plain ints,
@@ -113,6 +115,56 @@ DEV_ACCESS_LEVEL = 100
 # 0x7FF = all 11 tiers. Dev/owner accounts get the full set so every founder shop appears.
 FOUNDER_IP25 = 0x7FF
 _DEV_USERS_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "dev_users.txt"
+
+# Name-plate ("portrait") frame ownership. The client enum PortraitFrameId is
+# {Default=0, Tier0=1, Tier1=2, Tier2=3, Tier3=4} (the 5 shipped frames, kept 1:1). The picker
+# (NameplatePortraitFixer / PopulateAvailablePortraitFrames) ALWAYS offers Default and
+# then only the ints the server lists in playerInfo.ownedPortraitFrames — ownership is
+# 100% server-authoritative, there's no client-side achievement check. A live playtest
+# sample of a maxed founder account received [0,1,2,3] but NOT 4. We mirror founder tiers via
+# ip25 bits (frames 1-3); the FULL set is an explicit account allowlist. Each entry is
+# (frame_int, ip25_bit_index).
+_PORTRAIT_FRAME_GRANTS = [
+    (1, 2),   # Tier0  <- founder ip25 bit 2 ("Founder")
+    (2, 3),   # Tier1  <- founder ip25 bit 3 ("Epic")
+    (3, 4),   # Tier2  <- founder ip25 bit 4 ("Underworld")
+]
+
+# CUSTOM frames added on TOP of the shipped 0-4 (the enum is int-backed, so (PortraitFrameId)N
+# is valid for N>4). The client mod synthesizes a NameplatePortraitFixerData setting for these
+# ids from PNGs in UserData/Beyond/portraits/ (Harmony patch on FindByFrame). Keep in sync w/ mod.
+PORTRAIT_FRAME_POTATO = 5     # "Tato's Potato Frame" (potato/dirt themed)
+_CUSTOM_PORTRAIT_FRAMES = [PORTRAIT_FRAME_POTATO]
+
+# Accounts that get the FULL shipped set (0-4) PLUS the custom frames. Deliberately NOT tied to
+# access_level or a dev-users file (too easy to abuse) — an explicit username allowlist. Keep tiny.
+_PORTRAIT_FULL_ACCOUNTS = {"redux"}
+
+
+def account_username(conn, char):
+    """The account username owning this character (lowercased), or '' if unknown."""
+    if char is None or "account_id" not in char.keys():
+        return ""
+    row = conn.execute("SELECT username FROM accounts WHERE id=?",
+                       (char["account_id"],)).fetchone()
+    return (row["username"] or "").lower() if row else ""
+
+
+def owned_portrait_frames(username, achievements):
+    """Which name-plate frames this account owns, as the client's PortraitFrameId ints.
+    Frame 0 (Default) is always included; the allowlist gets all 5 shipped + the custom frames;
+    everyone else earns frames 1-3 via founder ip25 bits."""
+    if str(username or "").strip().lower() in _PORTRAIT_FULL_ACCOUNTS:
+        return [0, 1, 2, 3, 4] + _CUSTOM_PORTRAIT_FRAMES
+    owned = [0]
+    try:
+        ip25 = int((achievements or {}).get("ip25", 0))
+    except (TypeError, ValueError):
+        ip25 = 0
+    for frame_int, bit in _PORTRAIT_FRAME_GRANTS:
+        if ip25 & (1 << bit):
+            owned.append(frame_int)
+    return owned
 
 
 def _dev_users():
@@ -339,6 +391,44 @@ def save_customization(conn, char, params):
     return applied
 
 
+def save_portrait_pref(conn, char, pref):
+    """Persist the chosen name-plate style into the char's prefs JSON blob. Returns the
+    normalised int written. Kept alongside the userPrefs toggles but read back out as a
+    top-level `portraitPref` (see build_init_player)."""
+    try:
+        pref = int(pref)
+    except (TypeError, ValueError):
+        pref = 0
+    prefs = {}
+    if "prefs" in char.keys() and char["prefs"]:
+        try:
+            prefs = json.loads(char["prefs"]) or {}
+        except (TypeError, ValueError):
+            prefs = {}
+    prefs["PortraitPref"] = pref
+    conn.execute("UPDATE characters SET prefs=? WHERE id=?",
+                 (json.dumps(prefs), char["id"]))
+    return pref
+
+
+def save_user_pref(conn, char, name, value):
+    """Persist one userPrefs UI toggle (client `savePrefs`, Params=[name, "True"/"False"]) into
+    the char's prefs JSON blob so it survives relog. Only known toggle keys are accepted."""
+    if name not in _DEFAULT_USER_PREFS:
+        return None
+    val = str(value).strip().lower() in ("true", "1", "yes")
+    prefs = {}
+    if "prefs" in char.keys() and char["prefs"]:
+        try:
+            prefs = json.loads(char["prefs"]) or {}
+        except (TypeError, ValueError):
+            prefs = {}
+    prefs[name] = val
+    conn.execute("UPDATE characters SET prefs=? WHERE id=?",
+                 (json.dumps(prefs), char["id"]))
+    return val
+
+
 def _item_is_class(item):
     """A class-armor item (EquipSpots.Class = 6 / isClass) — its Quantity is class POINTS
     (rank), not a stack (InventoryItem.cs:114-116)."""
@@ -559,8 +649,10 @@ def change_state(char, state=1):
     """ResponseChangeState for the joining player. The client resolves the entity by
     `unm` and only acts when it matches a known player (the joiner themselves), so
     `unm` must be THIS character's name — the old static sample hardcoded drathaxie,
-    making the packet a silent no-op for everyone else."""
-    name = char["name"] if char is not None else ""
+    making the packet a silent no-op for everyone else. `unm` MUST also be lowercase:
+    ResponseChangeState resolves via getPlayer(unm)/unm==mainPlayer.Name, both keyed on
+    the lowercase in-world name (same rule as rest_player/revive_player) — mixed case no-ops."""
+    name = char["name"].lower() if char is not None else ""
     return {"Cmd": "ChangeState", "unm": name, "State": state}
 
 
@@ -1018,6 +1110,42 @@ def build_house_data(conn, owner_char):
             "unm": (owner_char["name"] or "").lower()}
 
 
+# A synthetic "house deed" injected into the guild hall's houseData.items so the client's
+# HouseUICanvasController.GetEquippedHouseID() (which returns the items[] entry with bEquip==1)
+# has a >0 id to echo in the Save request. It isn't a catalog item — it's only a routing token;
+# the server routes the save by session state (guildhall_gid), not by this id.
+GUILDHALL_ITEM_ID = 900001
+
+
+def _guild_hall_deed_item():
+    """The synthetic House-type houseItem (bEquip=1) that makes the hall's Save button live."""
+    return {"ItemID": GUILDHALL_ITEM_ID, "CharItemID": GUILDHALL_ITEM_ID, "Bundle": None,
+            "PrefabName": None, "sType": "House", "iQty": 1, "bEquip": 1, "sName": "Guild Hall",
+            "iCost": 0, "bCoins": False, "sDesc": "Your guild's hall.", "bHouse": True,
+            "bTemp": False, "MobileCompatibility": 1}
+
+
+def build_guild_hall_data(conn, guild_id):
+    """AreaJoin houseData for a guild hall: the guild's saved layout (sHouseInfo), the LEADER's
+    furniture as the palette (placements reference the leader's CharItemIDs), and unm = the
+    leader's lowercase name so ONLY the leader gets the client's owner/decorate controls. The
+    synthetic Guild Hall deed leads the items list so GetEquippedHouseID resolves to it (not the
+    leader's personal deed). Returns None if the guild or its leader can't be resolved."""
+    import guilds
+    leader = guilds.leader_row(conn, guild_id)
+    if leader is None:
+        return None
+    layout = guilds.hall_layout(conn, guild_id)
+    # furniture only (EquipSpot 9) — exclude real house deeds so the hall deed is the sole bEquip=1
+    furniture = [hw for hw in house_items(conn, leader["id"])
+                 if hw.get("sType") != "House"]
+    for hw in furniture:                       # a hall palette item is never "equipped" (placed via layout)
+        hw["bEquip"] = 0
+    return {"sHouseInfo": json.dumps(layout, separators=(",", ":")) if layout else "",
+            "items": [_guild_hall_deed_item()] + furniture,
+            "unm": (leader["name"] or "").lower()}
+
+
 def house_save(conn, char, house_id, frame, data):
     """housesave [houseItemID, frame, placedJSON]: persist ONE FRAME's placement list into the
     house's stored {frame: [...]} dict (the client's Save button sends GatherFrameSaveData for
@@ -1378,6 +1506,18 @@ def build_init_player(conn, char):
             prefs.update(json.loads(char["prefs"]) or {})
         except (TypeError, ValueError):
             pass
+    # Name-plate style is persisted inside the prefs blob but is NOT a userPrefs UI toggle:
+    # AE carries it as a top-level `portraitPref` int on the user object (AreaAdd/uoBranch),
+    # not in the userPrefs dict. Pop it so the emitted userPrefs stays clean. 0 = default plate.
+    try:
+        portrait_pref = int(prefs.pop("PortraitPref", 0) or 0)
+    except (TypeError, ValueError):
+        portrait_pref = 0
+    # The client applies the saved frame ON LOGIN from userPrefs.PortraitPreference
+    # (ResponseInitPlayer.Execute), NOT from user.portraitPref (that's only the live/other-player
+    # path). So the pref MUST ride in the emitted userPrefs under this exact key, or it resets to
+    # Default every relog. [[name-plates]]
+    prefs["PortraitPreference"] = portrait_pref
 
     # The equipped class drives the visual rig (skin + ClassParticleBundle) AND the skill bar.
     # A real ClassID is REQUIRED for the client to activate the class; a fresh character has the
@@ -1437,6 +1577,7 @@ def build_init_player(conn, char):
         "intHPMax": maxhp,
         "showHelm": bool(prefs.get("ShowHelm", True)),
         "showCloak": bool(prefs.get("ShowCloak", True)),
+        "portraitPref": portrait_pref,                # name-plate style (savePortrait/portraitChange)
         "strFrame": "Enter",
         "strPad": "Spawn",
         "particleList": seact.get("particleList", []),
@@ -1445,14 +1586,17 @@ def build_init_player(conn, char):
     # playerInfo: THIS character's identity + neutral free-account defaults; never another
     # account's membership/slots/guild/achievements.
     created_iso = DEFAULT_CREATED
+    account_name = ""
     if "account_id" in char.keys():
-        arow = conn.execute("SELECT created FROM accounts WHERE id=?",
+        arow = conn.execute("SELECT username, created FROM accounts WHERE id=?",
                             (char["account_id"],)).fetchone()
-        if arow and arow["created"]:
-            try:
-                created_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(float(arow["created"])))
-            except (TypeError, ValueError):
-                pass
+        if arow:
+            account_name = arow["username"] or ""
+            if arow["created"]:
+                try:
+                    created_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(float(arow["created"])))
+                except (TypeError, ValueError):
+                    pass
     try:
         achievements = json.loads(char["achievements"] or "{}")   # per-char bitfields; ip25 gates
     except (ValueError, TypeError):                                # Despair's founder shops. NOT null.
@@ -1484,7 +1628,10 @@ def build_init_player(conn, char):
         "HouseSlots": DEFAULT_HOUSE_SLOTS,
         "EquippedHouseItemID": equipped_house_id(conn, char["id"]),   # -1 = no house
         "achievements": achievements,
-        "guild": None,                                # null is the client's real "no guild" value
+        # Name-plate frames this char may pick (client picker gates on this list). [[name-plates]]
+        "ownedPortraitFrames": owned_portrait_frames(account_name, achievements),
+        # Info.guild: the client reads the guild from playerInfo. null = no guild. [[name-plates]]
+        "guild": guilds.guild_object(conn, char["guild_id"] if "guild_id" in char.keys() else 0),
     }
 
     return {
@@ -1496,7 +1643,7 @@ def build_init_player(conn, char):
         "loot": [],                                   # pending loot is per-uid (loot.py); none at login
         "patterns": patterns.loose_gems(conn, char["id"]),   # the enhancement gem bag (equipPattern)
         "houseItems": house_items(conn, char["id"]),  # owned houses + furniture (houseItem shape)
-        "friends": [],                                # social — not modelled
+        "friends": friends.friend_list(conn, char["id"]),   # mutual persistent friends
         "Actions": seact,                             # the class skill bar (sEAct) the HUD shows
     }
 

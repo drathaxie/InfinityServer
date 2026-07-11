@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using HarmonyLib;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 // Doorstop invokes Doorstop.Entrypoint.Start() at process startup (before the game's first
 // scene). We apply our Harmony patches there using AE's OWN HarmonyLib.
@@ -100,6 +101,32 @@ public static class InfinityLoaderMod
             AccessTools.Method(typeof(WebEditButton), "OnMouseDown"),
             prefix: nameof(WebEditButton_OnMouseDown_Prefix));
 
+        // 5b) Custom portrait/name-plate frames on TOP of the shipped 0-4. The enum PortraitFrameId
+        //     is int-backed, so the server can grant ids >4 (see game.PORTRAIT_FRAME_POTATO=5); the
+        //     client's NameplatePortraitFixerData has no setting for them, so FindByFrame falls back
+        //     to Default. We postfix FindByFrame to synthesize a setting (sprites from PNGs in
+        //     UserData/Beyond/portraits/) for our custom ids — so BOTH the picker option and the
+        //     applied frame render our art, and the shipped tiers stay untouched (1:1).
+        TryPatch(h, "custom portrait frames",
+            AccessTools.Method(typeof(NameplatePortraitFixerData), "FindByFrame"),
+            postfix: nameof(FindByFrame_Postfix));
+
+        // 5c) Custom-frame layer fit-up: the shipped Image rects are sized for the vanilla art, so
+        //     our fixed-perspective PNGs get stretched. For custom frames (id>4) we log each layer's
+        //     rect/type (diag) and keep the round layers circular via preserveAspect.
+        TryPatch(h, "custom portrait layer fit",
+            AccessTools.Method(typeof(NameplatePortraitFixer), "ApplyPortrait"),
+            postfix: nameof(ApplyPortrait_Postfix));
+
+        // 5d) Apop portrait for avatar-assembled NPCs. Apop.OnActorSpawnready does
+        //     asset.transform.Find("CameraFocus").position — but an NPC assembled from equipped
+        //     items (HumanoidAvatar, e.g. custom Redux) has NO CameraFocus child (only bundle
+        //     prefabs ship one), so it NREs and the portrait never appears beside the apop. Inject
+        //     a CameraFocus at the avatar's origin before the original runs so positioning works.
+        TryPatch(h, "apop portrait CameraFocus guard",
+            AccessTools.Method(typeof(Apop), "OnActorSpawnready"),
+            prefix: nameof(Apop_OnActorSpawnready_Prefix));
+
         // 6) In-client cutscene editor (Phase 1): drives the shipped Dialogger_Manager to render
         //    saved cutscenes under our control. IMGUI panel, F8 to toggle.
         //    IMPORTANT: do NOT spawn it here. Boot() runs at the Doorstop entrypoint, BEFORE Unity's
@@ -151,6 +178,23 @@ public static class InfinityLoaderMod
     public static void WebEditButton_OnMouseDown_Prefix()
     {
         try { WebEditButton._baseURL = Main.WebApiURL; } catch { }
+    }
+
+    // Ensure an avatar-assembled apop NPC has the "CameraFocus" child Apop.OnActorSpawnready derefs
+    // (bundle prefabs ship one; HumanoidAvatar-assembled NPCs don't). Origin-anchored so the portrait
+    // lands where the original math expects; harmless if a CameraFocus already exists.
+    public static void Apop_OnActorSpawnready_Prefix(GameObject asset)
+    {
+        try
+        {
+            if (asset != null && asset.transform.Find("CameraFocus") == null)
+            {
+                var cf = new GameObject("CameraFocus");
+                cf.transform.SetParent(asset.transform, worldPositionStays: false);
+                cf.transform.localPosition = Vector3.zero;
+            }
+        }
+        catch { }
     }
 
     public static void WebApiPostfix(ref string __result)
@@ -309,6 +353,156 @@ public static class InfinityLoaderMod
             catch { }
         }
         if (!string.IsNullOrEmpty(s)) s = ExpandEmoji(s);
+    }
+
+    // ---- custom portrait / name-plate frames ---------------------------------
+    // Frame ids > 4 are OURS (added on top of the shipped Default..Tier3). For each, we build a
+    // NameplatePortraitFixerData setting from PNGs in UserData/Beyond/portraits/<key>_*.png and
+    // hand it back from FindByFrame, so the stock picker + ApplyPortrait paths render our art.
+    //   id 5 = "potato": potato_frame.png (ring) / potato_plate.png / potato_background.png /
+    //                    potato_lvlcircle.png. Missing layers are simply left as the default.
+    private static readonly Dictionary<int, NameplatePortraitFixerData.NameplatePortraitFixerSettings> _customFrames
+        = new Dictionary<int, NameplatePortraitFixerData.NameplatePortraitFixerSettings>();
+
+    private static readonly Dictionary<int, string> _customFrameKey = new Dictionary<int, string>
+    {
+        { 5, "potato" },
+    };
+
+    public static void FindByFrame_Postfix(PortraitFrameId frame,
+        ref NameplatePortraitFixerData.NameplatePortraitFixerSettings __result)
+    {
+        int id = (int)frame;
+        if (id <= 4) return;                       // shipped frames — never touch
+        var custom = GetCustomFrame(id);
+        if (custom != null) __result = custom;     // else leave the Default fallback in place
+    }
+
+    private static NameplatePortraitFixerData.NameplatePortraitFixerSettings GetCustomFrame(int id)
+    {
+        NameplatePortraitFixerData.NameplatePortraitFixerSettings s;
+        if (_customFrames.TryGetValue(id, out s)) return s;    // cached (incl. null "tried")
+        string key;
+        if (!_customFrameKey.TryGetValue(id, out key)) { _customFrames[id] = null; return null; }
+        try
+        {
+            string dir = Path.Combine(_beyondDir, "portraits");
+            // The plate is 9-sliced (see ApplyPortrait_Postfix): its sprite carries a border so the
+            // dirt corners stay fixed while the wide UI rect stretches the middle. border = (left,
+            // bottom, right, top) in sprite px — sized to the dirt/gold frame thickness.
+            s = new NameplatePortraitFixerData.NameplatePortraitFixerSettings
+            {
+                name = key,
+                frame = (PortraitFrameId)id,
+                portraitSprite    = LoadSpritePng(Path.Combine(dir, key + "_frame.png")),
+                // plate is built WIDE (~583x321, the vanilla aspect) so a plain Simple stretch to the
+                // 430x240 rect is ~distortion-free — no 9-slice needed.
+                Nameplate_Plate       = LoadSpritePng(Path.Combine(dir, key + "_plate.png")),
+                Nameplate_Background  = LoadSpritePng(Path.Combine(dir, key + "_background.png")),
+                Nameplate_LvlCircle   = LoadSpritePng(Path.Combine(dir, key + "_lvlcircle.png")),
+            };
+            SafeLog("[portrait] built custom frame #" + id + " (" + key + ") ring="
+                + (s.portraitSprite != null) + " plate=" + (s.Nameplate_Plate != null)
+                + " bg=" + (s.Nameplate_Background != null) + " lvl=" + (s.Nameplate_LvlCircle != null));
+        }
+        catch (Exception ex) { SafeLog("[portrait] build #" + id + " FAILED: " + ex.Message); s = null; }
+        _customFrames[id] = s;
+        return s;
+    }
+
+    private static FieldInfo _fPortrait, _fPlate, _fBg, _fLvl;
+
+    public static void ApplyPortrait_Postfix(NameplatePortraitFixer __instance, PortraitFrameId frame)
+    {
+        if (__instance == null) return;
+        try
+        {
+            if (_fPortrait == null)
+            {
+                var t = typeof(NameplatePortraitFixer);
+                const BindingFlags BF = BindingFlags.NonPublic | BindingFlags.Instance;
+                _fPortrait = t.GetField("portraitFrame", BF);
+                _fPlate = t.GetField("nameplatePlate", BF);
+                _fBg = t.GetField("nameplateBackground", BF);
+                _fLvl = t.GetField("nameplateLvlCircle", BF);
+            }
+            bool custom = (int)frame > 4;
+            // Round layers (ring + level badge) are square sprites: preserveAspect keeps them
+            // circular in a non-square rect. The plate is a wide frame: 9-slice (Sliced) so the
+            // dirt corners stay put and only the middle stretches to the 430x240 rect. For shipped
+            // frames we restore the vanilla state (Simple, no preserveAspect).
+            Fit("portraitFrame", _fPortrait, __instance, custom, Image.Type.Simple);
+            Fit("nameplatePlate", _fPlate, __instance, false, Image.Type.Simple);
+            Fit("nameplateLvlCircle", _fLvl, __instance, custom, Image.Type.Simple);
+        }
+        catch (Exception ex) { SafeLog("[portrait] fit err: " + ex.Message); }
+    }
+
+    private static void Fit(string label, FieldInfo f, object inst, bool preserveAspect, Image.Type type)
+    {
+        if (f == null) return;
+        var img = f.GetValue(inst) as Image;
+        if (img == null) { SafeLog("[portrait/rect] " + label + " = null"); return; }
+        var r = img.rectTransform.rect;
+        string sp = img.sprite != null ? (img.sprite.name + " " + (int)img.sprite.rect.width + "x" + (int)img.sprite.rect.height + " border" + img.sprite.border) : "(none)";
+        SafeLog("[portrait/rect] " + label + " rect=" + (int)r.width + "x" + (int)r.height
+            + " type=" + img.type + "->" + type + " sprite=" + sp);
+        LogSpriteOpaque(img.sprite);   // measure real vs custom footprint for every layer
+        img.preserveAspect = preserveAspect;
+        img.type = type;
+    }
+
+    // Measure a sprite's opaque bounding box (once per sprite) so I can match the real gold plate's
+    // tight footprint. Uses a RenderTexture readback so it works even on non-readable bundle textures.
+    private static readonly HashSet<string> _opaqueLogged = new HashSet<string>();
+    private static void LogSpriteOpaque(Sprite sprite)
+    {
+        try
+        {
+            if (sprite == null || sprite.texture == null) return;
+            string nm = sprite.name ?? "?";
+            if (!_opaqueLogged.Add(nm)) return;
+            var tex = sprite.texture;
+            var tr = sprite.textureRect;                 // this sprite's region in the atlas texture
+            int tw = (int)tr.width, th = (int)tr.height;
+            if (tw <= 0 || th <= 0) return;
+            var rt = RenderTexture.GetTemporary(tex.width, tex.height, 0, RenderTextureFormat.ARGB32);
+            Graphics.Blit(tex, rt);
+            var prev = RenderTexture.active; RenderTexture.active = rt;
+            var rd = new Texture2D(tw, th, TextureFormat.RGBA32, false);
+            rd.ReadPixels(new Rect(tr.x, tex.height - tr.y - th, tw, th), 0, 0);
+            rd.Apply();
+            RenderTexture.active = prev; RenderTexture.ReleaseTemporary(rt);
+            var px = rd.GetPixels32();
+            int minx = tw, miny = th, maxx = 0, maxy = 0;
+            for (int y = 0; y < th; y++)
+                for (int x = 0; x < tw; x++)
+                    if (px[y * tw + x].a > 20)
+                    {
+                        if (x < minx) minx = x; if (x > maxx) maxx = x;
+                        if (y < miny) miny = y; if (y > maxy) maxy = y;
+                    }
+            UnityEngine.Object.Destroy(rd);
+            if (maxx < minx) { SafeLog("[portrait/opaque] " + nm + " fully transparent"); return; }
+            SafeLog("[portrait/opaque] " + nm + " tex=" + tw + "x" + th
+                + " opaque=" + (maxx - minx + 1) + "x" + (maxy - miny + 1)
+                + " margins L" + minx + " R" + (tw - 1 - maxx) + " T" + miny + " B" + (th - 1 - maxy)
+                + " => opaque " + ((maxx - minx + 1) * 100 / tw) + "% x " + ((maxy - miny + 1) * 100 / th) + "%");
+        }
+        catch (Exception ex) { SafeLog("[portrait/opaque] fail: " + ex.Message); }
+    }
+
+    private static Sprite LoadSpritePng(string path, Vector4 border = default(Vector4), float ppu = 100f)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+            var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+            if (!tex.LoadImage(File.ReadAllBytes(path))) return null;   // ImageConversion
+            return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height),
+                                 new Vector2(0.5f, 0.5f), ppu, 0, SpriteMeshType.FullRect, border);
+        }
+        catch (Exception ex) { SafeLog("[portrait] sprite load fail " + Path.GetFileName(path) + ": " + ex.Message); return null; }
     }
 
     // ---- packet logger -------------------------------------------------------
