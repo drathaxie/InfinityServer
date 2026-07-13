@@ -27,7 +27,7 @@ namespace Doorstop
 /// <summary>
 /// The whole mod: redirect the client's web API to our local server, plus the always-on
 /// c2s/s2c packet logger. Each patch is applied independently in a try/catch so a single
-/// failed patch (e.g. a renamed method in a future game build) never takes the others down —
+/// failed patch (e.g. a renamed method in a future game build) never takes the others down
 /// the WebApi redirect, the one essential piece, stays up even if the logger can't bind.
 /// </summary>
 public static class InfinityLoaderMod
@@ -39,6 +39,24 @@ public static class InfinityLoaderMod
     private static string _packetLog;        // ...\UserData\Beyond\packets.jsonl
     private static string _loaderLog;        // ...\UserData\Beyond\infinity_loader.log
     private static MethodInfo _serialize;    // AEC.Serialize (private) for faithful c2s logging
+
+    // Overhead guild tag: lowercase player name -> (guild name, colour hex). Fed from the
+    // guildName/guildTagColor fields our server adds to every user object (initPlayer.user,
+    // AreaJoin.uoBranch[], AreaAdd.userData). The base client has no guild-on-nameplate concept,
+    // so we render a coloured "Guild" line under the name from this map.
+    private static readonly Dictionary<string, KeyValuePair<string, string>> _guildByName =
+        new Dictionary<string, KeyValuePair<string, string>>(StringComparer.OrdinalIgnoreCase);
+    private static readonly object _guildLock = new object();
+
+    // Guild-tag colour shop (initPlayer.tagShop / standalone "tagShop" push)  drives the picker
+    // we inject into the guild panel. All access on the main thread (packet Execute / UI), so no lock.
+    internal static readonly List<InfinityTagColor> TagPalette = new List<InfinityTagColor>();
+    internal static readonly HashSet<string> TagOwned =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    internal static string TagSelected = "";   // player's personal override name ('' = follow guild)
+    internal static string TagGuildDefault = "";
+    internal static volatile bool TagShopDirty;   // set off-thread; main-thread ticker repaints panel
+    private static NameplateTicker _ticker;    // per-frame rainbow driver (created lazily)
 
     public static void Boot()
     {
@@ -66,7 +84,7 @@ public static class InfinityLoaderMod
             AccessTools.PropertyGetter(typeof(Main), "BaseURL"),
             postfix: nameof(BaseUrlPostfix));
 
-        // 2) Always-on packet capture (our ground truth) — c2s requests and s2c responses.
+        // 2) Always-on packet capture (our ground truth)  c2s requests and s2c responses.
         TryPatch(h, "c2s logger",
             AccessTools.Method(typeof(AEC), "sendRequest"),
             prefix: nameof(SendRequestPrefix));
@@ -105,7 +123,7 @@ public static class InfinityLoaderMod
         //     is int-backed, so the server can grant ids >4 (see game.PORTRAIT_FRAME_POTATO=5); the
         //     client's NameplatePortraitFixerData has no setting for them, so FindByFrame falls back
         //     to Default. We postfix FindByFrame to synthesize a setting (sprites from PNGs in
-        //     UserData/Beyond/portraits/) for our custom ids — so BOTH the picker option and the
+        //     UserData/Beyond/portraits/) for our custom ids  so BOTH the picker option and the
         //     applied frame render our art, and the shipped tiers stay untouched (1:1).
         TryPatch(h, "custom portrait frames",
             AccessTools.Method(typeof(NameplatePortraitFixerData), "FindByFrame"),
@@ -119,7 +137,7 @@ public static class InfinityLoaderMod
             postfix: nameof(ApplyPortrait_Postfix));
 
         // 5d) Apop portrait for avatar-assembled NPCs. Apop.OnActorSpawnready does
-        //     asset.transform.Find("CameraFocus").position — but an NPC assembled from equipped
+        //     asset.transform.Find("CameraFocus").position  but an NPC assembled from equipped
         //     items (HumanoidAvatar, e.g. custom Redux) has NO CameraFocus child (only bundle
         //     prefabs ship one), so it NREs and the portrait never appears beside the apop. Inject
         //     a CameraFocus at the avatar's origin before the original runs so positioning works.
@@ -127,10 +145,27 @@ public static class InfinityLoaderMod
             AccessTools.Method(typeof(Apop), "OnActorSpawnready"),
             prefix: nameof(Apop_OnActorSpawnready_Prefix));
 
+
+        // 5e) Guild name under the overhead nameplate. Our server tags every user object with
+        //     guildName/guildTagColor; we capture those in WrapResponsePrefix into _guildByName,
+        //     then append a coloured "Guild" line to the plate text. The SetUserData postfix
+        //     refreshes an already-spawned player's plate live when their colour/guild changes.
+        TryPatch(h, "guild nameplate line",
+            AccessTools.Method(typeof(Player), "ComposeNameplateText"),
+            postfix: nameof(ComposeNameplateText_Postfix));
+        TryPatch(h, "guild nameplate live refresh",
+            AccessTools.Method(typeof(Player), "SetUserData"),
+            postfix: nameof(SetUserData_Postfix));
+        // 5f) Guild-panel colour picker: append palette rows to the guild list so colours are
+        //     bought/worn from the actual panel, not just chat. Backed by initPlayer.tagShop.
+        TryPatch(h, "guild panel colour picker",
+            AccessTools.Method(typeof(FriendListUI), "Refresh"),
+            postfix: nameof(FriendList_Refresh_Postfix));
+
         // 6) In-client cutscene editor (Phase 1): drives the shipped Dialogger_Manager to render
         //    saved cutscenes under our control. IMGUI panel, F8 to toggle.
         //    IMPORTANT: do NOT spawn it here. Boot() runs at the Doorstop entrypoint, BEFORE Unity's
-        //    scripting runtime is initialized — touching any UnityEngine type (e.g. `new GameObject`)
+        //    scripting runtime is initialized  touching any UnityEngine type (e.g. `new GameObject`)
         //    forces UnityEngine.Object's static initializer to run too early, it throws
         //    (GetOffsetOfInstanceIDInCPlusPlusObject native binding not ready), and a type initializer
         //    that throws once POISONS that type for the whole process -> every Unity object is then
@@ -197,6 +232,82 @@ public static class InfinityLoaderMod
         catch { }
     }
 
+    public static bool NPCLoader_LoadMob_Prefix(NPCLoader __instance, Monbranch mb)
+    {
+        try
+        {
+            if (mb == null || mb.equippedItems == null || mb.equippedItems.Count == 0)
+                return true;
+
+            var character = new Monster(mb.ID, mb, ig: false);
+            character.init();
+            Traverse.Create(__instance).Field("avtGO").SetValue(character.getGameObject());
+            bool fired = false;
+
+            character.AssetUpdated += delegate
+            {
+                try
+                {
+                    if (fired) return;
+                    fired = true;
+                    GameObject asset = character.getGameObject();
+                    if (asset == null) return;
+                    asset.transform.localScale = Vector3.one;
+                    EnsureCameraFocus(asset);
+                    StripNpcLoaderRuntimeComponents(asset);
+                    __instance.isDone = true;
+                    var loaded = Traverse.Create(__instance).Field("OnAssetLoaded").GetValue<Action<GameObject>>();
+                    loaded?.Invoke(asset);
+                    InfinityLoaderMod.SafeLog("[npc-loader] loaded humanoid npc " + mb.ID + " via world avatar path");
+                }
+                catch (Exception ex) { InfinityLoaderMod.SafeLog("[npc-loader] humanoid complete failed " + ex.Message); }
+            };
+
+            character.createAvatar();
+            var avt = character.GetAvatar();
+            Traverse.Create(__instance).Field("avt").SetValue(avt);
+            if (avt != null)
+            {
+                avt.hideFlame = true;
+                avt.OnLoadError = (Action<string>)Delegate.Combine(avt.OnLoadError, (Action<string>)delegate(string error)
+                {
+                    __instance.isDone = true;
+                    var failed = Traverse.Create(__instance).Field("LoadFailed").GetValue<Action<string>>();
+                    failed?.Invoke(error);
+                });
+            }
+            return false;
+        }
+        catch (Exception ex)
+        {
+            __instance.isDone = true;
+            var failed = Traverse.Create(__instance).Field("LoadFailed").GetValue<Action<string>>();
+            failed?.Invoke("Humanoid NPC load failed: " + ex.Message);
+            InfinityLoaderMod.SafeLog("[npc-loader] humanoid load failed " + ex);
+            return false;
+        }
+    }
+
+    private static void EnsureCameraFocus(GameObject asset)
+    {
+        if (asset != null && asset.transform.Find("CameraFocus") == null)
+        {
+            var cf = new GameObject("CameraFocus");
+            cf.transform.SetParent(asset.transform, worldPositionStays: false);
+            cf.transform.localPosition = Vector3.zero;
+        }
+    }
+
+    private static void StripNpcLoaderRuntimeComponents(GameObject asset)
+    {
+        if (asset == null) return;
+        foreach (var c in asset.GetComponentsInChildren<Collider2D>(includeInactive: true))
+            UnityEngine.Object.Destroy(c);
+        foreach (var z in asset.GetComponentsInChildren<ZOffset>(includeInactive: true))
+            UnityEngine.Object.Destroy(z);
+        foreach (var w in asset.GetComponentsInChildren<Walk>(includeInactive: true))
+            UnityEngine.Object.Destroy(w);
+    }
     public static void WebApiPostfix(ref string __result)
     {
         string url = ReadWebApiUrl();
@@ -226,7 +337,7 @@ public static class InfinityLoaderMod
 
     // ---- allow our plain-HTTP API (Unity 6 insecure-connection bypass) -------
     // We replace the UnityWebRequest send for http:// URLs with a synchronous .NET WebClient
-    // call (no Unity insecure-http block, no SynchronizationContext deadlock — WebClient is
+    // call (no Unity insecure-http block, no SynchronizationContext deadlock  WebClient is
     // blocking, not async/await) and fire WebCom's own LoadCompleted/onError so the rest of the
     // client flow is unchanged. Returning false skips the original UnityWebRequest path.
     public static bool WebCom_SendData_Prefix(WebCom __instance, WebComData wd)
@@ -342,6 +453,7 @@ public static class InfinityLoaderMod
     public static void UIChat_SetText_Prefix(UIChat __instance, ref string s)
     {
         CutsceneEditorController.Spawn();      // lazy fallback: guaranteed in-game, Unity ready
+        NpcBakerController.Spawn();            // F9 runtime capture for dressed custom NPCs
         EnsureEmoji();
         if (_emojiAsset != null && __instance != null)
         {
@@ -373,7 +485,7 @@ public static class InfinityLoaderMod
         ref NameplatePortraitFixerData.NameplatePortraitFixerSettings __result)
     {
         int id = (int)frame;
-        if (id <= 4) return;                       // shipped frames — never touch
+        if (id <= 4) return;                       // shipped frames  never touch
         var custom = GetCustomFrame(id);
         if (custom != null) __result = custom;     // else leave the Default fallback in place
     }
@@ -389,14 +501,14 @@ public static class InfinityLoaderMod
             string dir = Path.Combine(_beyondDir, "portraits");
             // The plate is 9-sliced (see ApplyPortrait_Postfix): its sprite carries a border so the
             // dirt corners stay fixed while the wide UI rect stretches the middle. border = (left,
-            // bottom, right, top) in sprite px — sized to the dirt/gold frame thickness.
+            // bottom, right, top) in sprite px  sized to the dirt/gold frame thickness.
             s = new NameplatePortraitFixerData.NameplatePortraitFixerSettings
             {
                 name = key,
                 frame = (PortraitFrameId)id,
                 portraitSprite    = LoadSpritePng(Path.Combine(dir, key + "_frame.png")),
                 // plate is built WIDE (~583x321, the vanilla aspect) so a plain Simple stretch to the
-                // 430x240 rect is ~distortion-free — no 9-slice needed.
+                // 430x240 rect is ~distortion-free  no 9-slice needed.
                 Nameplate_Plate       = LoadSpritePng(Path.Combine(dir, key + "_plate.png")),
                 Nameplate_Background  = LoadSpritePng(Path.Combine(dir, key + "_background.png")),
                 Nameplate_LvlCircle   = LoadSpritePng(Path.Combine(dir, key + "_lvlcircle.png")),
@@ -528,8 +640,140 @@ public static class InfinityLoaderMod
     public static void WrapResponsePrefix(byte[] data)
     {
         if (data == null) return;
-        try { WritePacket("s2c", Encoding.UTF8.GetString(data)); }
+        string raw = null;
+        try { raw = Encoding.UTF8.GetString(data); } catch { }
+        try { WritePacket("s2c", raw); } catch { }
+        // Capture guild-tag data off the user objects. Runs off the main thread (packet arrival),
+        // so we ONLY touch our own dictionary here  never Unity objects. The plate is composed
+        // later on the main thread (ResponseAreaJoin/AreaAdd.Execute -> createNameplate), by which
+        // point the map is populated. Live colour changes refresh via SetUserData_Postfix.
+        try { IngestGuildTags(raw); } catch { }
+    }
+
+    private static void IngestGuildTags(string rawPkt)
+    {
+        if (string.IsNullOrEmpty(rawPkt)) return;
+        bool hasGuild = rawPkt.IndexOf("guildName", StringComparison.Ordinal) >= 0;
+        bool hasShop = rawPkt.IndexOf("tagShop", StringComparison.Ordinal) >= 0
+                    || rawPkt.IndexOf("\"Cmd\":\"tagShop\"", StringComparison.Ordinal) >= 0;
+        if (!hasGuild && !hasShop) return;
+        var pkt = Newtonsoft.Json.Linq.JObject.Parse(rawPkt);
+        string cmd = (string)pkt["Cmd"];
+        if (cmd == "initPlayer") { IngestUserObject(pkt["user"]); IngestTagShop(pkt["tagShop"]); }
+        else if (cmd == "tagShop") { IngestTagShop(pkt); }
+        else if (cmd == "AreaAdd") { IngestUserObject(pkt["userData"]); }
+        else if (cmd == "AreaJoin")
+        {
+            var uo = pkt["uoBranch"] as Newtonsoft.Json.Linq.JArray;
+            if (uo != null) foreach (var u in uo) IngestUserObject(u);
+        }
+    }
+
+    private static void IngestTagShop(Newtonsoft.Json.Linq.JToken shop)
+    {
+        if (shop == null) return;
+        try
+        {
+            var pal = shop["palette"] as Newtonsoft.Json.Linq.JArray;
+            if (pal != null)
+            {
+                TagPalette.Clear();
+                foreach (var p in pal)
+                    TagPalette.Add(new InfinityTagColor
+                    {
+                        name = (string)p["name"] ?? "",
+                        hex = (string)p["hex"] ?? "#FFFFFF",
+                        cost = (int?)p["cost"] ?? 0,
+                        coins = (bool?)p["coins"] ?? false,
+                        animated = (bool?)p["animated"] ?? false,
+                    });
+            }
+            var owned = shop["owned"] as Newtonsoft.Json.Linq.JArray;
+            if (owned != null)
+            {
+                TagOwned.Clear();
+                foreach (var o in owned) TagOwned.Add((string)o);
+                TagOwned.Add("green");
+            }
+            TagSelected = (string)shop["selected"] ?? TagSelected;
+            TagGuildDefault = (string)shop["guildDefault"] ?? TagGuildDefault;
+            // this runs off the main thread (packet arrival)  never touch Unity here. Flag the
+            // panel for repaint; the main-thread ticker consumes it.
+            TagShopDirty = true;
+        }
         catch { }
+    }
+
+    private static void IngestUserObject(Newtonsoft.Json.Linq.JToken u)
+    {
+        if (u == null) return;
+        string name = (string)u["Name"];
+        if (string.IsNullOrEmpty(name)) return;
+        string guild = (string)u["guildName"] ?? "";
+        string color = (string)u["guildTagColor"] ?? "";
+        lock (_guildLock)
+            _guildByName[name] = new KeyValuePair<string, string>(guild, color);
+    }
+
+    // Append a coloured "Guild" line under the name. TMP supports multi-line + rich text, so
+    // one label carries both. Keeps the existing "(IGNORED) name" text; only adds a second line.
+    public static void ComposeNameplateText_Postfix(Player __instance, ref string __result)
+    {
+        try
+        {
+            EnsureTicker();
+            if (__instance == null || string.IsNullOrEmpty(__instance.Name)) return;
+            KeyValuePair<string, string> tag;
+            lock (_guildLock)
+                if (!_guildByName.TryGetValue(__instance.Name, out tag)) return;
+            string guild = tag.Key;
+            if (string.IsNullOrEmpty(guild)) return;
+            string colorTok = string.IsNullOrEmpty(tag.Value) ? "#99FF00" : tag.Value;
+            // "rainbow" (and any animated keyword) isn't a hex  resolve to a per-frame hue offset
+            // by name so plates don't all pulse in lock-step.
+            string hex = colorTok;
+            if (colorTok == "rainbow")
+            {
+                float off = (Math.Abs(__instance.Name.GetHashCode()) % 360) / 360f;
+                float h = ((Time.time * 0.25f) + off) % 1f;
+                hex = "#" + ColorUtility.ToHtmlStringRGB(Color.HSVToRGB(h, 0.85f, 1f));
+            }
+            __result = __result + "\n<size=60%><color=" + hex + ">" + guild + "</color></size>";
+        }
+        catch { }
+    }
+
+    internal static bool AnyRainbowTag()
+    {
+        lock (_guildLock)
+            foreach (var kv in _guildByName)
+                if (kv.Value.Value == "rainbow") return true;
+        return false;
+    }
+
+    private static void EnsureTicker()
+    {
+        if (_ticker != null) return;
+        try
+        {
+            var go = new GameObject("InfinityNameplateTicker");
+            UnityEngine.Object.DontDestroyOnLoad(go);
+            _ticker = go.AddComponent<NameplateTicker>();
+        }
+        catch { }
+    }
+
+    // After a live user-data update (e.g. our AreaAdd rebroadcast on a colour change), redraw the
+    // plate so the new guild/colour shows without a relog. Main thread -> safe to touch Unity.
+    public static void SetUserData_Postfix(Player __instance)
+    {
+        try { __instance?.RefreshNameplate(); } catch { }
+    }
+
+    // The guild panel (FriendListUI) just repopulated  in guild mode, append our colour picker.
+    public static void FriendList_Refresh_Postfix(FriendListUI __instance)
+    {
+        try { InfinityGuildColorPicker.OnRefreshed(__instance); } catch { }
     }
 
     private static void WritePacket(string dir, string rawPkt)
@@ -556,5 +800,164 @@ public static class InfinityLoaderMod
                     DateTime.Now.ToString("HH:mm:ss.fff") + " " + msg + "\n");
         }
         catch { }
+    }
+}
+
+/// <summary>One guild-tag palette colour (initPlayer.tagShop.palette entry).</summary>
+public class InfinityTagColor
+{
+    public string name;
+    public string hex;
+    public int cost;
+    public bool coins;      // true => priced in AdventureCoins, false => gold
+    public bool animated;   // true => rendered as a cycling rainbow, not a flat hex
+}
+
+/// <summary>Per-frame driver: cycles rainbow nameplates and repaints the guild panel when the
+/// tag shop changes off-thread. One instance, created lazily on the main thread.</summary>
+public class NameplateTicker : MonoBehaviour
+{
+    private float _last;
+
+    private void Update()
+    {
+        try
+        {
+            if (InfinityLoaderMod.TagShopDirty)
+            {
+                InfinityLoaderMod.TagShopDirty = false;
+                InfinityGuildColorPicker.RefreshOpenPanel();
+            }
+            if (Time.time - _last < 0.08f) return;      // ~12 fps is plenty for a smooth cycle
+            _last = Time.time;
+            if (InfinityLoaderMod.AnyRainbowTag()) Player.RefreshAllNameplates();
+        }
+        catch { }
+    }
+}
+
+/// <summary>Injects a colour-picker into the guild panel (FriendListUI). Each palette colour is a
+/// row on the shared list template: owned -> click to wear, unowned -> click to buy. Sends the
+/// same server `/tagcolor` command the chat path uses, so the backend is unchanged.</summary>
+public static class InfinityGuildColorPicker
+{
+    private static FriendListUI _open;
+
+    public static void OnRefreshed(FriendListUI ui)
+    {
+        try
+        {
+            if (ui == null) return;
+            var t = Traverse.Create(ui);
+            var mode = t.Field("mode").GetValue();
+            if (mode == null || mode.ToString() != "Guild") return;
+            if (Entity.myPlayerData == null || Entity.myPlayerData.Info == null
+                || Entity.myPlayerData.Info.guild == null) return;   // only your own guild panel
+            _open = ui;
+            var listContent = t.Field("listContent").GetValue<Transform>();
+            var template = t.Field("itemTemplate").GetValue<GameObject>();
+            var spawned = t.Field("spawnedItems").GetValue<List<GameObject>>();
+            if (listContent == null || template == null) return;
+            AddRow(listContent, template, spawned, " GUILD TAG COLOURS ", "", null, null, false);
+            foreach (var c in InfinityLoaderMod.TagPalette)
+            {
+                bool owned = InfinityLoaderMod.TagOwned.Contains(c.name);
+                bool selected = string.Equals(InfinityLoaderMod.TagSelected, c.name,
+                    StringComparison.OrdinalIgnoreCase);
+                string label = Cap(c.name) + (selected ? "  " : "");
+                string right = owned ? "OWNED"
+                    : (c.cost == 0 ? "FREE" : c.cost.ToString("N0") + (c.coins ? " AC" : " gold"));
+                Color col;
+                if (!ColorUtility.TryParseHtmlString(string.IsNullOrEmpty(c.hex) ? "#FFFFFF" : c.hex, out col))
+                    col = Color.white;
+                string nm = c.name; bool own = owned;
+                AddRow(listContent, template, spawned, label, right, col,
+                    () => OnColorClicked(nm, own), true);
+            }
+        }
+        catch { }
+    }
+
+    private static void OnColorClicked(string name, bool owned)
+    {
+        try
+        {
+            if (AEC.Instance == null) return;
+            if (owned)
+            {
+                AEC.Instance.sendRequest(new RequestCmd("tagcolor", new[] { "tagcolor", name }));
+                InfinityLoaderMod.TagSelected = name;       // optimistic; server confirms via tagShop
+            }
+            else
+            {
+                AEC.Instance.sendRequest(new RequestCmd("tagcolor", new[] { "tagcolor", "buy", name }));
+            }
+            RefreshOpenPanel();
+        }
+        catch { }
+    }
+
+    public static void RefreshOpenPanel()
+    {
+        try
+        {
+            if (_open != null && _open.isActiveAndEnabled)
+                Traverse.Create(_open).Method("Refresh").GetValue();
+        }
+        catch { }
+    }
+
+    private static void AddRow(Transform parent, GameObject template, List<GameObject> spawned,
+        string left, string right, Color? swatch, Action onClick, bool interactive)
+    {
+        var go = UnityEngine.Object.Instantiate(template, parent);
+        go.SetActive(true);
+        spawned?.Add(go);
+        SetText(go.transform, "PlayerName", left);
+        SetText(go.transform, "ServerText", right);
+        SetText(go.transform, "LevelText", "");
+        var on = FindDeep(go.transform, "OnlineCircle");
+        var off = FindDeep(go.transform, "OfflineCircle");
+        if (off != null) off.gameObject.SetActive(false);
+        if (on != null)
+        {
+            on.gameObject.SetActive(swatch.HasValue);
+            if (swatch.HasValue)
+            {
+                var img = on.GetComponent<Image>();
+                if (img != null) img.color = swatch.Value;
+            }
+        }
+        var btn = go.GetComponent<Button>();
+        if (btn != null)
+        {
+            btn.onClick.RemoveAllListeners();
+            if (interactive && onClick != null) btn.onClick.AddListener(() => onClick());
+        }
+    }
+
+    private static void SetText(Transform root, string child, string val)
+    {
+        var t = FindDeep(root, child);
+        if (t == null) return;
+        var tmp = t.GetComponent<TMP_Text>();
+        if (tmp != null) tmp.text = val;
+    }
+
+    private static Transform FindDeep(Transform root, string name)
+    {
+        if (root == null) return null;
+        if (root.name == name) return root;
+        for (int i = 0; i < root.childCount; i++)
+        {
+            var r = FindDeep(root.GetChild(i), name);
+            if (r != null) return r;
+        }
+        return null;
+    }
+
+    private static string Cap(string s)
+    {
+        return string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0]) + s.Substring(1);
     }
 }

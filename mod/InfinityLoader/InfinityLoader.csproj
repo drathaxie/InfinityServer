@@ -56,6 +56,11 @@
       <HintPath>$(AqwiManaged)\UnityEngine.AssetBundleModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <!-- Animator/runtimeAnimatorController inspection for the NPC baker runtime capture. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.ImageConversionModule">
       <!-- Texture2D.LoadImage(byte[]) to build custom portrait-frame sprites from PNGs. -->
       <HintPath>$(AqwiManaged)\UnityEngine.ImageConversionModule.dll</HintPath>
@@ -69,6 +74,11 @@
     <Reference Include="UnityEngine.UI">
       <!-- TMP_Text : MaskableGraphic (UnityEngine.UI) — needed to touch UIChat.textField. -->
       <HintPath>$(AqwiManaged)\UnityEngine.UI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.Physics2DModule">
+      <!-- Collider2D cleanup for NPC baker preview/capture objects. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.Physics2DModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
