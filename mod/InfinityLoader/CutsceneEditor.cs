@@ -732,6 +732,7 @@ public class CutsceneEditorController : MonoBehaviour
         {
             var character = new Monster(mb.ID, mb, ig: false);
             character.init();
+            LogNpcEquipSummary(id, npcId, character);
             character.AssetUpdated += delegate
             {
                 if (asset == null) asset = character.getGameObject();
@@ -806,9 +807,11 @@ public class CutsceneEditorController : MonoBehaviour
             string name = string.IsNullOrEmpty(mb.strMonName) ? ("NPC" + npcId) : mb.strMonName;
             if (!asset.name.EndsWith("(Clone)", StringComparison.Ordinal)) asset.name = name + "(Clone)";
             StripCutsceneRuntimeComponents(asset);
+            RevealHumanoidSlots(finalHumanoid);
             int prepared = PrepareCutsceneHumanoid(asset);
             int enabled = CountActiveRenderers(asset);
             dm.BumperJumper(asset, "OBJ " + id + " - " + name, id, frombund: false, "O" + id + " " + name);
+            RevealHumanoidSlots(finalHumanoid);
             PrepareCutsceneHumanoid(asset);
             enabled = CountActiveRenderers(asset);
             bool humanoidDone = finalHumanoid != null && finalHumanoid.allLoaded;
@@ -866,6 +869,49 @@ public class CutsceneEditorController : MonoBehaviour
     }
 
 
+
+    private static void LogNpcEquipSummary(int actorId, int npcId, Entity character)
+    {
+        if (character == null) return;
+        try
+        {
+            InfinityLoaderMod.SafeLog("[cutedit] npc #" + actorId + " npc=" + npcId
+                + " gender=" + character.GetGenderString()
+                + " armor=" + DescribeEquip(character.Armor)
+                + " class=" + DescribeEquip(character.Class)
+                + " helm=" + DescribeEquip(character.Helm)
+                + " weapon=" + DescribeEquip(character.Weapon)
+                + " back=" + DescribeEquip(character.Back));
+        }
+        catch (Exception ex)
+        {
+            InfinityLoaderMod.SafeLog("[cutedit] npc #" + actorId + " equip log failed " + ex.Message);
+        }
+    }
+
+    private static string DescribeEquip(EquipItem item)
+    {
+        if (item == null) return "null";
+        string bundle = item.Bundle != null ? item.Bundle.Filename : "no-bundle";
+        string prefab = string.IsNullOrEmpty(item.PrefabName) ? "no-prefab" : item.PrefabName;
+        return item.ID + "/" + item.EquipSpot + "/" + item.ItemType + "/" + bundle + "/" + prefab;
+    }
+
+    private static int RevealHumanoidSlots(HumanoidAvatar avatar)
+    {
+        if (avatar == null || avatar.CC == null) return 0;
+        int count = 0;
+        try { avatar.CC.setActive(true); } catch { }
+        var slots = avatar.CC.GetComponentsInChildren<CustomizableSlot>(includeInactive: true);
+        foreach (var slot in slots)
+        {
+            if (slot == null || slot.spriteRenderer == null || slot.spriteRenderer.sprite == null) continue;
+            slot.gameObject.SetActive(true);
+            slot.spriteRenderer.enabled = true;
+            count++;
+        }
+        return count;
+    }
     private static int PrepareCutsceneHumanoid(GameObject asset)
     {
         if (asset == null) return 0;
