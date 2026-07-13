@@ -240,9 +240,36 @@ public sealed class NpcBakerController : MonoBehaviour
         }
 
         float t = 0f;
-        while (!complete && t < 45f)
+        float nextStatus = 1f;
+        while (!complete && t < 30f)
         {
             t += Time.deltaTime;
+            var ha = _previewAvatar as HumanoidAvatar;
+            if (ha != null && ha.CC != null)
+            {
+                int renderers = 0;
+                try { renderers = ha.CC.gameObject.GetComponentsInChildren<Renderer>(includeInactive: true).Length; } catch { }
+                if (ha.allLoaded || (t > 8f && renderers > 0))
+                {
+                    complete = true;
+                    InfinityLoaderMod.SafeLog("[npcbake] poll complete npc " + id
+                        + " allLoaded=" + ha.allLoaded + " renderers=" + renderers
+                        + " wait=" + t.ToString("F1"));
+                    OnLoaded(_previewMonster != null ? _previewMonster.getGameObject() : ha.gameObject);
+                    break;
+                }
+                if (t >= nextStatus)
+                {
+                    nextStatus += 1f;
+                    _status = "loading NPC " + id + "... " + t.ToString("F0")
+                        + "s (avatar ready, renderers " + renderers + ", allLoaded " + ha.allLoaded + ")";
+                }
+            }
+            else if (t >= nextStatus)
+            {
+                nextStatus += 1f;
+                _status = "loading NPC " + id + "... " + t.ToString("F0") + "s (waiting for avatar)";
+            }
             yield return null;
         }
         if (!complete) OnFailed("timed out waiting for equipped humanoid assets");
