@@ -1,26 +1,34 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
+using UnityEngine.UI;
 
 // Runtime half of the custom-NPC bundle pipeline.
 //
 // Unity players cannot build new AssetBundles directly; that API lives in UnityEditor. This
-// controller captures the thing the player build *can* see: the fully assembled humanoid NPC after
-// NPCLoader has dressed it with armor/head/weapon/back assets. The JSON manifest it writes is the
+// controller captures the thing the player build can see: the fully assembled humanoid NPC after
+// the client has dressed it with armor/head/weapon/back assets. The JSON manifest it writes is the
 // contract for the editor-side baker that will recreate the prefab and emit one self-contained
 // bundle/linkage for Dialogger, apops, and the dialogue-cell avatar path.
 public sealed class NpcBakerController : MonoBehaviour
 {
     public static NpcBakerController Instance;
     private const KeyCode ToggleKey = KeyCode.F9;
+    private const float PanelWidth = 360f;
 
     private bool _open;
     private string _npcIdText = "361";
     private string _status = "F9 toggles NPC Baker. Load a humanoid NPC, then Capture Manifest.";
     private GameObject _preview;
-    private NPCLoader _loader;
+    private Monster _previewMonster;
+    private Avatar _previewAvatar;
+    private bool _loading;
+    private GameObject _blocker;
     private Vector2 _scroll;
     private Manifest _last;
     private string _outDir;
@@ -53,9 +61,9 @@ public sealed class NpcBakerController : MonoBehaviour
     private void Update()
     {
         try { if (Input.GetKeyDown(ToggleKey)) _open = !_open; } catch { }
+        try { UpdateBlocker(); } catch { }
         if (_preview != null)
         {
-            // Keep the diagnostic preview near the camera, but out of the way of normal play.
             try
             {
                 _preview.transform.position = new Vector3(0f, 0f, 0f);
@@ -119,7 +127,7 @@ public sealed class NpcBakerController : MonoBehaviour
         try
         {
             EnsureStyles();
-            GUILayout.BeginArea(new Rect(Screen.width - 360f, 0f, 360f, Screen.height), _panel);
+            GUILayout.BeginArea(PanelRect(), _panel);
             GUILayout.Label("NPC Baker", _header);
             GUILayout.Label("Runtime capture for dressed humanoid NPCs. Output goes to UserData/Beyond/npc_baker.", _muted);
             GUILayout.Space(4);
@@ -142,6 +150,11 @@ public sealed class NpcBakerController : MonoBehaviour
             DrawLastSummary();
             GUILayout.EndScrollView();
             GUILayout.EndArea();
+
+            var e = Event.current;
+            if (e != null && PanelRect().Contains(e.mousePosition) &&
+                (e.isMouse || e.type == EventType.ScrollWheel))
+                e.Use();
         }
         catch (Exception ex) { InfinityLoaderMod.SafeLog("[npcbake] OnGUI " + ex.Message); }
     }
@@ -150,13 +163,123 @@ public sealed class NpcBakerController : MonoBehaviour
     {
         int id;
         if (!int.TryParse(_npcIdText, out id)) { _status = "NPC id must be numeric."; return; }
+        if (_loading) { _status = "already loading..."; return; }
         ClearPreview();
         _status = "loading NPC " + id + "...";
-        _loader = new NPCLoader();
-        _loader.OnAssetLoaded += OnLoaded;
-        _loader.LoadFailed += OnFailed;
-        _loader.LoadNPCByID(id);
+        StartCoroutine(LoadNpcCoroutine(id));
         InfinityLoaderMod.SafeLog("[npcbake] load npc " + id);
+    }
+
+    private IEnumerator LoadNpcCoroutine(int id)
+    {
+        _loading = true;
+        string json = null;
+        Exception fetchError = null;
+        yield return null;
+        try { json = FetchMonsterJson(id); }
+        catch (Exception ex) { fetchError = ex; }
+        if (fetchError != null)
+        {
+            OnFailed("monster data fetch failed: " + fetchError.Message);
+            _loading = false;
+            yield break;
+        }
+
+        Monbranch mb = null;
+        try { mb = ParseFirstMonster(json); }
+        catch (Exception ex)
+        {
+            OnFailed("monster data parse failed: " + ex.Message);
+            _loading = false;
+            yield break;
+        }
+        if (mb == null)
+        {
+            OnFailed("monster " + id + " was not returned by data/GetMonsterData");
+            _loading = false;
+            yield break;
+        }
+        if (mb.equippedItems == null || mb.equippedItems.Count == 0)
+        {
+            OnFailed("monster " + id + " is not an equipped humanoid; this baker captures custom humanoid NPCs only");
+            _loading = false;
+            yield break;
+        }
+
+        bool complete = false;
+        try
+        {
+            _previewMonster = new Monster(mb.ID, mb, ig: false);
+            _previewMonster.init();
+            _previewMonster.AssetUpdated += delegate
+            {
+                if (complete) return;
+                complete = true;
+                OnLoaded(_previewMonster.getGameObject());
+            };
+            _previewMonster.createAvatar();
+            _previewAvatar = _previewMonster.GetAvatar();
+            if (_previewAvatar != null)
+            {
+                _previewAvatar.hideFlame = true;
+                _previewAvatar.OnLoadError = (Action<string>)Delegate.Combine(
+                    _previewAvatar.OnLoadError,
+                    (Action<string>)delegate(string error)
+                    {
+                        if (complete) return;
+                        complete = true;
+                        OnFailed(error);
+                    });
+            }
+        }
+        catch (Exception ex)
+        {
+            OnFailed("humanoid preview setup failed: " + ex.Message);
+            _loading = false;
+            yield break;
+        }
+
+        float t = 0f;
+        while (!complete && t < 45f)
+        {
+            t += Time.deltaTime;
+            yield return null;
+        }
+        if (!complete) OnFailed("timed out waiting for equipped humanoid assets");
+        _loading = false;
+    }
+
+    private static Monbranch ParseFirstMonster(string json)
+    {
+        var arr = JArray.Parse(json);
+        if (arr.Count == 0) return null;
+        var obj = arr[0] as JObject;
+        if (obj == null) return null;
+        NormalizeEquippedItems(obj);
+        return obj.ToObject<Monbranch>();
+    }
+
+    private static void NormalizeEquippedItems(JObject obj)
+    {
+        var eqArray = obj["equippedItems"] as JArray;
+        if (eqArray == null) return;
+        var eqObj = new JObject();
+        foreach (var tok in eqArray)
+        {
+            var item = tok as JObject;
+            if (item == null) continue;
+            string spot = Convert.ToString(item["EquipSpot"]);
+            if (!string.IsNullOrEmpty(spot)) eqObj[spot] = item;
+        }
+        obj["equippedItems"] = eqObj;
+    }
+    private static string FetchMonsterJson(int id)
+    {
+        string baseUrl = Main.WebApiURL;
+        if (string.IsNullOrEmpty(baseUrl)) baseUrl = "https://130-162-189-229.sslip.io/";
+        if (!baseUrl.EndsWith("/")) baseUrl += "/";
+        using (var wc = new WebClient())
+            return wc.DownloadString(baseUrl + "data/GetMonsterData?ids=" + id);
     }
 
     private void OnLoaded(GameObject asset)
@@ -322,19 +445,45 @@ public sealed class NpcBakerController : MonoBehaviour
 
     private void ClearPreview()
     {
-        try
-        {
-            if (_loader != null)
-            {
-                _loader.OnAssetLoaded -= OnLoaded;
-                _loader.LoadFailed -= OnFailed;
-                _loader.Dispose();
-                _loader = null;
-            }
-        }
-        catch { }
         try { if (_preview != null) Destroy(_preview); } catch { }
         _preview = null;
+        _previewMonster = null;
+        _previewAvatar = null;
+    }
+
+    private static Rect PanelRect()
+    {
+        return new Rect(Screen.width - PanelWidth, 0f, PanelWidth, Screen.height);
+    }
+
+    private void UpdateBlocker()
+    {
+        if (_blocker == null) CreateBlocker();
+        if (_blocker != null) _blocker.SetActive(_open);
+    }
+
+    private void CreateBlocker()
+    {
+        var go = new GameObject("InfinityNpcBakerClickBlocker");
+        DontDestroyOnLoad(go);
+        var canvas = go.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 32760;
+        go.AddComponent<GraphicRaycaster>();
+
+        var panel = new GameObject("PanelBlocker");
+        panel.transform.SetParent(go.transform, false);
+        var rt = panel.AddComponent<RectTransform>();
+        rt.anchorMin = new Vector2(1f, 0f);
+        rt.anchorMax = new Vector2(1f, 1f);
+        rt.pivot = new Vector2(1f, 0.5f);
+        rt.sizeDelta = new Vector2(PanelWidth, 0f);
+        rt.anchoredPosition = Vector2.zero;
+        var img = panel.AddComponent<Image>();
+        img.color = new Color(0f, 0f, 0f, 0f);
+        img.raycastTarget = true;
+        _blocker = go;
+        _blocker.SetActive(false);
     }
 
     private static void EnsureCameraFocus(GameObject asset)

@@ -71,6 +71,11 @@
       <HintPath>$(AqwiManaged)\Unity.TextMeshPro.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <!-- Canvas/RenderMode for the NPC baker click blocker overlay. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.UIModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.UI">
       <!-- TMP_Text : MaskableGraphic (UnityEngine.UI) — needed to touch UIChat.textField. -->
       <HintPath>$(AqwiManaged)\UnityEngine.UI.dll</HintPath>
