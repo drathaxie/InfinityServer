@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Net;
 using System.Text;
+using Newtonsoft.Json.Linq;
 using Pixelplacement;   // Singleton<Game>.Instance (the layer-visibility toggles)
 using UnityEngine;
 
@@ -667,6 +668,14 @@ public class CutsceneEditorController : MonoBehaviour
         if (_page >= 1) dm.dData.frames[_page].Add("Object{" + id + "|1|1|20|1|0|0|0|-1 0|FFFFFFFF|0|0|1}");
         _selKind = "obj"; _selId = id.ToString(); _bufSig = "";
 
+        _status = "loading " + type + " #" + id + "…";
+        InfinityLoaderMod.SafeLog("[cutedit] add " + type + " #" + id + " (" + link + ")");
+        if (type == "npc")
+        {
+            StartCoroutine(LoadNpcObjectDirect(id, link));
+            return;
+        }
+
         // Load exactly the way the scene loads its own assets (Dialogger_Manager.ProcessLoadCommands):
         // preload any actor/sfx bundle metadata via AssetBundleDataLoader.Load, THEN ReadCommand_Load
         // in its callback (which only acts while pageNumber==0, so flip it for that call).
@@ -680,9 +689,172 @@ public class CutsceneEditorController : MonoBehaviour
             catch (Exception ex) { InfinityLoaderMod.SafeLog("[cutedit] add load err " + ex.Message); }
             dm.pageNumber = saved;
         });
-        _status = "loading " + type + " #" + id + "…";
-        InfinityLoaderMod.SafeLog("[cutedit] add " + type + " #" + id + " (" + link + ")");
         StartCoroutine(WaitThenRender(id));
+    }
+
+
+    private IEnumerator LoadNpcObjectDirect(int id, string link)
+    {
+        var dm = Dialogger_Manager.instance;
+        int npcId;
+        if (!int.TryParse(link, out npcId))
+        {
+            _status = "NPC id is not numeric: " + link;
+            yield break;
+        }
+
+        Monbranch mb = null;
+        try { mb = FetchNpcMonbranch(npcId); }
+        catch (Exception ex)
+        {
+            _status = "NPC fetch failed: " + ex.Message;
+            InfinityLoaderMod.SafeLog("[cutedit] direct npc fetch failed #" + id + " npc=" + npcId + " " + ex.Message);
+            yield break;
+        }
+        if (mb == null)
+        {
+            _status = "NPC " + npcId + " was not returned by GetMonsterData";
+            yield break;
+        }
+        if (mb.equippedItems == null || mb.equippedItems.Count == 0)
+        {
+            LoadNpcViaDialogger(id, link);
+            StartCoroutine(WaitThenRender(id));
+            yield break;
+        }
+
+        bool complete = false;
+        string error = null;
+        GameObject asset = null;
+        Avatar avt = null;
+        try
+        {
+            var character = new Monster(mb.ID, mb, ig: false);
+            character.init();
+            character.AssetUpdated += delegate
+            {
+                if (complete) return;
+                complete = true;
+                asset = character.getGameObject();
+            };
+            character.createAvatar();
+            avt = character.GetAvatar();
+            if (avt != null)
+            {
+                avt.hideFlame = true;
+                avt.OnLoadError = (Action<string>)Delegate.Combine(avt.OnLoadError, (Action<string>)delegate(string e)
+                {
+                    if (complete) return;
+                    error = e;
+                    complete = true;
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _status = "NPC setup failed: " + ex.Message;
+            InfinityLoaderMod.SafeLog("[cutedit] direct npc setup failed #" + id + " npc=" + npcId + " " + ex);
+            yield break;
+        }
+
+        float t = 0f;
+        while (!complete && t < 30f)
+        {
+            t += Time.deltaTime;
+            var ha = avt as HumanoidAvatar;
+            if (ha != null && ha.CC != null)
+            {
+                int renderers = 0;
+                try { renderers = ha.CC.gameObject.GetComponentsInChildren<Renderer>(includeInactive: true).Length; } catch { }
+                if (ha.allLoaded || (t > 8f && renderers > 0))
+                {
+                    asset = ha.CC.gameObject;
+                    complete = true;
+                    break;
+                }
+            }
+            yield return null;
+        }
+
+        if (!string.IsNullOrEmpty(error))
+        {
+            _status = "NPC load failed: " + error;
+            InfinityLoaderMod.SafeLog("[cutedit] direct npc load failed #" + id + " npc=" + npcId + " " + error);
+            yield break;
+        }
+        if (asset == null)
+        {
+            _status = "NPC " + npcId + " timed out before creating an actor";
+            InfinityLoaderMod.SafeLog("[cutedit] direct npc timeout #" + id + " npc=" + npcId);
+            yield break;
+        }
+
+        try
+        {
+            var finalHumanoid = avt as HumanoidAvatar;
+            if (finalHumanoid != null && finalHumanoid.CC != null) asset = finalHumanoid.CC.gameObject;
+            string name = string.IsNullOrEmpty(mb.strMonName) ? ("NPC" + npcId) : mb.strMonName;
+            if (!asset.name.EndsWith("(Clone)", StringComparison.Ordinal)) asset.name = name + "(Clone)";
+            StripCutsceneRuntimeComponents(asset);
+            dm.BumperJumper(asset, "OBJ " + id + " - " + name, id, frombund: false, "O" + id + " " + name);
+            try { dm.LoadPage(_page); } catch { }
+            _bufSig = "";
+            bool ok = dm.GetActorFromID(id) != null;
+            _status = ok ? ("added #" + id + " - position it in the inspector") : ("#" + id + " assembled but did not register");
+            InfinityLoaderMod.SafeLog("[cutedit] direct npc #" + id + " npc=" + npcId + " loaded=" + ok + " actors=" + SafeCount(dm.actorList));
+        }
+        catch (Exception ex)
+        {
+            _status = "NPC wrap failed: " + ex.Message;
+            InfinityLoaderMod.SafeLog("[cutedit] direct npc wrap failed #" + id + " npc=" + npcId + " " + ex);
+        }
+    }
+
+    private void LoadNpcViaDialogger(int id, string link)
+    {
+        var dm = Dialogger_Manager.instance;
+        int saved = dm.pageNumber; dm.pageNumber = 0;
+        try { dm.ReadCommand_Load(id, link, "npc"); }
+        catch (Exception ex) { InfinityLoaderMod.SafeLog("[cutedit] stock npc load err " + ex.Message); }
+        dm.pageNumber = saved;
+    }
+
+    private static Monbranch FetchNpcMonbranch(int npcId)
+    {
+        string baseUrl = Main.WebApiURL;
+        if (string.IsNullOrEmpty(baseUrl)) baseUrl = "https://130-162-189-229.sslip.io/";
+        if (!baseUrl.EndsWith("/")) baseUrl += "/";
+        string json;
+        using (var wc = new WebClient()) json = wc.DownloadString(baseUrl + "data/GetMonsterData?ids=" + npcId);
+        var arr = JArray.Parse(json);
+        if (arr.Count == 0) return null;
+        var obj = arr[0] as JObject;
+        if (obj == null) return null;
+        NormalizeNpcEquips(obj);
+        return obj.ToObject<Monbranch>();
+    }
+
+    private static void NormalizeNpcEquips(JObject obj)
+    {
+        var eqArray = obj["equippedItems"] as JArray;
+        if (eqArray == null) return;
+        var eqObj = new JObject();
+        foreach (var tok in eqArray)
+        {
+            var item = tok as JObject;
+            if (item == null) continue;
+            string spot = Convert.ToString(item["EquipSpot"]);
+            if (!string.IsNullOrEmpty(spot)) eqObj[spot] = item;
+        }
+        obj["equippedItems"] = eqObj;
+    }
+
+    private static void StripCutsceneRuntimeComponents(GameObject asset)
+    {
+        if (asset == null) return;
+        foreach (var c in asset.GetComponentsInChildren<Collider2D>(includeInactive: true)) UnityEngine.Object.Destroy(c);
+        foreach (var z in asset.GetComponentsInChildren<ZOffset>(includeInactive: true)) UnityEngine.Object.Destroy(z);
+        foreach (var w in asset.GetComponentsInChildren<Walk>(includeInactive: true)) UnityEngine.Object.Destroy(w);
     }
 
     private IEnumerator WaitThenRender(int id)
@@ -809,12 +981,32 @@ public class CutsceneEditorController : MonoBehaviour
         SetCutsceneView(true);                   // reveal the Cutscene layer (StartCutscene skips this when editor=true)
         _loaded = true;
         Goto(total > 1 ? 1 : 0);                 // page 0 is the (invisible) setup page
+        yield return StartCoroutine(RecoverMissingNpcActors());
         int actors = SafeCount(dm.actorList), boxes = SafeCount(dm.boxList);
         InfinityLoaderMod.SafeLog("[cutedit] loaded id " + _idText + " frames=" + total + " loadStarted=" + started
             + " waitStart=" + tStart.ToString("F1") + "s waitFinish=" + tDone.ToString("F1") + "s actors=" + actors + " boxes=" + boxes);
         _status = "loaded — " + total + " page(s), " + actors + " actor(s). Use the pager.";
     }
 
+
+    private IEnumerator RecoverMissingNpcActors()
+    {
+        var dm = Dialogger_Manager.instance;
+        if (dm == null || dm.dData == null || dm.dData.frames == null || dm.dData.frames.Count == 0) yield break;
+        var setup = dm.dData.frames[0];
+        for (int i = 0; i < setup.Count; i++)
+        {
+            string cmd = setup[i];
+            if (string.IsNullOrEmpty(cmd) || !cmd.StartsWith("Load{")) continue;
+            var f = Body(cmd);
+            if (f == null || f.Length < 3 || f[2] != "npc") continue;
+            int id;
+            if (!int.TryParse(f[0], out id)) continue;
+            try { if (dm.GetActorFromID(id) != null) continue; } catch { }
+            InfinityLoaderMod.SafeLog("[cutedit] recover missing npc #" + id + " (" + f[1] + ")");
+            yield return StartCoroutine(LoadNpcObjectDirect(id, f[1]));
+        }
+    }
     private static int SafeCount(System.Collections.ICollection c) { return c == null ? -1 : c.Count; }
 
     // Playback's StartCutscene reveals the Cutscene render layer (22) on Camera.main and hides the
