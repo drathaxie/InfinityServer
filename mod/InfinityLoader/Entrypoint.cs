@@ -39,6 +39,7 @@ public static class InfinityLoaderMod
     private static string _packetLog;        // ...\UserData\Beyond\packets.jsonl
     private static string _loaderLog;        // ...\UserData\Beyond\infinity_loader.log
     private static MethodInfo _serialize;    // AEC.Serialize (private) for faithful c2s logging
+    private static bool _npcLoaderPatched;
 
     // Overhead guild tag: lowercase player name -> (guild name, colour hex). Fed from the
     // guildName/guildTagColor fields our server adds to every user object (initPlayer.user,
@@ -253,6 +254,8 @@ public static class InfinityLoaderMod
                     GameObject asset = character.getGameObject();
                     if (asset == null) return;
                     asset.transform.localScale = Vector3.one;
+                    if (string.IsNullOrEmpty(asset.name) || !asset.name.EndsWith("(Clone)", StringComparison.Ordinal))
+                        asset.name = (string.IsNullOrEmpty(mb.strMonName) ? ("NPC" + mb.ID) : mb.strMonName) + "(Clone)";
                     EnsureCameraFocus(asset);
                     StripNpcLoaderRuntimeComponents(asset);
                     __instance.isDone = true;
@@ -308,6 +311,24 @@ public static class InfinityLoaderMod
         foreach (var w in asset.GetComponentsInChildren<Walk>(includeInactive: true))
             UnityEngine.Object.Destroy(w);
     }
+
+    public static void EnsureNpcLoaderPatch()
+    {
+        if (_npcLoaderPatched) return;
+        _npcLoaderPatched = true;
+        try
+        {
+            var h = new Harmony("infinity.local.npc-loader.lazy");
+            TryPatch(h, "humanoid NPC loader",
+                AccessTools.Method(typeof(NPCLoader), "LoadMob", new[] { typeof(Monbranch) }),
+                prefix: nameof(NPCLoader_LoadMob_Prefix));
+        }
+        catch (Exception ex)
+        {
+            SafeLog("[npc-loader] lazy patch failed " + ex);
+        }
+    }
+
     public static void WebApiPostfix(ref string __result)
     {
         string url = ReadWebApiUrl();
@@ -452,6 +473,7 @@ public static class InfinityLoaderMod
 
     public static void UIChat_SetText_Prefix(UIChat __instance, ref string s)
     {
+        EnsureNpcLoaderPatch();                // lazy: NPCLoader static init is unsafe at Doorstop boot
         CutsceneEditorController.Spawn();      // lazy fallback: guaranteed in-game, Unity ready
         NpcBakerController.Spawn();            // F9 runtime capture for dressed custom NPCs
         EnsureEmoji();

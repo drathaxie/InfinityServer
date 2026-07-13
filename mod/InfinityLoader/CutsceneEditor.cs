@@ -659,6 +659,7 @@ public class CutsceneEditorController : MonoBehaviour
         var dm = Dialogger_Manager.instance;
         if (dm == null || dm.dData == null) return;
         if (type == "actor" && !link.Contains(",")) { _status = "actor needs 'bundleId,PrefabName' (e.g. 66131,actor-veddrian)"; return; }
+        if (type == "npc") InfinityLoaderMod.EnsureNpcLoaderPatch();
         int id = dm.dData.idCount; dm.dData.idCount = id + 1;
         dm.dData.frames[0].Add("Load{" + id + "|" + link + "|" + type + "}");
         // z-order 20 so it renders in FRONT of the background layers (a fresh object at z 0 hides
