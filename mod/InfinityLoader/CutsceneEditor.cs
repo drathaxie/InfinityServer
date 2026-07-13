@@ -807,10 +807,12 @@ public class CutsceneEditorController : MonoBehaviour
             if (!asset.name.EndsWith("(Clone)", StringComparison.Ordinal)) asset.name = name + "(Clone)";
             StripCutsceneRuntimeComponents(asset);
             int prepared = PrepareCutsceneHumanoid(asset);
+            int enabled = CountActiveRenderers(asset);
             dm.BumperJumper(asset, "OBJ " + id + " - " + name, id, frombund: false, "O" + id + " " + name);
             PrepareCutsceneHumanoid(asset);
+            enabled = CountActiveRenderers(asset);
             bool humanoidDone = finalHumanoid != null && finalHumanoid.allLoaded;
-            InfinityLoaderMod.SafeLog("[cutedit] direct npc #" + id + " prepared renderers=" + prepared + " allLoaded=" + humanoidDone);
+            InfinityLoaderMod.SafeLog("[cutedit] direct npc #" + id + " prepared renderers=" + prepared + " enabledRenderers=" + enabled + " allLoaded=" + humanoidDone);
             try { dm.LoadPage(_page); } catch { }
             _bufSig = "";
             bool ok = dm.GetActorFromID(id) != null;
@@ -867,12 +869,12 @@ public class CutsceneEditorController : MonoBehaviour
     private static int PrepareCutsceneHumanoid(GameObject asset)
     {
         if (asset == null) return 0;
+        asset.SetActive(true);
         int cutsceneLayer = LayerMask.NameToLayer("Cutscene");
         var transforms = asset.GetComponentsInChildren<Transform>(includeInactive: true);
         foreach (var t in transforms)
         {
             if (t == null) continue;
-            t.gameObject.SetActive(true);
             if (cutsceneLayer >= 0) t.gameObject.layer = cutsceneLayer;
         }
 
@@ -881,7 +883,6 @@ public class CutsceneEditorController : MonoBehaviour
         foreach (var r in renderers)
         {
             if (r == null) continue;
-            r.enabled = true;
             if (cutsceneLayer >= 0) r.gameObject.layer = cutsceneLayer;
             try { r.sortingLayerName = "Cutscene-0"; } catch { }
             count++;
@@ -897,6 +898,18 @@ public class CutsceneEditorController : MonoBehaviour
         return count;
     }
 
+
+    private static int CountActiveRenderers(GameObject asset)
+    {
+        if (asset == null) return 0;
+        int count = 0;
+        var renderers = asset.GetComponentsInChildren<Renderer>(includeInactive: true);
+        foreach (var r in renderers)
+        {
+            if (r != null && r.enabled && r.gameObject.activeInHierarchy) count++;
+        }
+        return count;
+    }
     private static void StripCutsceneRuntimeComponents(GameObject asset)
     {
         if (asset == null) return;
