@@ -6,6 +6,7 @@ using System.Text;
 using Newtonsoft.Json.Linq;
 using Pixelplacement;   // Singleton<Game>.Instance (the layer-visibility toggles)
 using UnityEngine;
+using UnityEngine.Rendering;
 
 // ---------------------------------------------------------------------------
 // In-client Dialogger editor — Phase 1: the render-drive proof.
@@ -796,7 +797,10 @@ public class CutsceneEditorController : MonoBehaviour
             string name = string.IsNullOrEmpty(mb.strMonName) ? ("NPC" + npcId) : mb.strMonName;
             if (!asset.name.EndsWith("(Clone)", StringComparison.Ordinal)) asset.name = name + "(Clone)";
             StripCutsceneRuntimeComponents(asset);
+            int prepared = PrepareCutsceneHumanoid(asset);
             dm.BumperJumper(asset, "OBJ " + id + " - " + name, id, frombund: false, "O" + id + " " + name);
+            PrepareCutsceneHumanoid(asset);
+            InfinityLoaderMod.SafeLog("[cutedit] direct npc #" + id + " prepared renderers=" + prepared);
             try { dm.LoadPage(_page); } catch { }
             _bufSig = "";
             bool ok = dm.GetActorFromID(id) != null;
@@ -847,6 +851,40 @@ public class CutsceneEditorController : MonoBehaviour
             if (!string.IsNullOrEmpty(spot)) eqObj[spot] = item;
         }
         obj["equippedItems"] = eqObj;
+    }
+
+
+    private static int PrepareCutsceneHumanoid(GameObject asset)
+    {
+        if (asset == null) return 0;
+        int cutsceneLayer = LayerMask.NameToLayer("Cutscene");
+        var transforms = asset.GetComponentsInChildren<Transform>(includeInactive: true);
+        foreach (var t in transforms)
+        {
+            if (t == null) continue;
+            t.gameObject.SetActive(true);
+            if (cutsceneLayer >= 0) t.gameObject.layer = cutsceneLayer;
+        }
+
+        int count = 0;
+        var renderers = asset.GetComponentsInChildren<Renderer>(includeInactive: true);
+        foreach (var r in renderers)
+        {
+            if (r == null) continue;
+            r.enabled = true;
+            if (cutsceneLayer >= 0) r.gameObject.layer = cutsceneLayer;
+            try { r.sortingLayerName = "Cutscene-0"; } catch { }
+            count++;
+        }
+
+        var groups = asset.GetComponentsInChildren<SortingGroup>(includeInactive: true);
+        foreach (var sg in groups)
+        {
+            if (sg == null) continue;
+            if (cutsceneLayer >= 0) sg.gameObject.layer = cutsceneLayer;
+            try { sg.sortingLayerName = "Cutscene-0"; } catch { }
+        }
+        return count;
     }
 
     private static void StripCutsceneRuntimeComponents(GameObject asset)
