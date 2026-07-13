@@ -23,10 +23,8 @@ public sealed class NpcBakerController : MonoBehaviour
 
     private bool _open;
     private string _npcIdText = "361";
-    private string _status = "F9 toggles NPC Baker. Load a humanoid NPC, then Capture Manifest.";
+    private string _status = "F9 toggles NPC Baker. Use F8 Cutscene Editor to add NPCs; this panel only checks humanoid metadata.";
     private GameObject _preview;
-    private Monster _previewMonster;
-    private Avatar _previewAvatar;
     private bool _loading;
     private GameObject _blocker;
     private Vector2 _scroll;
@@ -129,13 +127,13 @@ public sealed class NpcBakerController : MonoBehaviour
             EnsureStyles();
             GUILayout.BeginArea(PanelRect(), _panel);
             GUILayout.Label("NPC Baker", _header);
-            GUILayout.Label("Runtime capture for dressed humanoid NPCs. Output goes to UserData/Beyond/npc_baker.", _muted);
+            GUILayout.Label("Humanoid metadata check only. Add NPCs from the F8 Cutscene Editor; baking will be editor-side.", _muted);
             GUILayout.Space(4);
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("NPC", _label, GUILayout.Width(32));
             _npcIdText = GUILayout.TextField(_npcIdText ?? "", _field, GUILayout.Width(64));
-            if (GUILayout.Button("Load", _primary, GUILayout.Width(64))) LoadNpc();
+            if (GUILayout.Button("Check", _primary, GUILayout.Width(64))) LoadNpc();
             if (GUILayout.Button("Clear", _button, GUILayout.Width(64))) ClearPreview();
             GUILayout.EndHorizontal();
 
@@ -206,73 +204,16 @@ public sealed class NpcBakerController : MonoBehaviour
             yield break;
         }
 
-        bool complete = false;
-        try
+        _last = new Manifest
         {
-            _previewMonster = new Monster(mb.ID, mb, ig: false);
-            _previewMonster.init();
-            _previewMonster.AssetUpdated += delegate
-            {
-                if (complete) return;
-                complete = true;
-                OnLoaded(_previewMonster.getGameObject());
-            };
-            _previewMonster.createAvatar();
-            _previewAvatar = _previewMonster.GetAvatar();
-            if (_previewAvatar != null)
-            {
-                _previewAvatar.hideFlame = true;
-                _previewAvatar.OnLoadError = (Action<string>)Delegate.Combine(
-                    _previewAvatar.OnLoadError,
-                    (Action<string>)delegate(string error)
-                    {
-                        if (complete) return;
-                        complete = true;
-                        OnFailed(error);
-                    });
-            }
-        }
-        catch (Exception ex)
-        {
-            OnFailed("humanoid preview setup failed: " + ex.Message);
-            _loading = false;
-            yield break;
-        }
-
-        float t = 0f;
-        float nextStatus = 1f;
-        while (!complete && t < 30f)
-        {
-            t += Time.deltaTime;
-            var ha = _previewAvatar as HumanoidAvatar;
-            if (ha != null && ha.CC != null)
-            {
-                int renderers = 0;
-                try { renderers = ha.CC.gameObject.GetComponentsInChildren<Renderer>(includeInactive: true).Length; } catch { }
-                if (ha.allLoaded || (t > 8f && renderers > 0))
-                {
-                    complete = true;
-                    InfinityLoaderMod.SafeLog("[npcbake] poll complete npc " + id
-                        + " allLoaded=" + ha.allLoaded + " renderers=" + renderers
-                        + " wait=" + t.ToString("F1"));
-                    OnLoaded(_previewMonster != null ? _previewMonster.getGameObject() : ha.gameObject);
-                    break;
-                }
-                if (t >= nextStatus)
-                {
-                    nextStatus += 1f;
-                    _status = "loading NPC " + id + "... " + t.ToString("F0")
-                        + "s (avatar ready, renderers " + renderers + ", allLoaded " + ha.allLoaded + ")";
-                }
-            }
-            else if (t >= nextStatus)
-            {
-                nextStatus += 1f;
-                _status = "loading NPC " + id + "... " + t.ToString("F0") + "s (waiting for avatar)";
-            }
-            yield return null;
-        }
-        if (!complete) OnFailed("timed out waiting for equipped humanoid assets");
+            schema = 1,
+            npcId = mb.ID,
+            rootName = mb.strLinkage ?? "",
+            capturedUtc = DateTime.UtcNow.ToString("o"),
+            notes = "Metadata check only. Runtime preview loading was disabled because it instantiates into the live game; use the F8 Cutscene Editor NPC path."
+        };
+        _status = "NPC " + mb.ID + " is an equipped humanoid. Use F8 Cutscene Editor > Add Object > npc to load it.";
+        InfinityLoaderMod.SafeLog("[npcbake] checked humanoid npc " + mb.ID + " equips=" + mb.equippedItems.Count);
         _loading = false;
     }
 
@@ -335,7 +276,7 @@ public sealed class NpcBakerController : MonoBehaviour
 
     private void CaptureManifest()
     {
-        if (_preview == null) { _status = "Load an NPC first."; return; }
+        if (_preview == null) { _status = "F9 no longer spawns NPCs into the game. Use F8 Cutscene Editor Add Object > npc."; return; }
         int id;
         int.TryParse(_npcIdText, out id);
         try
@@ -474,8 +415,6 @@ public sealed class NpcBakerController : MonoBehaviour
     {
         try { if (_preview != null) Destroy(_preview); } catch { }
         _preview = null;
-        _previewMonster = null;
-        _previewAvatar = null;
     }
 
     private static Rect PanelRect()

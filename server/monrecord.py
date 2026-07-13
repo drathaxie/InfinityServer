@@ -94,9 +94,36 @@ def to_catalog(cols):
     for col, key in _CAT_INV.items():                  # avatar customization
         if col in cols:
             out[key] = cols[col]
+    if "equippedItems" in out:
+        out["equippedItems"] = _equipped_items_for_client(out.get("equippedItems"))
     if not out.get("Scale"):       # a scale-less/zero stub row renders at scale 0 (invisible) —
         out["Scale"] = 1.0         # every monster must have a render scale; default to full size.
     return out
+
+
+def _equipped_items_for_client(equipped):
+    """Return the GetMonsterData equippedItems shape Unity's Monbranch can deserialize.
+
+    Custom authoring paths have produced both AE-style arrays and our editor's canonical
+    {equipSpot: itemDef} object. The client field is Dictionary<EquipSpots, EquipItem>,
+    so the wire shape must be a JSON object keyed by the numeric equip slot.
+    """
+    if not equipped:
+        return {}
+    if isinstance(equipped, dict):
+        return {str(k): v for k, v in equipped.items()}
+    if isinstance(equipped, list):
+        out = {}
+        for item in equipped:
+            if not isinstance(item, dict):
+                continue
+            spot = item.get("EquipSpot")
+            if spot is None:
+                spot = item.get("equipSpot")
+            if spot is not None:
+                out[str(spot)] = item
+        return out
+    return {}
 
 
 # ---- DB row <-> canonical cols (JSON columns are stored as text) --------------

@@ -122,8 +122,33 @@ def get_monster_data(conn, qs):
     for mid in ids:
         c = montemplates.catalog(conn, mid)
         if c is not None:
+            _normalize_equipped_items(c)
             out.append(c)
     return out
+
+
+def _normalize_equipped_items(mon):
+    equipped = mon.get("equippedItems") if isinstance(mon, dict) else None
+    if not equipped:
+        if isinstance(mon, dict):
+            mon["equippedItems"] = {}
+        return
+    if isinstance(equipped, dict):
+        mon["equippedItems"] = {str(k): v for k, v in equipped.items()}
+        return
+    if isinstance(equipped, list):
+        out = {}
+        for item in equipped:
+            if not isinstance(item, dict):
+                continue
+            spot = item.get("EquipSpot")
+            if spot is None:
+                spot = item.get("equipSpot")
+            if spot is not None:
+                out[str(spot)] = item
+        mon["equippedItems"] = out
+        return
+    mon["equippedItems"] = {}
 
 
 # --- asset-bundle registry (id -> {ID,Name,Filename,Version*}) -----------------
