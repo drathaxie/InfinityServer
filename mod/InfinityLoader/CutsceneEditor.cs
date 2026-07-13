@@ -734,15 +734,19 @@ public class CutsceneEditorController : MonoBehaviour
             character.init();
             character.AssetUpdated += delegate
             {
-                if (complete) return;
-                complete = true;
-                asset = character.getGameObject();
+                if (asset == null) asset = character.getGameObject();
             };
             character.createAvatar();
             avt = character.GetAvatar();
             if (avt != null)
             {
                 avt.hideFlame = true;
+                avt.OnSetupComplete = (Action<GameObject>)Delegate.Combine(avt.OnSetupComplete, (Action<GameObject>)delegate(GameObject ready)
+                {
+                    if (complete) return;
+                    asset = ready != null ? ready : character.getGameObject();
+                    complete = true;
+                });
                 avt.OnLoadError = (Action<string>)Delegate.Combine(avt.OnLoadError, (Action<string>)delegate(string e)
                 {
                     if (complete) return;
@@ -767,11 +771,16 @@ public class CutsceneEditorController : MonoBehaviour
             {
                 int renderers = 0;
                 try { renderers = ha.CC.gameObject.GetComponentsInChildren<Renderer>(includeInactive: true).Length; } catch { }
-                if (ha.allLoaded || (t > 8f && renderers > 0))
+                if (ha.allLoaded && t > 0.5f)
                 {
                     asset = ha.CC.gameObject;
-                    complete = true;
-                    break;
+                    // ShowChar/OnSetupComplete is the real signal, but allLoaded is a useful fallback
+                    // if a custom item path never fires that callback.
+                    if (t > 2f)
+                    {
+                        complete = true;
+                        break;
+                    }
                 }
             }
             yield return null;
@@ -800,7 +809,8 @@ public class CutsceneEditorController : MonoBehaviour
             int prepared = PrepareCutsceneHumanoid(asset);
             dm.BumperJumper(asset, "OBJ " + id + " - " + name, id, frombund: false, "O" + id + " " + name);
             PrepareCutsceneHumanoid(asset);
-            InfinityLoaderMod.SafeLog("[cutedit] direct npc #" + id + " prepared renderers=" + prepared);
+            bool humanoidDone = finalHumanoid != null && finalHumanoid.allLoaded;
+            InfinityLoaderMod.SafeLog("[cutedit] direct npc #" + id + " prepared renderers=" + prepared + " allLoaded=" + humanoidDone);
             try { dm.LoadPage(_page); } catch { }
             _bufSig = "";
             bool ok = dm.GetActorFromID(id) != null;
