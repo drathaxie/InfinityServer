@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible server, API, data, or client-integration defect
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include passwords, session tokens, private server addresses, raw packet captures, production database content, or personal data.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Game server / networking
+        - Web API
+        - Authentication / persistence
+        - Combat / classes
+        - World / multiplayer
+        - Quests / shops / loot
+        - Content authoring
+        - Client integration
+        - Deployment / operations
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what should have happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start ...
+        2. Connect ...
+        3. Send/select ...
+        4. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Include relevant logs, tests, screenshots, or packet shapes with secrets and personal data removed.
+  - type: input
+    id: backend
+    attributes:
+      label: Database backend
+      placeholder: SQLite or PostgreSQL
+  - type: input
+    id: revision
+    attributes:
+      label: Commit or branch
+      placeholder: main / commit SHA
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, tokens, private addresses, personal data, and copyrighted source from this report.
+          required: true
