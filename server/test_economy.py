@@ -59,6 +59,8 @@ def main():
     for r in conn.execute("SELECT shop_id, shop_item_id, cost, item_id FROM shop_items "
                           "ORDER BY shop_item_id"):
         idef = db.item(conn, r["item_id"]) or {}
+        if r["item_id"] in _fresh_inv:
+            continue
         if game._is_class_item(conn, r["item_id"]):
             continue
         if int(idef.get("EquipSpot", 0) or 0) in (game.EQUIP_SPOT_HOUSE, game.EQUIP_SPOT_HOUSE_ITEM):

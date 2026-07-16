@@ -61,8 +61,19 @@ async def quest_progress(session, writer, cmd, params, msg):
         game.track_quest(session.conn, session.char, arg)
         _refresh_char()
     elif cmd == "openApopQO":
+        # Params=[apopID, monMapID]. The client never opens the dialogue panel itself on this
+        # path (unlike the direct NPC-click path, which calls HUDCanvas.LoadApop locally) — it
+        # waits for a ResponseOpenApop {Cmd:"OpenApop"} to do so (see ResponseOpenApop.Execute()
+        # in the decomp). Without it, the HUD quick-menu shortcuts (e.g. Gravelyn/Despair) silently
+        # no-op: the server-side quest bookkeeping still ran, but nothing ever told the client to
+        # render the panel.
+        try:
+            monmapid = int(params[1]) if len(params) > 1 else 0
+        except (ValueError, TypeError):
+            monmapid = 0
+        await send_obj(writer, {"Cmd": "OpenApop", "ApopID": arg, "MonMapID": monmapid})
         await send_obj(writer, game.open_apop_qo(session.conn, session.char, arg))
-        print(f"  [s2c] questData (openApopQO {arg})")
+        print(f"  [s2c] OpenApop + questData (openApopQO {arg})")
     elif cmd == "watchCutscene":
         await send_obj(writer, game.watch_cutscene(session.conn, session.char, arg))
         print(f"  [s2c] questData (watchCutscene {arg})")

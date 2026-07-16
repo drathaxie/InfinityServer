@@ -7,5 +7,5 @@ module here — dispatch() and the transport never change.
 """
 from .registry import HANDLERS, register            # noqa: F401
 from . import context                               # noqa: F401
-from . import (auth, combat_cmds, dev, economy, editors, houses,  # noqa: F401
-               items, loot_cmds, patterns_cmds, quests, social, world_cmds)
+from . import (auth, combat_cmds, dev, economy, editors, guild_cmds, houses,  # noqa: F401
+               items, loot_cmds, patterns_cmds, players, quests, social, world_cmds)

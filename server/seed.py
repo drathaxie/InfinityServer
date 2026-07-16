@@ -15,6 +15,7 @@ import json
 import pathlib
 
 import db
+import fill_dev_shop
 import montemplates
 
 DATA = pathlib.Path(__file__).resolve().parent.parent / "data"
@@ -26,6 +27,22 @@ DEFAULTCLASSES_FILE = DATA / "defaultclasses.json"
 MONSTER_DROPS_FILE = DATA / "monster_drops.json"
 ITEMS_FILE = DATA / "items.json"
 SHOPS_FILE = DATA / "shops.json"
+BASECLASSES_FILE = DATA.parent / "capture" / "harvest" / "baseclasses_live.json"
+
+
+def seed_hairs(conn):
+    """Seed the canonical HairInfo catalog used by creation and changeColor."""
+    try:
+        payload = json.loads(BASECLASSES_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    count = 0
+    for hair in payload.get("hairs", []):
+        if isinstance(hair, dict) and hair.get("ID") is not None:
+            db.store_hair(conn, hair)
+            count += 1
+    return count
+
 
 
 def _seed_shop(conn, shop_obj):
@@ -265,10 +282,12 @@ def seed_classes(conn):
             meta = defs.get(str(sid), {})
             conn.execute(
                 "INSERT INTO skills(skill_id, action, name, description, icon, slot, "
-                "auto_h_range, auto_v_range, mana) VALUES(?,?,?,?,?,?,?,?,?)",
+                "auto_h_range, auto_v_range, auto_hold_at_range, mana) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (sid, int(meta.get("act", 0) or 0), meta.get("nam"), meta.get("desc"),
                  meta.get("icon"), slot, float(meta.get("autoHRange", 0) or 0),
-                 float(meta.get("autoVRange", 0) or 0), int(meta.get("regMana", 0) or 0)))
+                 float(meta.get("autoVRange", 0) or 0), 1 if meta.get("autoHoldAtRange") else 0,
+                 int(meta.get("regMana", 0) or 0)))
             n_skills += 1
     return (n_cls, n_skills)
 
@@ -752,7 +771,13 @@ PALADIN_CLASS_ID = 69420
 #     actually plays on the caster. Icons: the unused shipped ClassSkillIcons (opportunitystrike
 #     ×2, Healer/gears, Dragonslayer/spin + downstrike). seed_paladin also swaps the particle
 #     bundle on live rigs still pointing at the Warrior one (78047).
-PALADIN_GRAPH_VERSION = 4
+# v5: reconstructs the leaked InfinityHero slot-3 Meteor using all six S3 emitters. The
+#     existing support/offense buttons establish Healer/Warrior Aspect so Meteor can execute
+#     both tooltip branches without inventing the rest of the unrevealed official kit.
+# v6: uses the actual classInfinityHero_S1_P4 composite for Meteor's victim-side finisher.
+#     That prefab owns InfinitySword-Animation plus the giant sword, three lightning strikes,
+#     gold pillars, runes, smoke, and explosion; a 6s lifetime lets its full sequence finish.
+PALADIN_GRAPH_VERSION = 6
 
 _PALADIN_RESOURCE = {"model": "conviction", "ResourceColor": 16764498, "MaxRP": 50}
 # The rig carries the ReduxPaladin class-armor item id (69420) — forge.class_for_armor_item
@@ -775,8 +800,8 @@ _PALADIN_RIG = {
 # are each skill's BASE, before Conviction scaling. Icons are the shipped-but-unused entries in
 # Resources/UI/SpriteAssets/ClassSkillIcons. Particles are the unshipped InfinityHero kit
 # (classInfinityHero_S<slot+1>_P<n>, see _PALADIN_RIG); each Particle node must cue an
-# Animation the caster plays in the same cast or the client never spawns it. S1_P4 and
-# S3_P4..P6 are left on the shelf to keep casts readable.
+# Animation the caster plays in the same cast or the client never spawns it. Meteor's leaked
+# sword/lightning finisher is unusually stored as S1_P4 despite being used by the slot-3 skill.
 _PALADIN_SKILLS = [
     (0, 90373, "Auto Attack", "Warrior/opportunitystrike",
      "Attack your enemy, applying a stack of Conviction. Conviction stacks up to 50, "
@@ -811,26 +836,34 @@ _PALADIN_SKILLS = [
         ("7", {"Name": "Resource", "Amount": 2}),
         ("8", {"Name": "UpdateAnimation", "Value": "2H_Fight"}),
     ]),
-    (2, 90370, "Paladin's Protection", "Healer/gears",
-     "Heal yourself and up to 5 allies. Healing is empowered by 3% per stack of Conviction, "
-     "up to 150% bonus healing. 4 second cooldown.", [
+    (2, 90370, "Meteor", "Mage/fireball",
+     "Rains down meteors that deal magical damage based on INT and WIS to up to 4 targets. "
+     "Warrior Aspect: hits 1 target for 50% increased damage and leaves a burning field for "
+     "5 seconds. Healer Aspect: applies Suppression, reducing Crit Chance, Physical Damage, "
+     "and Magical Damage by 10% for 6 seconds. 4 second cooldown.", [
         ("0", {"Name": "OnRequest"}),
         ("1", {"Name": "Cooldown", "CD": 4000}),
-        ("2", {"Name": "PlayerAnimation", "Animation": "Castgood"}),
-        ("3", {"Name": "Damage", "Heal": True, "Multiplier": 2.0, "MaxTargets": 6}),
-        ("4", {"Name": "Particle", "Particle": "classInfinityHero_S3_P1",
-               "Animation": "Castgood", "X": 0, "Y": 0}),
-        ("5", {"Name": "Particle", "Particle": "classInfinityHero_S3_P2",
-               "Animation": "Castgood", "X": 0, "Y": 3}),
-        ("6", {"Name": "Particle", "Particle": "classInfinityHero_S3_P3",
-               "Animation": "Castgood", "X": 0, "Y": 6}),
-        ("7", {"Name": "Resource", "Amount": 0}),
-        ("8", {"Name": "UpdateAnimation", "Value": "2H_Fight"}),
+        ("2", {"Name": "PlayerAnimation", "Animation": "Attack1"}),
+        ("3", {"Name": "AllEnemies"}),
+        ("4", {"Name": "Damage", "DamageType": "Magical", "Multiplier": 1.0,
+               "MaxTargets": 4, "Targets": {"id": "3"}}),
+        ("5", {"Name": "Particle", "Particle": "classInfinityHero_S3_P1",
+               "Animation": "Attack1", "Time": 0, "X": 0, "Y": 0,
+               "Lifetime": 5000}),
+        ("6", {"Name": "Particle", "Particle": "classInfinityHero_S3_P2",
+               "Animation": "Attack1", "Time": 0, "X": 0, "Y": 0,
+               "Lifetime": 5000}),
+        ("7", {"Name": "Target"}),
+        ("8", {"Name": "Particle", "Particle": "classInfinityHero_S1_P4",
+               "Animation": "Attack1", "Time": 0, "X": 0, "Y": 0,
+               "Lifetime": 6000, "Targets": {"id": "7"}}),
+        ("9", {"Name": "Resource", "Amount": 0}),
+        ("10", {"Name": "UpdateAnimation", "Value": "2H_Fight"}),
     ]),
-    (3, 90371, "Paladin's Guard", "Dragonslayer/spin",
-     "Bless yourself and up to 5 allies with your Conviction for 6 seconds, increasing damage "
-     "dealt (empowered per stack of Conviction) and reducing incoming damage by 25%. "
-     "4 second cooldown.", [
+    (3, 90371, "Healer Aspect", "Healer/heal",
+     "Assume the Healer Aspect and bless yourself and up to 5 allies for 6 seconds, increasing "
+     "damage dealt and reducing incoming damage by 25%. While active, Meteor hits up to 4 "
+     "targets and applies Suppression. 4 second cooldown.", [
         ("0", {"Name": "OnRequest"}),
         ("1", {"Name": "Cooldown", "CD": 4000}),
         ("2", {"Name": "PlayerAnimation", "Animation": "Cast2"}),
@@ -844,9 +877,10 @@ _PALADIN_SKILLS = [
         ("7", {"Name": "Resource", "Amount": 0}),
         ("8", {"Name": "UpdateAnimation", "Value": "2H_Fight"}),
     ]),
-    (4, 90372, "Paladin's Smite", "Dragonslayer/downstrike",
-     "Smite your opponent with Holy Wrath. Consumes all stacks of Conviction to deal 5% Bonus "
-     "Magical Damage per stack, up to 250%, and heals your party for 30% of the damage dealt.", [
+    (4, 90372, "Warrior Aspect", "Rogue/viper",
+     "Assume the Warrior Aspect and smite your opponent. Consumes all stacks of Conviction to "
+     "deal 5% bonus Magical Damage per stack and heals your party for 30% of damage dealt. "
+     "While active, Meteor hits 1 target for 50% increased damage and leaves a burning field.", [
         ("0", {"Name": "OnRequest"}),
         ("1", {"Name": "Cooldown", "CD": 6000}),
         ("2", {"Name": "PlayerAnimation", "Animation": "Attack3"}),
@@ -1351,9 +1385,11 @@ def run():
     db.init()
     with db.connect() as conn:
         # Catalog from versioned data/ files (exported from the live DB). Items first so
+        hairs = seed_hairs(conn)
         # shop_items/links resolve.
         items = seed_items(conn)
         shops, links = seed_shops(conn)
+        dev_shop = fill_dev_shop.fill(conn)
         mons = montemplates.seed_db(conn)
         maps = seed_maps(conn)
         quests = seed_quests(conn)
@@ -1371,7 +1407,7 @@ def run():
         gdrops = seed_global_drops(conn)
         qrefs = seed_quest_objective_refs(conn)
         conn.commit()
-    print(f"[seed] items={items} shops={shops} shop_items={links} monsters={mons} maps={maps} "
+    print(f"[seed] items={items} hairs={hairs} shops={shops} shop_items={links} dev_shop_items={dev_shop} monsters={mons} maps={maps} "
           f"quests={quests} apops={apops} classes={cls} skills={sk} skill_graphs={graphs} "
           f"monster_skills_linked={mon_skills} paladin_skills={pala} void_skills={void} "
           f"class_items_granted={class_grants} cutscenes={cutscenes} defaultclasses={dclasses} "

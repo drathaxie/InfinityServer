@@ -50,3 +50,11 @@ dist/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# AQW Wiki item matcher cache/reports
+capture/harvest/aqw_wiki_pages/
+capture/harvest/aqw_wiki_items.jsonl
+capture/harvest/aqw_wiki_item_matches*.jsonl
+
+capture/harvest/*.out.log
+capture/harvest/*.err.log

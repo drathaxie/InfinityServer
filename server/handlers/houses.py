@@ -2,6 +2,7 @@
 (First-house auto-equip on buy lives in economy.buy_sell; the deed equip route
 lives in items.equip — the client sends plain buyItem/equipItem for those.)"""
 import game
+import guilds
 import maps
 
 from .registry import register
@@ -13,9 +14,23 @@ async def house_save(session, writer, cmd, params, msg):
     # persist a house layout (the save action works)
     if session.char is None:
         return
+    frame = params[1] if len(params) > 1 else ""
+    data = params[2] if len(params) > 2 else "[]"
+    # Inside a guild hall the client still sends `housesave` (keyed on the synthetic hall deed id),
+    # so route by session state, not the id: only the guild's LEADER may decorate the hall.
+    gid = session.guildhall_gid
+    if gid:
+        leader = guilds.leader_row(session.conn, gid)
+        if leader is None or leader["id"] != session.char["id"]:
+            await send_obj(writer, {"Cmd": "houseSave", "success": False,
+                                    "reason": "Only the guild leader can decorate the hall."})
+            return
+        ok = guilds.save_hall_layout(session.conn, gid, frame, data)
+        await send_obj(writer, {"Cmd": "houseSave", "success": bool(ok)})
+        print(f"  [s2c] houseSave (guild hall #{gid}, frame {frame or '*'})")
+        return
     await send_obj(writer, game.house_save(
-        session.conn, session.char, params[0] if params else "0",
-        params[1] if len(params) > 1 else "", params[2] if len(params) > 2 else "[]"))
+        session.conn, session.char, params[0] if params else "0", frame, data))
     print(f"  [s2c] houseSave (map {params[0] if params else '?'})")
     return
 

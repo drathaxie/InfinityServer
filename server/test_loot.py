@@ -37,8 +37,9 @@ def main():
     wire = loot.add_pending(uid, items)
     assert len(wire) == 3 and all(w["LootID"] >= 2_700_000 for w in wire), "drops get unique LootIDs"
     assert all("ID" in w and w["Quantity"] >= 1 for w in wire), "drops carry catalog ID + Quantity"
-    rp = loot.reward_packet(1553, gold_val=17, exp_val=170, exp_total=1104, items_wire=wire)
+    rp = loot.reward_packet(1553, 42, gold_val=17, exp_val=170, exp_total=1104, items_wire=wire)
     assert rp["Cmd"] == "rewardPlayer" and rp["Gold"]["val"] == 17 and rp["Exp"]["val"] == 170
+    assert rp["monID"] == 1553 and rp["monMapID"] == 42
     assert rp["showDropWindow"] is True and rp["items"] == wire and rp["autoDiscarded"] == []
     assert len(loot.pending(uid)) == 3, "all three are pending until kept/discarded"
     print(f"reward OK: rewardPlayer carries {len(wire)} pending drops (LootIDs assigned)")

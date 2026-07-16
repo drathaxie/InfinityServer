@@ -38,6 +38,7 @@ class Session:
         self.member = None             # world.Member once logged in
         self.last_target = None        # last m:<MonMapID> the client acted on (dev attach)
         self.equipped_class = forge.EQUIPPED_CLASS_ID   # whose skills are live (sEAct/combat)
+        self.guildhall_gid = None      # guild id if currently inside a guild hall (routes housesave)
 
     def close(self):
         try:
@@ -135,7 +136,7 @@ def _refresh_pattern_stats(session, as_statupdate=False):
     return game.combat_sta(session.char, bonus)
 
 
-def load_shop(conn, params):
+def load_shop(conn, params, is_staff=False):
     """Serve the requested shop live from the DB catalog (the authoritative store).
 
     A shop we don't have yet returns an honest *empty* shop for that id — never a
@@ -146,12 +147,16 @@ def load_shop(conn, params):
     shop_id = None
     if params:
         try:
-            shop_id = int(params[-1])
-        except ValueError:
+            # RequestLoadShop carries the shop id first. Some client builds include a
+            # trailing mode/placeholder param (observed as [shopID, 0]); do not treat
+            # that suffix as the requested shop.
+            shop_id = int(params[0])
+        except (ValueError, TypeError):
             shop_id = None
     if shop_id is None:
         return None
-    resp = game.load_shop(conn, shop_id)
+    item_filter = params[1] if len(params) > 1 else 0
+    resp = game.load_shop(conn, shop_id, item_filter)
     if resp is not None:
         return resp
     return {"Cmd": "loadShop",
@@ -189,6 +194,7 @@ async def _enter_area(session, writer, base, room, house_data=None):
     firstJoin/tfer (client-initiated) and /goto + summon-accept (server-initiated).
     `house_data` (mapHouseData dict) makes the join a HOUSE: Area.isHouse keys on it."""
     area_name = f"{base}-{room}"
+    session.guildhall_gid = None       # any area entry leaves a guild hall; the /guildhall handler re-sets it
     area = (maps.area_payload(base, session.conn)
             or maps.area_payload("infinityportal", session.conn))
     area["areaName"] = area_name               # tell the client which room it's in
@@ -255,8 +261,14 @@ async def _handle_kills(session, writer, killed):
         cat_id, _ = combat.monster_identity(session.area, target)
         drops = loot.roll_drops(session.conn, cat_id)
         items_wire += loot.add_pending(session.member.uid, drops)
-    mon_id = unique[0].split(":", 1)[1] if ":" in unique[0] else 0
-    await send_obj(writer, loot.reward_packet(mon_id, gold_gain, exp_gain, new_exp, items_wire))
+    first_target = unique[0]
+    mon_id, _ = combat.monster_identity(session.area, first_target)
+    try:
+        mon_map_id = int(first_target.split(":", 1)[1])
+    except (ValueError, IndexError):
+        mon_map_id = 0
+    await send_obj(writer, loot.reward_packet(
+        mon_id, mon_map_id, gold_gain, exp_gain, new_exp, items_wire))
     # carry the player's CURRENT HP so the post-kill stat refresh doesn't heal them to
     # full (P0-3) — killing a monster must not restore the player's HP bar. Fold the equipped
     # gems so MaxHP/stats stay consistent with login (keystone).

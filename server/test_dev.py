@@ -34,6 +34,17 @@ def main():
     # access surfaces in initPlayer so the client enables the dev UI
     init = game.build_init_player(conn, staff)
     assert init["user"]["intAccessLevel"] == game.DEV_ACCESS_LEVEL, "initPlayer carries dev access"
+    # membership is persisted per character and emitted everywhere the client checks IsMember.
+    days, expires = game.set_membership(conn, staff["id"], 30)
+    conn.commit()
+    staff = conn.execute("SELECT * FROM characters WHERE id=?", (staff["id"],)).fetchone()
+    init = game.build_init_player(conn, staff)
+    assert init["user"]["iUpgDays"] == days, "world user carries membership days"
+    assert init["playerInfo"]["UpgradeDays"] == days, "playerInfo carries membership days"
+    assert init["playerInfo"]["upgradeExpires"] == expires, "playerInfo carries membership expiry"
+    account = game.build_account(conn, staff, "__staff__", "tok")
+    assert account["iUpg"] == 1 and account["iUpgDays"] == days, "login account carries membership"
+    assert account["chars"][0]["iUpgDays"] == days, "char select carries membership"
 
     # Dialogger editor: Save (new) -> returns an id; Load(id) -> the same JSON back
     import urllib.parse
@@ -64,6 +75,13 @@ def main():
     bludrut = game.load_dialog(conn, 28)
     assert bludrut, "captured cutscene 28 is seeded and playable via getDialog"
     assert _json.loads(bludrut).get("cutsceneName") == "Bludrut Title Splash", "real captured cutscene"
+
+    # In-client asset browser: index actual Dialogger Load commands, filter backgrounds, and rank
+    # token matches. This must work even when the harvested asset_bundles tables are empty.
+    backgrounds = webapi.cutscene_assets(conn, {"q": ["bludrut"], "kind": ["background"]})
+    assert backgrounds and all(asset["background"] for asset in backgrounds), "background search returns filtered art"
+    assert any("bludrut" in asset["name"].lower() for asset in backgrounds), "background search ranks name matches"
+    assert webapi.cutscene_npcs(conn, {"q": ["grav"]}), "NPC browser route searches the local monster catalog"
 
     # asset-bundle resolver: the client does IDs.Select(id => cache[id]); if we omit ANY requested
     # id it throws and the cutscene HANGS on "Loading Cutscene Assets...". So GetAssetBundlesByIDs

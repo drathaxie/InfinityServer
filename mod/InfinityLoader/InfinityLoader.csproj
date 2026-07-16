@@ -31,6 +31,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Assets\StatuePedestal.png" LogicalName="InfinityLoader.StatuePedestal.png" />
+
     <Reference Include="Assembly-CSharp">
       <HintPath>$(AqwiManaged)\Assembly-CSharp.dll</HintPath>
       <Private>False</Private>
@@ -56,14 +58,39 @@
       <HintPath>$(AqwiManaged)\UnityEngine.AssetBundleModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <!-- Animator/runtimeAnimatorController inspection for the NPC baker runtime capture. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AudioModule">
+      <!-- AudioClip/MixerTrack.Clip inspection for the cutscene editor's sfx cue picker. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.AudioModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <!-- Texture2D.LoadImage(byte[]) to build custom portrait-frame sprites from PNGs. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="Unity.TextMeshPro">
       <!-- TMP_SpriteAsset / TMP_Settings / TMP_Text for chat emoji. -->
       <HintPath>$(AqwiManaged)\Unity.TextMeshPro.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <!-- Canvas/RenderMode for the NPC baker click blocker overlay. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.UIModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.UI">
       <!-- TMP_Text : MaskableGraphic (UnityEngine.UI) — needed to touch UIChat.textField. -->
       <HintPath>$(AqwiManaged)\UnityEngine.UI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.Physics2DModule">
+      <!-- Collider2D cleanup for NPC baker preview/capture objects. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.Physics2DModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
@@ -74,6 +101,11 @@
     <Reference Include="UnityEngine.InputLegacyModule">
       <!-- Input.GetKeyDown for the editor's toggle hotkey (the game uses legacy Input, e.g. Dialogger_Manager.Update). -->
       <HintPath>$(AqwiManaged)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <!-- TextAnchor / FontStyle for the editor's GUIStyle theming (CutsceneEditor.cs). -->
+      <HintPath>$(AqwiManaged)\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
   </ItemGroup>

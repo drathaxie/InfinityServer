@@ -727,19 +727,70 @@ def main():
     assert 2.3 < hi / lo < 2.7, f"Vow @50 stacks must ~2.5x its base ({lo:.0f}->{hi:.0f})"
     print(f"vow scaling OK: {lo:.0f} dmg @0 stacks -> {hi:.0f} @50 ({hi/lo:.2f}x)")
 
-    # Protection: the heal scales with stacks (sp 100 * mult 2.0 * 2.5 @50 stacks, ±15% roll)
+    # InfinityHero Meteor (slot 3): the support/offense buttons select its Healer/Warrior
+    # branch. Healer hits at most four room enemies and applies Suppression to each; Warrior
+    # hits only the clicked target at +50% and attaches the five-second burning-field DoT.
     combat.set_power(puid, {"ap": 30, "sp": 100, "tcr": 0.0, "scm": 1.5, "tha": 1.0})
-    h_data = [{"0": {"Name": "OnRequest"}},
-              {"1": {"Name": "Damage", "Heal": True, "Multiplier": 2.0, "MaxTargets": 6}}]
-    h_forge = [{}, {"0": {"Next": {"id": "1"}}}]
-    combat._rp[puid] = 50
-    combat._php[puid] = 1
-    atk, _, _ = combat.cast_skill("pal", puid, 2, None, h_data, h_forge, 90370)
-    hn = next(n for n in atk["Nodes"] if n["Name"] == "Damage")
-    amt = -hn["Damages"][0]
-    assert 425 <= amt <= 575, f"Protection @50 stacks should heal ~500 (sp100*2*2.5), got {amt}"
-    print(f"protection OK: heal {amt} scaled 2.5x by 50 stacks")
+    for mid in range(72, 77):
+        combat.register_monster("pal", f"m:{mid}", 10 ** 7)
+    combat._mon[("pal", "m:70")] = 10 ** 7
+    meteor_data = [{"0": {"Name": "OnRequest"}},
+                   {"1": {"Name": "Cooldown", "CD": 4000},
+                    "2": {"Name": "AllEnemies"},
+                    "3": {"Name": "Damage", "DamageType": "Magical", "Multiplier": 1.0,
+                          "MaxTargets": 4, "Targets": {"id": "2"}}}]
+    meteor_forge = [{}, {"0": {"Next": {"id": "1", "Next": {"id": "2",
+                    "Next": {"id": "3"}}}}}]
 
+    selector_data = [{"0": {"Name": "OnRequest"}}, {"1": {"Name": "Cooldown", "CD": 4000}}]
+    selector_forge = [{}, {"0": {"Next": {"id": "1"}}}]
+    combat.cast_skill("pal", puid, 3, None, selector_data, selector_forge, 90371)
+    assert combat.active_aspect(puid) == "healer", "slot 4 selects Healer Aspect"
+    combat._rp[puid] = 20
+    atk, _, _ = combat.cast_skill("pal", puid, 2, "m:70",
+                                  meteor_data, meteor_forge, combat.INFINITY_METEOR_SKILL_ID)
+    hn = next(n for n in atk["Nodes"] if n["Name"] == "Damage")
+    ha = next(n for n in atk["Nodes"] if n.get("AuraName") == "Suppression")
+    assert len(hn["Targets"]) == 4 and ha["Targets"] == hn["Targets"], \
+        "Healer Meteor hits and suppresses exactly four targets"
+    assert all(combat.is_dmg_debuffed("pal", ts) for ts in hn["Targets"])
+    assert next(n for n in atk["Nodes"] if n["Name"] == "Cooldown")["CD"] == 4000
+    assert combat._rp[puid] == 20, "Meteor neither gains nor consumes Conviction"
+
+    combat.cast_skill("pal", puid, 4, "m:76", selector_data, selector_forge, 90372)
+    assert combat.active_aspect(puid) == "warrior", "slot 5 selects Warrior Aspect"
+    wp = combat._meteor_damage_props(puid, meteor_data[1]["3"])
+    assert wp["Multiplier"] == 1.5 and wp["MaxTargets"] == 1 and "Targets" not in wp
+    combat._rp[puid] = 20
+    atk, _, _ = combat.cast_skill("pal", puid, 2, "m:76",
+                                  meteor_data, meteor_forge, combat.INFINITY_METEOR_SKILL_ID)
+    wn = next(n for n in atk["Nodes"] if n["Name"] == "Damage")
+    wa = next(n for n in atk["Nodes"] if n.get("AuraName") == "Burning Field")
+    assert wn["Targets"] == ["m:76"] and wa["Targets"] == ["m:76"]
+    burning = combat._auras[("pal", "m:76")]["Burning Field"]
+    assert 4.8 <= burning["ends"] - _t.time() <= 5.0, "burning field lasts five seconds"
+    burning["next"] = 0
+    ticks = combat.aura_ticks()
+    assert any(n.get("DamageTypes") == [combat.DT_DOT] and n.get("Targets") == ["m:76"]
+               for _, packet, _ in ticks for n in packet.get("Nodes", [])), \
+        "burning field deals an INT/WIS-scaled magical tick"
+    # The leaked giant-sword composite is a victim-side Particle, not a caster attachment.
+    visual_data = [{"0": {"Name": "OnRequest"}},
+                   {"1": {"Name": "PlayerAnimation", "Animation": "Attack1"},
+                    "2": {"Name": "Target"},
+                    "3": {"Name": "Particle", "Particle": "classInfinityHero_S1_P4",
+                          "Animation": "Attack1", "Time": 0, "X": 0, "Y": 0,
+                          "AnimSpeed": 0.8, "Lifetime": 6000, "Targets": {"id": "2"}}}]
+    visual_forge = [{}, {"0": {"Next": {"id": "1", "Next": {"id": "2",
+                    "Next": {"id": "3"}}}}}]
+    vatk, _, _ = combat.cast_skill("pal", puid, 2, "m:76",
+                                    visual_data, visual_forge, 999999)
+    vfx = next(n for n in vatk["Nodes"] if n["Name"] == "Particle")
+    assert vfx["Particle"] == "classInfinityHero_S1_P4"
+    assert vfx["Targets"] == ["m:76"], "giant sword must spawn over the victim"
+    assert vfx["Lifetime"] == 6000 and vfx["AnimSpeed"] == 0.8
+    print("meteor OK: 4s CD, Healer 4-target Suppression, Warrior +50% single-target + 5s DoT; "
+          "S1_P4 sword/lightning composite targets victim for full 6s sequence")
     # Guard: lands on the caster (not the monster), -25% incoming, outgoing bonus from stacks
     g_data = [{"0": {"Name": "OnRequest"}},
               {"1": {"Name": "Aura", "AuraName": "Paladin's Guard", "Duration": 6,
