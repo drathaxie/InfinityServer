@@ -16,6 +16,8 @@ def main():
     apop_id = conn.execute("SELECT apop_id FROM apops ORDER BY apop_id LIMIT 1").fetchone()["apop_id"]
     map_name = conn.execute("SELECT str_map_name FROM maps ORDER BY map_id LIMIT 1").fetchone()["str_map_name"]
     mon_id = conn.execute("SELECT mon_id FROM monsters ORDER BY mon_id LIMIT 1").fetchone()["mon_id"]
+    assert conn.execute("SELECT COUNT(*) FROM shop_items WHERE shop_id=2722").fetchone()[0] > 1000, \
+        "dev shop 2722 was not stocked"
 
     # edit catalog content in place, the way the in-game editors (CreateNewApop, NPC/pad editor,
     # map authoring) mutate the DB

@@ -53,6 +53,31 @@ DEFAULT_UPGRADE_EXPIRES = "2024-01-01T00:00:00"
 # only) — a neutral "activated" constant is safe and account-agnostic.
 DEFAULT_ACTIVATION_FLAG = 1
 
+
+def membership_days(char):
+    """Current client-visible membership days for a character row."""
+    try:
+        return max(0, int(char["upgrade_days"] or 0)) if "upgrade_days" in char.keys() else 0
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def membership_expires(char):
+    try:
+        exp = char["upgrade_expires"] if "upgrade_expires" in char.keys() else None
+    except AttributeError:
+        exp = None
+    return exp or DEFAULT_UPGRADE_EXPIRES
+
+
+def set_membership(conn, char_id, days):
+    days = max(0, int(days or 0))
+    expires = (time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() + days * 86400))
+               if days else DEFAULT_UPGRADE_EXPIRES)
+    conn.execute("UPDATE characters SET upgrade_days=?, upgrade_expires=? WHERE id=?",
+                 (days, expires, int(char_id)))
+    return days, expires
+
 # user-object display constants the client expects (rage bar + threshold colours). These are
 # fixed client-side presentation values, identical for every player — not account data.
 USER_RP_MAX = 100
@@ -377,12 +402,18 @@ def save_customization(conn, char, params):
             applied[col] = int(params[i]) & 0xFFFFFF      # colours are 24-bit RGB ints
         except (TypeError, ValueError):
             pass
-    # hair id is the value right after the six colours (index 6), if present
+    # New clients dereference hairBundle.Name without a null guard. Accept only a
+    # catalog hair for this gender and repair old invalid hair ids to the default.
+    requested_hair = None
     if len(params) > 6:
         try:
-            applied["hair_id"] = int(params[6])
+            requested_hair = int(params[6])
         except (TypeError, ValueError):
-            pass
+            requested_hair = None
+    if requested_hair is not None and _hair_info(conn, requested_hair, char["gender"]):
+        applied["hair_id"] = requested_hair
+    elif _hair_info(conn, char["hair_id"], char["gender"]) is None:
+        applied["hair_id"] = _default_hair_id(conn, char["gender"])
     if not applied:
         return {}
     sets = ", ".join(f"{col}=?" for col in applied)
@@ -1018,6 +1049,7 @@ def _house_item_wire(conn, ci):
         "sDesc": item.get("Description") or "",
         "bHouse": True,
         "bTemp": False,
+        "Meta": (ci["meta"] if "meta" in ci.keys() else "") or item.get("Meta") or "",
         "MobileCompatibility": 1,
     }
 
@@ -1491,6 +1523,89 @@ def load_hairshop(conn, shop_id):
     return {"Cmd": "loadHairShop", "HairShopID": shop_id, "hair": hair}
 
 
+# --- guild nameplate tag colours (a preset palette sold for gold/ACs) -------------------------
+# Each entry: hex swatch + price + currency. Priced cosmetics = a pure money sink (no power).
+# The base green matches the guild chat colour, and is FREE (every guild starts with it).
+DEFAULT_GUILD_TAG_COLOR = "#99FF00"
+GUILD_TAG_PALETTE = {
+    # name:        (hex,        cost,   coins?)   coins=True -> AdventureCoins, else gold
+    "green":       (DEFAULT_GUILD_TAG_COLOR, 0, False),   # free starter colour
+    "white":       ("#FFFFFF",   5000,  False),
+    "silver":      ("#C0C0C0",  15000,  False),
+    "gold":        ("#FFD700",  50000,  False),
+    "crimson":     ("#DC143C",     50,  True),
+    "royal":       ("#4169E1",     50,  True),
+    "violet":      ("#9400D3",     75,  True),
+    "cyan":        ("#00FFFF",     75,  True),
+    "pink":        ("#FF69B4",    100,  True),
+    "orange":      ("#FF8C00",    100,  True),
+    "rainbow":     ("#FF00AA",    250,  True),   # premium flat colour (animated version = later)
+}
+
+
+def guild_tag_color_hex(name):
+    """The hex swatch for a palette colour name (None if unknown)."""
+    entry = GUILD_TAG_PALETTE.get((name or "").lower())
+    return entry[0] if entry else None
+
+
+ANIMATED_TAG_COLORS = {"rainbow"}   # names the client animates instead of drawing a flat hex
+
+
+def effective_tag_name(conn, char):
+    """The palette NAME a character's guild tag resolves to: personal override > guild default >
+    base green. '' if guildless."""
+    if char is None or not (char["guild_id"] if "guild_id" in char.keys() else 0):
+        return ""
+    personal = (char["guild_tag_color"] if "guild_tag_color" in char.keys() else "") or ""
+    if personal in GUILD_TAG_PALETTE:
+        return personal
+    g = conn.execute("SELECT tag_color FROM guilds WHERE id=?", (char["guild_id"],)).fetchone()
+    gdef = (g["tag_color"] if g else "") or ""
+    return gdef if gdef in GUILD_TAG_PALETTE else "green"
+
+
+def resolve_guild_tag_color(conn, char):
+    """The wire colour for a character's guild tag: a hex string for flat colours, or the animated
+    keyword (e.g. 'rainbow') the mod cycles per-frame. '' if they have no guild."""
+    name = effective_tag_name(conn, char)
+    if not name:
+        return ""
+    if name in ANIMATED_TAG_COLORS:
+        return name                                   # marker; the mod animates it
+    return guild_tag_color_hex(name) or DEFAULT_GUILD_TAG_COLOR
+
+
+def guild_tag_shop(conn, char):
+    """The palette + this character's ownership/selection, for the client-side guild-panel colour
+    picker (initPlayer.tagShop). owned always includes the free 'green'."""
+    try:
+        owned = set(json.loads(char["owned_tag_colors"] or "[]"))
+    except (TypeError, ValueError, KeyError):
+        owned = set()
+    owned.add("green")
+    palette = [{"name": n, "hex": hexv, "cost": cost, "coins": bool(coins),
+                "animated": n in ANIMATED_TAG_COLORS}
+               for n, (hexv, cost, coins) in GUILD_TAG_PALETTE.items()]
+    gid = (char["guild_id"] if "guild_id" in char.keys() else 0)
+    gdef = ""
+    if gid:
+        g = conn.execute("SELECT tag_color FROM guilds WHERE id=?", (gid,)).fetchone()
+        gdef = (g["tag_color"] if g else "") or ""
+    return {"palette": palette, "owned": sorted(owned),
+            "selected": (char["guild_tag_color"] if "guild_tag_color" in char.keys() else "") or "",
+            "guildDefault": gdef}
+
+
+def guild_name_for(conn, char):
+    """The character's guild name for the overhead nameplate tag ('' if guildless)."""
+    gid = (char["guild_id"] if char is not None and "guild_id" in char.keys() else 0)
+    if not gid:
+        return ""
+    row = conn.execute("SELECT name FROM guilds WHERE id=?", (gid,)).fetchone()
+    return row["name"] if row else ""
+
+
 def build_init_player(conn, char):
     """initPlayer built FRESH from this character's DB state — identity, currencies, level, the
     full stat block, customization, the equipped rig, inventory and the class skill bar — with NO
@@ -1567,7 +1682,7 @@ def build_init_player(conn, char):
         "strGender": char["gender"],
         "intLevel": char["level"],
         "intAccessLevel": access,                     # >=50 unlocks the dev panel
-        "iUpgDays": 0,                                # membership: UpgradeDays>0 == member; 0 = free
+        "iUpgDays": membership_days(char),            # membership: UpgradeDays>0 == member
         "intState": 1,                                # alive
         "intRPMax": USER_RP_MAX,
         "intRPColor": USER_RP_COLOR,
@@ -1581,6 +1696,10 @@ def build_init_player(conn, char):
         "strFrame": "Enter",
         "strPad": "Spawn",
         "particleList": seact.get("particleList", []),
+        # Overhead guild tag (base client ignores these; the InfinityLoader mod reads them off the
+        # AreaAdd/uoBranch JSON and renders a coloured "«Guild»" line under the nameplate).
+        "guildName": guild_name_for(conn, char),
+        "guildTagColor": resolve_guild_tag_color(conn, char),
     }
 
     # playerInfo: THIS character's identity + neutral free-account defaults; never another
@@ -1615,9 +1734,9 @@ def build_init_player(conn, char):
         # placeholder keeps it private AND un-typeable in normal chat. [[chat-email-guard-gotcha]]
         "Email": f"player{char['id']}@infinityserver.local",
         "dateCreated": created_iso,                   # the account's real creation time (or default)
-        "upgradeExpires": DEFAULT_UPGRADE_EXPIRES,    # DateTime; membership is gated on UpgradeDays
-        "UpgradeDays": 0,
-        "iUpg": 0,                                    # membership flag — free account
+        "upgradeExpires": membership_expires(char),   # DateTime; membership is gated on UpgradeDays
+        "UpgradeDays": membership_days(char),
+        "iUpg": 1 if membership_days(char) > 0 else 0,  # membership flag
         "ActivationFlag": DEFAULT_ACTIVATION_FLAG,
         "Age": 0,
         "Buyer": False,
@@ -1645,6 +1764,7 @@ def build_init_player(conn, char):
         "houseItems": house_items(conn, char["id"]),  # owned houses + furniture (houseItem shape)
         "friends": friends.friend_list(conn, char["id"]),   # mutual persistent friends
         "Actions": seact,                             # the class skill bar (sEAct) the HUD shows
+        "tagShop": guild_tag_shop(conn, char),        # guild-tag colour palette + ownership (mod UI)
     }
 
 
@@ -1700,7 +1820,7 @@ def charselect_entry(conn, char):
         "intHPMax": maxhp,
         # --- preview-shell defaults (AE's CharSelect packet sends these as 0/null) ---
         "pvpTeam": 0,
-        "iUpgDays": 0,
+        "iUpgDays": membership_days(char),
         "isFounder": False,
         "intState": 0,
         "intRP": 0,
@@ -1737,13 +1857,13 @@ def build_account(conn, char, username, token):
     return {
         "userid": uid_for(char),
         "iAccess": access,
-        "iUpg": 0,
+        "iUpg": 1 if membership_days(char) > 0 else 0,
         "iAge": 0,
         "iLevel": char["level"],
         "mobileLevel": char["level"],
         "mobileGold": char["gold"],
         "mobileExp": char["exp"],
-        "iUpgDays": 0,
+        "iUpgDays": membership_days(char),
         "bCCOnly": 0,
         "intHours": 0,
         "iEmailStatus": 0,
@@ -1754,7 +1874,7 @@ def build_account(conn, char, username, token):
         "strEmail": f"player{char['id']}@infinityserver.local",
         "strCountryCode": "US",
         "unm": username,                          # the typed name the game-server Login echoes
-        "dUpgExp": DEFAULT_UPGRADE_EXPIRES,
+        "dUpgExp": membership_expires(char),
         "dCreated": created_iso,
         "hasAlphaAccess": True,
         "chars": [charselect_entry(conn, char)],
@@ -1897,15 +2017,21 @@ def shop_listing(conn, shop_item):
     return item
 
 
-def load_shop(conn, shop_id):
-    """Assemble a loadShop response from the normalized catalog (or None)."""
+def load_shop(conn, shop_id, item_filter=0):
+    """Assemble a loadShop response, honoring ApopButtonData's optional item-type filter."""
     blob = db.shop_blob(conn, shop_id)          # loadShop wrapper generated from columns
     if blob is None:
         return None
-    blob["shop"]["items"] = [
+    items = [
         shop_listing(conn, si) for si in conn.execute(
             "SELECT * FROM shop_items WHERE shop_id=? ORDER BY shop_item_id", (shop_id,))
     ]
+    try:
+        item_filter = int(item_filter or 0)
+    except (TypeError, ValueError):
+        item_filter = 0
+    blob["shop"]["items"] = [it for it in items if not item_filter
+                              or int(it.get("ItemType", 0) or 0) == item_filter]
     return blob
 
 

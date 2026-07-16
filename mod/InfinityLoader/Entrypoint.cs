@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -40,6 +41,8 @@ public static class InfinityLoaderMod
     private static string _loaderLog;        // ...\UserData\Beyond\infinity_loader.log
     private static MethodInfo _serialize;    // AEC.Serialize (private) for faithful c2s logging
     private static bool _npcLoaderPatched;
+    private const int CUSTOM_STATUE_ITEM_ID = 200002;
+    private static GameObject _customStatuePrefab;
 
     // Overhead guild tag: lowercase player name -> (guild name, colour hex). Fed from the
     // guildName/guildTagColor fields our server adds to every user object (initPlayer.user,
@@ -129,6 +132,24 @@ public static class InfinityLoaderMod
         TryPatch(h, "custom portrait frames",
             AccessTools.Method(typeof(NameplatePortraitFixerData), "FindByFrame"),
             postfix: nameof(FindByFrame_Postfix));
+        TryPatch(h, "private-server dynamic statues",
+            AccessTools.Method(typeof(DynamicStatue), "Start"),
+            prefix: nameof(DynamicStatue_Start_Prefix));
+        TryPatch(h, "private-server statue capture",
+            AccessTools.Method(typeof(ResponseGenerateStatue), "Execute"),
+            postfix: nameof(ResponseGenerateStatue_Execute_Postfix));
+        TryPatch(h, "private-server statue download",
+            AccessTools.Method(typeof(ApopButton), "ClickAction"),
+            prefix: nameof(ApopButton_ClickAction_Prefix));
+
+        TryPatch(h, "private-server custom statue prefab",
+            AccessTools.Method(typeof(HouseItemManager), "SpawnItem"),
+            prefix: nameof(HouseItemManager_SpawnItem_Prefix),
+            postfix: nameof(HouseItemManager_SpawnItem_Postfix));
+        TryPatch(h, "private-server custom statue inventory prefab",
+            AccessTools.Method(typeof(HouseItemManager), "LoadItemPrefab"),
+            prefix: nameof(HouseItemManager_LoadItemPrefab_Prefix));
+
 
         // 5c) Custom-frame layer fit-up: the shipped Image rects are sized for the vanilla art, so
         //     our fixed-perspective PNGs get stretched. For custom frames (id>4) we log each layer's
@@ -162,6 +183,20 @@ public static class InfinityLoaderMod
         TryPatch(h, "guild panel colour picker",
             AccessTools.Method(typeof(FriendListUI), "Refresh"),
             postfix: nameof(FriendList_Refresh_Postfix));
+
+        // 5g) Fill AE's dormant Character -> Achievements tab from server-owned bitfields.
+        TryPatch(h, "character achievements enable button",
+            AccessTools.Method(typeof(UICharacterCanvas), "Start"),
+            postfix: nameof(UICharacterCanvas_Start_Postfix));
+        TryPatch(h, "character achievements panel",
+            AccessTools.Method(typeof(UICharacterCanvas), "Tab_ShowAchievments"),
+            postfix: nameof(UICharacterCanvas_Achievements_Postfix));
+        TryPatch(h, "character achievements hide on overview",
+            AccessTools.Method(typeof(UICharacterCanvas), "Tab_ShowOverview"),
+            prefix: nameof(UICharacterCanvas_OtherTab_Prefix));
+        TryPatch(h, "character achievements hide on reputation",
+            AccessTools.Method(typeof(UICharacterCanvas), "Tab_ShowReputation"),
+            prefix: nameof(UICharacterCanvas_OtherTab_Prefix));
 
         // 6) In-client cutscene editor (Phase 1): drives the shipped Dialogger_Manager to render
         //    saved cutscenes under our control. IMGUI panel, F8 to toggle.
@@ -223,6 +258,7 @@ public static class InfinityLoaderMod
     {
         try
         {
+            RevealLoadedHumanoidSlots(asset);
             if (asset != null && asset.transform.Find("CameraFocus") == null)
             {
                 var cf = new GameObject("CameraFocus");
@@ -245,33 +281,42 @@ public static class InfinityLoaderMod
             Traverse.Create(__instance).Field("avtGO").SetValue(character.getGameObject());
             bool fired = false;
 
-            character.AssetUpdated += delegate
-            {
-                try
-                {
-                    if (fired) return;
-                    fired = true;
-                    GameObject asset = character.getGameObject();
-                    if (asset == null) return;
-                    asset.transform.localScale = Vector3.one;
-                    if (string.IsNullOrEmpty(asset.name) || !asset.name.EndsWith("(Clone)", StringComparison.Ordinal))
-                        asset.name = (string.IsNullOrEmpty(mb.strMonName) ? ("NPC" + mb.ID) : mb.strMonName) + "(Clone)";
-                    EnsureCameraFocus(asset);
-                    StripNpcLoaderRuntimeComponents(asset);
-                    __instance.isDone = true;
-                    var loaded = Traverse.Create(__instance).Field("OnAssetLoaded").GetValue<Action<GameObject>>();
-                    loaded?.Invoke(asset);
-                    InfinityLoaderMod.SafeLog("[npc-loader] loaded humanoid npc " + mb.ID + " via world avatar path");
-                }
-                catch (Exception ex) { InfinityLoaderMod.SafeLog("[npc-loader] humanoid complete failed " + ex.Message); }
-            };
-
             character.createAvatar();
             var avt = character.GetAvatar();
             Traverse.Create(__instance).Field("avt").SetValue(avt);
             if (avt != null)
             {
                 avt.hideFlame = true;
+                avt.OnSetupComplete = (Action<GameObject>)Delegate.Combine(avt.OnSetupComplete, (Action<GameObject>)delegate(GameObject ready)
+                {
+                    try
+                    {
+                        if (fired) return;
+                        fired = true;
+                        GameObject asset = ready != null ? ready : character.getGameObject();
+                        var humanoid = avt as HumanoidAvatar;
+                        if (humanoid != null && humanoid.CC != null)
+                            asset = humanoid.CC.gameObject;
+                        if (asset == null) return;
+                        int revealed = RevealLoadedHumanoidSlots(asset);
+                        asset.transform.localScale = Vector3.one;
+                        if (string.IsNullOrEmpty(asset.name) || !asset.name.EndsWith("(Clone)", StringComparison.Ordinal))
+                            asset.name = (string.IsNullOrEmpty(mb.strMonName) ? ("NPC" + mb.ID) : mb.strMonName) + "(Clone)";
+                        EnsureCameraFocus(asset);
+                        StripNpcLoaderRuntimeComponents(asset);
+                        __instance.isDone = true;
+                        var loaded = Traverse.Create(__instance).Field("OnAssetLoaded").GetValue<Action<GameObject>>();
+                        loaded?.Invoke(asset);
+                        int activeRenderers = 0;
+                        foreach (var renderer in asset.GetComponentsInChildren<Renderer>(includeInactive: true))
+                            if (renderer != null && renderer.enabled && renderer.gameObject.activeInHierarchy)
+                                activeRenderers++;
+                        InfinityLoaderMod.SafeLog("[npc-loader] loaded humanoid npc " + mb.ID
+                            + " after avatar setup root=" + asset.name + " revealedSlots=" + revealed
+                            + " activeRenderers=" + activeRenderers);
+                    }
+                    catch (Exception ex) { InfinityLoaderMod.SafeLog("[npc-loader] humanoid complete failed " + ex.Message); }
+                });
                 avt.OnLoadError = (Action<string>)Delegate.Combine(avt.OnLoadError, (Action<string>)delegate(string error)
                 {
                     __instance.isDone = true;
@@ -291,6 +336,27 @@ public static class InfinityLoaderMod
         }
     }
 
+    public static int RevealLoadedHumanoidSlots(GameObject asset)
+    {
+        if (asset == null) return 0;
+        var cc = asset.GetComponentInChildren<CustomizableCharacter>(includeInactive: true);
+        if (cc == null) return 0;
+        try { cc.setActive(true); } catch { }
+        int revealed = 0;
+        foreach (var slot in cc.GetComponentsInChildren<CustomizableSlot>(includeInactive: true))
+        {
+            if (slot == null || slot.spriteRenderer == null || slot.spriteRenderer.sprite == null) continue;
+            Transform cursor = slot.transform;
+            while (cursor != null && cursor != cc.transform)
+            {
+                cursor.gameObject.SetActive(true);
+                cursor = cursor.parent;
+            }
+            slot.spriteRenderer.enabled = true;
+            revealed++;
+        }
+        return revealed;
+    }
     private static void EnsureCameraFocus(GameObject asset)
     {
         if (asset != null && asset.transform.Find("CameraFocus") == null)
@@ -330,6 +396,177 @@ public static class InfinityLoaderMod
     }
 
     public static void WebApiPostfix(ref string __result)
+    {
+        ApplyWebApiRedirect(ref __result);
+    }
+
+    // A successful private-server response starts the real assembled-avatar capture.
+    public static void ResponseGenerateStatue_Execute_Postfix(ResponseGenerateStatue __instance)
+    {
+        try
+        {
+            string api = ReadWebApiUrl();
+            if (__instance != null && __instance.Success && !string.IsNullOrEmpty(api))
+                InfinityStatueCapture.Begin(api);
+        }
+        catch (Exception ex) { SafeLog("[statue] capture start failed " + ex); }
+    }
+
+    // DynamicStatue hardcodes AE's CDN. Private-server character ids only exist
+    // APop links are normally static. Vinchi uses this private sentinel so the link can be
+    // resolved at click time with the current character id, then served as a PNG attachment.
+    public static bool ApopButton_ClickAction_Prefix(ApopButton __instance)
+    {
+        if (__instance == null || !string.Equals(__instance.url, "infinity://statue/download",
+                                                  StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        PlayerInfo info = Entity.myPlayerData == null ? null : Entity.myPlayerData.Info;
+        string api = ReadWebApiUrl();
+        if (info == null || info.CharID <= 0 || string.IsNullOrEmpty(api))
+        {
+            SafeLog("[statue] download skipped: no authenticated player or private API");
+            return false;
+        }
+
+        string url = api + "statue/" + info.CharID + "/download.png";
+        SafeLog("[statue] opening download cid=" + info.CharID);
+        Application.OpenURL(url);
+        return false;
+    }
+
+    // in our DB, so load the cid render from our WebApiURL instead.
+    public static bool DynamicStatue_Start_Prefix(DynamicStatue __instance)
+    {
+        string api = ReadWebApiUrl();
+        if (string.IsNullOrEmpty(api) || __instance == null)
+            return true;                         // no Infinity marker: preserve live AE behavior
+        HouseItemInstance inst = __instance.GetComponent<HouseItemInstance>();
+        // Item 99514 is AE's existing Day 1 reward. Only our separately minted
+        // custom house item is redirected to the private statue renderer.
+        if (inst == null || inst.data == null || inst.data.ItemID != CUSTOM_STATUE_ITEM_ID)
+            return true;
+        string cid = ReadStatueMeta(inst == null ? null : inst.Meta, "cid");
+        if (string.IsNullOrEmpty(cid))
+            return true;
+        string rev = ReadStatueMeta(inst.Meta, "rev");
+        string url = api + "statue/" + cid + ".png"
+            + (string.IsNullOrEmpty(rev) ? "" : "?v=" + rev);
+        Texture2D texture = null;
+        Sprite sprite = null;
+        try
+        {
+            byte[] png;
+            using (var wc = new InfinityWebClient())
+                png = wc.DownloadData(url);
+            if (png == null || png.Length == 0)
+                return false;
+            texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            if (!texture.LoadImage(png, false))
+            {
+                UnityEngine.Object.Destroy(texture);
+                return false;
+            }
+            float nativeH = inst.CurrentSpriteNativeHeight;
+            Vector2 pivot = inst.CurrentSpritePivotNormalized;
+            float ppu = nativeH > 0.0001f ? texture.height / nativeH : 100f;
+            sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height),
+                                   pivot, ppu);
+            inst.ApplyLoadedSprite(sprite);
+            var lifetime = __instance.gameObject.AddComponent<InfinityStatueLifetime>();
+            lifetime.Texture = texture;
+            lifetime.Sprite = sprite;
+            SafeLog("[statue] loaded private snapshot cid=" + cid);
+        }
+        catch (Exception ex)
+        {
+            if (sprite != null) UnityEngine.Object.Destroy(sprite);
+            if (texture != null) UnityEngine.Object.Destroy(texture);
+            SafeLog("[statue] load failed " + url + ": " + ex.Message);
+        }
+        return false;                            // keep the prefab art on a local load failure
+    }
+
+    public static bool HouseItemManager_LoadItemPrefab_Prefix(houseItem item,
+                                                              Action<GameObject> callback,
+                                                              ref IEnumerator __result)
+    {
+        if (item == null || item.ItemID != CUSTOM_STATUE_ITEM_ID) return true;
+        item.MobileCompatibility = 1;
+        callback?.Invoke(GetCustomStatuePrefab());
+        __result = EmptyEnumerator();
+        return false;
+    }
+
+    private static IEnumerator EmptyEnumerator()
+    {
+        yield break;
+    }
+    public static void HouseItemManager_SpawnItem_Prefix(PlacedHouseItem phi,
+                                                          ref GameObject prefab)
+    {
+        if (phi == null || phi.ItemID != CUSTOM_STATUE_ITEM_ID) return;
+        prefab = GetCustomStatuePrefab();
+    }
+
+    public static void HouseItemManager_SpawnItem_Postfix(PlacedHouseItem phi,
+                                                           HouseItemInstance __result)
+    {
+        if (phi == null || phi.ItemID != CUSTOM_STATUE_ITEM_ID || __result == null) return;
+        // SpawnItem configures the clone first; activation starts DynamicStatue only
+        // after HouseItemInstance.Meta has been assigned by the original method.
+        __result.gameObject.hideFlags = HideFlags.None;
+        __result.gameObject.SetActive(true);
+    }
+
+    private static GameObject GetCustomStatuePrefab()
+    {
+        if (_customStatuePrefab != null) return _customStatuePrefab;
+
+        // This is the dedicated prefab shipped in the July client for generated
+        // character statues. It is unrelated to the Day 1 backer statue bundle.
+        var shipped = Resources.Load<GameObject>("testhouseitems/playerksstatue");
+        if (shipped != null)
+        {
+            _customStatuePrefab = shipped;
+            return shipped;
+        }
+
+        var go = new GameObject("InfinityCustomStatue_runtime");
+        go.hideFlags = HideFlags.HideAndDontSave;
+        var renderer = go.AddComponent<SpriteRenderer>();
+        var texture = new Texture2D(8, 12, TextureFormat.RGBA32, false);
+        var pixels = new Color32[8 * 12];
+        for (int i = 0; i < pixels.Length; i++)
+            pixels[i] = new Color32(145, 151, 160, 255);
+        texture.SetPixels32(pixels);
+        texture.Apply(false, true);
+        renderer.sprite = Sprite.Create(texture, new Rect(0, 0, 8, 12),
+                                        new Vector2(0.5f, 0f), 8f);
+        go.AddComponent<DynamicStatue>();
+        go.SetActive(false);
+        _customStatuePrefab = go;
+        return go;
+    }
+
+    private static string ReadStatueMeta(string meta, string wanted)
+    {
+        if (string.IsNullOrEmpty(meta)) return null;
+        foreach (string part in meta.Split(','))
+        {
+            int colon = part.IndexOf(':');
+            if (colon <= 0 || !string.Equals(part.Substring(0, colon).Trim(), wanted,
+                                             StringComparison.OrdinalIgnoreCase))
+                continue;
+            string value = part.Substring(colon + 1).Trim();
+            if (value.Length == 0) return null;
+            for (int i = 0; i < value.Length; i++)
+                if (value[i] < '0' || value[i] > '9') return null;
+            return value;
+        }
+        return null;
+    }
+    private static void ApplyWebApiRedirect(ref string __result)
     {
         string url = ReadWebApiUrl();
         if (!string.IsNullOrEmpty(url)) __result = url;
@@ -798,6 +1035,21 @@ public static class InfinityLoaderMod
         try { InfinityGuildColorPicker.OnRefreshed(__instance); } catch { }
     }
 
+    public static void UICharacterCanvas_Start_Postfix(UICharacterCanvas __instance)
+    {
+        InfinityAchievementsPanel.EnableButton(__instance);
+    }
+
+    public static void UICharacterCanvas_Achievements_Postfix(UICharacterCanvas __instance)
+    {
+        InfinityAchievementsPanel.Show(__instance);
+    }
+
+    public static void UICharacterCanvas_OtherTab_Prefix(UICharacterCanvas __instance)
+    {
+        InfinityAchievementsPanel.Hide(__instance);
+    }
+
     private static void WritePacket(string dir, string rawPkt)
     {
         if (string.IsNullOrEmpty(rawPkt)) return;
@@ -981,5 +1233,196 @@ public static class InfinityGuildColorPicker
     private static string Cap(string s)
     {
         return string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0]) + s.Substring(1);
+    }
+}
+
+/// <summary>Runtime contents for AE's shipped-but-empty Character -> Achievements tab.</summary>
+public static class InfinityAchievementsPanel
+{
+    private sealed class Entry
+    {
+        public readonly int bit;
+        public readonly string name;
+        public readonly string description;
+        public Entry(int bit, string name, string description)
+        {
+            this.bit = bit; this.name = name; this.description = description;
+        }
+    }
+
+    private static readonly Entry[] FounderAchievements =
+    {
+        new Entry(0, "Infinity: Day One", "Backed AdventureQuest Worlds: Infinity on its first day."),
+        new Entry(1, "Infinity: 100% Funded", "Helped the Infinity Kickstarter reach its funding goal."),
+        new Entry(2, "Infinity: Founder", "AdventureQuest Worlds: Infinity Founder."),
+        new Entry(3, "Infinity: Epic Founder", "AdventureQuest Worlds: Infinity Epic Founder."),
+        new Entry(4, "Infinity: Underworld Founder", "AdventureQuest Worlds: Infinity Underworld Founder."),
+        new Entry(5, "Infinity: Legendary Founder", "AdventureQuest Worlds: Infinity Legendary Founder."),
+        new Entry(6, "Infinity: Immortalized", "An Infinity founder immortalized in the world of Lore."),
+        new Entry(7, "Infinity: Benevolent", "Supported Infinity at the Benevolent Founder tier."),
+        new Entry(8, "Infinity: Weapon Designer", "Earned the Infinity Weapon Designer founder reward."),
+        new Entry(9, "Infinity: Armor Designer", "Earned the Infinity Armor Designer founder reward."),
+        new Entry(10, "Infinity: Mysterious Offer", "Accepted the Mysterious Stranger's Infinity offer.")
+    };
+
+    private const string PanelName = "InfinityAchievementsPanel";
+
+    public static void EnableButton(UICharacterCanvas canvas)
+    {
+        try
+        {
+            if (canvas == null) return;
+            Button found = null;
+            foreach (Button button in canvas.GetComponentsInChildren<Button>(true))
+            {
+                if (button == null || button.name.IndexOf("Achiev", StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+                found = button;
+                button.gameObject.SetActive(true);
+                button.interactable = true;
+                button.onClick.AddListener(canvas.Tab_ShowAchievments);
+                InfinityLoaderMod.SafeLog("[achievements] enabled button " + button.name);
+            }
+            if (found == null)
+                InfinityLoaderMod.SafeLog("[achievements] button not found under UICharacterCanvas");
+        }
+        catch (Exception ex) { InfinityLoaderMod.SafeLog("[achievements] enable failed: " + ex); }
+    }
+
+    public static void Show(UICharacterCanvas canvas)
+    {
+        try
+        {
+            if (canvas == null) return;
+            Transform old = canvas.transform.Find(PanelName);
+            if (old != null) UnityEngine.Object.Destroy(old.gameObject);
+
+            GameObject panel = MakeUI(PanelName, canvas.transform);
+            RectTransform panelRect = panel.GetComponent<RectTransform>();
+            panelRect.anchorMin = new Vector2(0.29f, 0.07f);
+            panelRect.anchorMax = new Vector2(0.985f, 0.91f);
+            panelRect.offsetMin = Vector2.zero;
+            panelRect.offsetMax = Vector2.zero;
+            Image panelImage = panel.AddComponent<Image>();
+            panelImage.color = new Color(0.025f, 0.045f, 0.085f, 0.86f);
+
+            GameObject header = MakeUI("Header", panel.transform);
+            RectTransform headerRect = header.GetComponent<RectTransform>();
+            headerRect.anchorMin = new Vector2(0f, 0.88f);
+            headerRect.anchorMax = Vector2.one;
+            headerRect.offsetMin = new Vector2(22f, 0f);
+            headerRect.offsetMax = new Vector2(-22f, -8f);
+            TMP_Text title = AddText(header, canvas, 27f, FontStyles.Bold);
+            title.text = "INFINITY FOUNDER COLLECTION";
+            title.alignment = TextAlignmentOptions.MidlineLeft;
+            title.color = new Color(0.96f, 0.76f, 0.34f);
+
+            bool ownCharacter = UICharacterCanvas.myPlayer == null
+                || UICharacterCanvas.myPlayer == Entity.mainPlayer;
+            int unlocked = 0;
+            if (ownCharacter && Entity.myPlayerData != null && Entity.myPlayerData.Info != null)
+                for (int i = 0; i < FounderAchievements.Length; i++)
+                    if (Entity.myPlayerData.Info.hasAchievement("ip25", FounderAchievements[i].bit)) unlocked++;
+            title.text += "  <size=60%><color=#C9D2E3>" + unlocked + "/"
+                + FounderAchievements.Length + "</color></size>";
+
+            GameObject content = MakeUI("Content", panel.transform);
+            RectTransform contentRect = content.GetComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0f, 0f);
+            contentRect.anchorMax = new Vector2(1f, 0.88f);
+            contentRect.offsetMin = new Vector2(20f, 18f);
+            contentRect.offsetMax = new Vector2(-20f, -6f);
+            GridLayoutGroup grid = content.AddComponent<GridLayoutGroup>();
+            grid.padding = new RectOffset(4, 4, 4, 4);
+            grid.spacing = new Vector2(12f, 11f);
+            grid.cellSize = new Vector2(610f, 88f);
+            grid.startCorner = GridLayoutGroup.Corner.UpperLeft;
+            grid.startAxis = GridLayoutGroup.Axis.Horizontal;
+            grid.childAlignment = TextAnchor.UpperCenter;
+            grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+            grid.constraintCount = 2;
+
+            if (!ownCharacter)
+            {
+                AddMessage(content.transform, canvas,
+                    "Another player's achievements are private.");
+            }
+            else
+            {
+                foreach (Entry entry in FounderAchievements)
+                {
+                    bool earned = Entity.myPlayerData != null && Entity.myPlayerData.Info != null
+                        && Entity.myPlayerData.Info.hasAchievement("ip25", entry.bit);
+                    AddAchievement(content.transform, canvas, entry, earned);
+                }
+            }
+            panel.transform.SetAsLastSibling();
+        }
+        catch (Exception ex) { InfinityLoaderMod.SafeLog("[achievements] panel failed: " + ex); }
+    }
+
+    public static void Hide(UICharacterCanvas canvas)
+    {
+        try
+        {
+            if (canvas == null) return;
+            Transform panel = canvas.transform.Find(PanelName);
+            if (panel != null) UnityEngine.Object.Destroy(panel.gameObject);
+        }
+        catch { }
+    }
+
+    private static void AddAchievement(Transform parent, UICharacterCanvas canvas, Entry entry, bool earned)
+    {
+        GameObject row = MakeUI("Achievement_ip25_" + entry.bit, parent);
+        LayoutElement size = row.AddComponent<LayoutElement>();
+        size.preferredHeight = 82f;
+        Image bg = row.AddComponent<Image>();
+        bg.color = earned ? new Color(0.18f, 0.115f, 0.045f, 0.96f)
+                          : new Color(0.07f, 0.08f, 0.11f, 0.94f);
+        GameObject label = MakeUI("Label", row.transform);
+        RectTransform labelRect = label.GetComponent<RectTransform>();
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = Vector2.zero;
+        labelRect.offsetMax = Vector2.zero;
+        TMP_Text text = AddText(label, canvas, 16f, FontStyles.Normal);
+        text.margin = new Vector4(16f, 7f, 14f, 5f);
+        text.alignment = TextAlignmentOptions.MidlineLeft;
+        text.textWrappingMode = TextWrappingModes.Normal;
+        text.text = (earned ? "<color=#F2C45F>UNLOCKED</color>  " : "<color=#747D8D>LOCKED</color>  ")
+            + "<b>" + entry.name + "</b>\n<size=74%><color=#CBD2DD>" + entry.description
+            + "</color></size>";
+    }
+
+    private static void AddMessage(Transform parent, UICharacterCanvas canvas, string message)
+    {
+        GameObject row = MakeUI("Message", parent);
+        row.AddComponent<LayoutElement>().preferredHeight = 90f;
+        TMP_Text text = AddText(row, canvas, 23f, FontStyles.Italic);
+        text.text = message;
+        text.color = new Color(0.75f, 0.79f, 0.86f);
+        text.alignment = TextAlignmentOptions.Center;
+    }
+
+    private static GameObject MakeUI(string name, Transform parent)
+    {
+        GameObject go = new GameObject(name, typeof(RectTransform));
+        go.transform.SetParent(parent, false);
+        return go;
+    }
+
+    private static TMP_Text AddText(GameObject go, UICharacterCanvas canvas, float size, FontStyles style)
+    {
+        TextMeshProUGUI text = go.AddComponent<TextMeshProUGUI>();
+        text.fontSize = size;
+        text.fontStyle = style;
+        text.color = Color.white;
+        text.raycastTarget = false;
+        if (canvas != null && canvas.text_playerName != null)
+        {
+            text.font = canvas.text_level != null ? canvas.text_level.font : canvas.text_playerName.font;
+        }
+        return text;
     }
 }

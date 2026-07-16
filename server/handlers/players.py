@@ -5,6 +5,7 @@ import time
 
 import db
 import game
+import statues
 import world
 import friends as friendsvc
 
@@ -77,8 +78,8 @@ async def gender_swap(session, writer, cmd, params, msg):
     return
 
 
-@register("generateStatue")
-async def generate_statue(session, writer, cmd, params, msg):
+# Kept as a reference for the pre-generation fallback; intentionally not registered.
+async def _generate_statue_unavailable_legacy(session, writer, cmd, params, msg):
     # Hall-of-heroes statue generation. We don't run the AE statue pipeline, so answer with a
     # clean, non-cooldown "unavailable" result rather than leaving the button spinning. RequestGenerateStatue
     if session.member is None:
@@ -87,6 +88,23 @@ async def generate_statue(session, writer, cmd, params, msg):
                             "Message": "Statue generation isn't available on this server yet.",
                             "CooldownRemainingMs": 0})
     return
+
+@register("generateStatue")
+async def generate_statue_live(session, writer, cmd, params, msg):
+    if session.member is None or session.char is None:
+        return
+    result, house_item = statues.generate(session.conn, session.char)
+    session.conn.commit()
+    # ResponseGenerateStatue owns the modal/pending state. Resolve it before an
+    # optional inventory refresh; sending buyItem first left the client in its
+    # generation overlay and was observed to race a disconnect.
+    await send_obj(writer, result)
+    if house_item is not None:
+        # Make the custom house item immediately visible without requiring a relog.
+        await send_obj(writer, {"Cmd": "buyItem", "Success": True, "Show": False,
+                                "IsDrop": False, "Cost": 0, "houseItem": house_item})
+    return
+
 
 
 # --- friends: request / accept / decline / delete ---
@@ -155,10 +173,10 @@ async def friend_delete(session, writer, cmd, params, msg):     # Params=[friend
 @register("upgradeSync")
 async def upgrade_sync(session, writer, cmd, params, msg):
     # Client asks to resync membership/coins (e.g. after a store return). Echo the character's
-    # current values — we're a free server, so UpgradeDays stays 0. RequestUpgradeSync
+    # current character values. RequestUpgradeSync
     if session.char is None:
         return
     await send_obj(writer, {"Cmd": "upgradeSync", "Coins": session.char["coins"],
-                            "UpgradeDays": 0,
-                            "UpgradeExpires": game.DEFAULT_UPGRADE_EXPIRES})
+                            "UpgradeDays": game.membership_days(session.char),
+                            "UpgradeExpires": game.membership_expires(session.char)})
     return

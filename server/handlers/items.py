@@ -180,12 +180,11 @@ async def change_color(session, writer, cmd, params, msg):
               "SkinColor": char["skin_color"], "HairColor": char["hair_color"],
               "EyeColor": char["eye_color"], "BaseColor": base_color,
               "TrimColor": char["trim_color"], "AccessoryColor": char["accessory_color"],
-              "HairID": char["hair_id"]}
+              "hairID": char["hair_id"]}
         # include the chosen hair's bundle so the client swaps the hairSTYLE live (matches AE,
         # which sends HairBundle in changeColor) — not just the hair colour.
         _hi = game._hair_info(session.conn, char["hair_id"], char["gender"])
-        if _hi is not None:
-            pk["HairBundle"] = _hi.get("Bundle")
+        pk["hairBundle"] = _hi.get("Bundle")
         world.broadcast(session.area, pk)
         # keep the render object current so late-joiners (AreaAdd/uoBranch) see the new look.
         cust = session.member.user_obj.setdefault("customization", {})

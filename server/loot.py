@@ -88,12 +88,13 @@ def add_pending(uid, items):
     return wire
 
 
-def reward_packet(monID, gold_val, exp_val, exp_total, items_wire, cp_val=0):
+def reward_packet(monID, monMapID, gold_val, exp_val, exp_total, items_wire, cp_val=0):
     """The s2c rewardPlayer that replaces addGoldXP: currency + the pending drops. CP is sent as
     0 for now — kills-grant-CP (class-point progression) is a separate flagged finding."""
     return {"Cmd": "rewardPlayer",
             "CP": {"val": cp_val}, "Exp": {"val": exp_val}, "ExpTotal": int(exp_total),
-            "typ": "m", "monID": str(monID or 0), "factionID": -1,
+            "typ": "m", "monID": int(monID or 0), "monMapID": int(monMapID or 0),
+            "factionID": -1,
             "Gold": {"val": gold_val}, "items": items_wire,
             "autoDiscarded": [], "showDropWindow": bool(items_wire), "showGold": True}
 

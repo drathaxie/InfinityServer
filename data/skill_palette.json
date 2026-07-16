@@ -65,7 +65,24 @@
    {"Name": "Sound", "NameOverride": "Sound", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Sound effect id to play.", "AllowNulls": false}
   ],
   "Particle": [
-   {"Name": "Particle", "NameOverride": "Particle", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Particle effect id to spawn.", "AllowNulls": false}
+   {"Name": "Particle", "NameOverride": "Particle", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Particle effect id to spawn.", "AllowNulls": false},
+   {"Name": "Animation", "NameOverride": "On Animation", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Caster animation cue that spawns this effect.", "AllowNulls": true, "NullDisplay": "immediate"},
+   {"Name": "Time", "NameOverride": "Cue Time (s)", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Seconds into the animation cue.", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "X", "NameOverride": "X", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Horizontal effect offset.", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "Y", "NameOverride": "Y", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Vertical effect offset.", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "AnimSpeed", "NameOverride": "VFX Speed", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Animator and particle simulation speed.", "AllowNulls": true, "NullDisplay": "1"},
+   {"Name": "Lifetime", "NameOverride": "Lifetime (ms)", "ComponentType": 1, "ReturnType": 1, "Tooltip": "How long the spawned effect remains alive.", "AllowNulls": true, "NullDisplay": "3000"},
+   {"Name": "Targets", "NameOverride": "Spawn On", "ComponentType": 3, "ReturnType": 0, "Tooltip": "Optional target helper. Blank spawns on the caster."}
+  ],
+  "SpellAnimation": [
+   {"Name": "FX", "NameOverride": "Mode", "ComponentType": 0, "ReturnType": 0, "Options": ["ORIGIN", "WRAPPER", "PROJECTILE", "HOMING", "METEOR"], "Tooltip": "Client spell movement mode.", "AllowNulls": false},
+   {"Name": "Animation", "NameOverride": "Cast Animation", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Caster animation whose cast event launches the spell.", "AllowNulls": false},
+   {"Name": "SpellGraphic", "NameOverride": "Spell Graphic", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Class-bundle projectile or wrapper prefab.", "AllowNulls": false},
+   {"Name": "SpellImpact", "NameOverride": "Impact Graphic", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Optional class-bundle impact prefab.", "AllowNulls": true, "NullDisplay": ""},
+   {"Name": "X", "NameOverride": "X Offset", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Horizontal launch offset.", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "Y", "NameOverride": "Y Offset", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Meteor height or projectile vertical offset.", "AllowNulls": true, "NullDisplay": "0"},
+   {"Name": "Ease", "NameOverride": "Ease", "ComponentType": 1, "ReturnType": 0, "Tooltip": "Optional iTween ease name.", "AllowNulls": true, "NullDisplay": "linear"},
+   {"Name": "ProjSpeed", "NameOverride": "Projectile Speed", "ComponentType": 1, "ReturnType": 1, "Tooltip": "Travel speed; blank uses the client default.", "AllowNulls": true, "NullDisplay": "default"}
   ],
   "Interruptable": [
    {"Name": "Value", "NameOverride": "Interruptable", "ComponentType": 0, "ReturnType": 3, "Tooltip": "Whether the skill can be interrupted while casting.", "AllowNulls": false}

@@ -179,6 +179,7 @@ def alive_monsters(area):
 
 HEAL_MAX_TARGETS = 4        # Healing Word: caster + up to 3 nearby allies (tooltip)
 PALADIN_MAX_TARGETS = 6     # Protection/Guard/lifelink: caster + up to 5 allies (tooltip)
+METEOR_MAX_TARGETS = 4      # InfinityHero Meteor tooltip: up to 4 targets
 
 
 def _ally_targets(caster, allies):
@@ -258,6 +259,15 @@ def _render_node(area, slot, caster, default_targets, nodes, props,
         # target — must NOT send TargetHPs:[0] for a player, which the client reads as
         # "set HP to 0" and kills them. Heals are the explicit Heal branch above.)
         mtgts = [t for t in tgts if isinstance(t, str) and t.startswith("m:")]
+        # Authored AoE skills can cap their server-resolved target set. Without this, an
+        # AllEnemies helper hits the entire room even when the tooltip promises a smaller cap
+        # (InfinityHero's Meteor is explicitly limited to four targets).
+        try:
+            cap = int(props.get("MaxTargets")) if props.get("MaxTargets") is not None else None
+        except (TypeError, ValueError):
+            cap = None
+        if cap is not None:
+            mtgts = mtgts[:max(0, cap)]
         if not mtgts:
             return (None, 0, killed)                             # nothing to damage -> skip node
         damages, hps, dtypes, dmg = [], [], [], 0
@@ -301,10 +311,35 @@ def _render_node(area, slot, caster, default_targets, nodes, props,
                  "Sound": props.get("Sound") or "", "Time": float(props.get("Time") or 0),
                  "MinPitch": 0.0, "MaxPitch": 0.0}, 0, killed)
     if name == "Particle":
-        return ({"Name": "Particle", "Follow": props.get("Follow") or "No Follow",
+        # Most legacy graphs author caster-attached particles without a Targets helper.
+        # Newer effects can wire Target/AllEnemies explicitly (the InfinityHero sword
+        # composite must be instantiated over the victim, not over the caster).
+        tgts = ([caster] if not props.get("Targets") else
+                _resolve_targets(props, nodes, caster, default_targets, area, allies))
+        node = {"Name": "Particle", "Follow": props.get("Follow") or "No Follow",
+                "X": float(props.get("X") or 0), "Y": float(props.get("Y") or 0),
+                "Particle": props.get("Particle") or "", "Animation": props.get("Animation") or "",
+                "Time": str(props.get("Time") or "0"), "Targets": tgts}
+        if props.get("AnimSpeed") is not None:
+            node["AnimSpeed"] = float(props["AnimSpeed"])
+        if props.get("Lifetime") is not None:
+            node["Lifetime"] = float(props["Lifetime"])
+        return (node, 0, killed)
+    if name == "SpellAnimation":
+        target = default_targets[0] if default_targets else caster
+        return ({"Name": "SpellAnimation", "FX": props.get("FX") or "ORIGIN",
+                 "Animation": props.get("Animation") or "",
+                 "SpellGraphic": props.get("SpellGraphic") or "",
+                 "SpellImpact": props.get("SpellImpact") or "",
+                 "AttachInit": props.get("AttachInit") or "CastAttach",
+                 "Attach": props.get("Attach") or "Cast",
+                 "AttachImpact": props.get("AttachImpact") or "Origin",
+                 "Follow": bool(props.get("Follow")),
                  "X": float(props.get("X") or 0), "Y": float(props.get("Y") or 0),
-                 "Particle": props.get("Particle") or "", "Animation": props.get("Animation") or "",
-                 "Time": str(props.get("Time") or "0"), "Targets": [caster]}, 0, killed)
+                 "Ease": props.get("Ease"), "ProjSpeed": float(props.get("ProjSpeed") or 0),
+                 "target": target}, 0, killed)
+    if name == "AnimationCancel":
+        return ({"Name": "AnimationCancel"}, 0, killed)
     if name == "Aura":
         if (AURA_FX.get(props.get("AuraName")) or {}).get("kind") == "guard":
             # a friendly party buff lands on the caster + allies, never the cast target
@@ -355,22 +390,82 @@ def _render_node(area, slot, caster, default_targets, nodes, props,
     return None, 0, killed                      # unknown -> skip
 
 
+INFINITY_METEOR_SKILL_ID = 90370
+INFINITY_ASPECT_SKILLS = {90371: "healer", 90372: "warrior"}
+_active_aspect = {}            # uid -> "warrior" | "healer"; Warrior is the default
+
+
+def active_aspect(uid):
+    """The InfinityHero aspect used by the caster's next aspect-sensitive skill."""
+    return _active_aspect.get(uid, "warrior")
+
+
+def set_active_aspect(uid, aspect):
+    """Select an InfinityHero aspect. Exposed for class-switch/setup code and focused tests."""
+    if aspect not in ("warrior", "healer"):
+        raise ValueError("aspect must be 'warrior' or 'healer'")
+    _active_aspect[uid] = aspect
+
+
+def _meteor_damage_props(uid, props):
+    """Apply Meteor's active-Aspect branch to one authored Damage node."""
+    out = dict(props)
+    if active_aspect(uid) == "warrior":
+        # Warrior: clicked target only, with the tooltip's 50% increased damage.
+        out.pop("Targets", None)
+        out["MaxTargets"] = 1
+        out["Multiplier"] = float(out.get("Multiplier") or 1.0) * 1.5
+    else:
+        # Healer: retain the graph's AllEnemies helper, but never exceed four targets.
+        out["MaxTargets"] = min(int(out.get("MaxTargets") or METEOR_MAX_TARGETS),
+                                METEOR_MAX_TARGETS)
+    return out
+
+
+def _meteor_aspect_node(area, uid, caster, resolved_nodes):
+    """Apply and render Meteor's post-hit Aspect effect for the monsters it actually hit."""
+    targets = []
+    for node in resolved_nodes:
+        if node.get("Name") != "Damage":
+            continue
+        for ts, dmg in zip(node.get("Targets") or [], node.get("Damages") or []):
+            if dmg >= 0 and ts.startswith("m:") and ts not in targets and monster_alive(area, ts):
+                targets.append(ts)
+    aspect = active_aspect(uid)
+    targets = targets[:1] if aspect == "warrior" else targets[:METEOR_MAX_TARGETS]
+    if not targets:
+        return None
+    aura_name = "Burning Field" if aspect == "warrior" else "Suppression"
+    apply_aura(area, aura_name, targets, caster)
+    return {"Name": "Aura", "Hide": False, "Animation": "", "AuraName": aura_name,
+            "Targets": targets, "casterTS": caster, "uniquenessType": 1}
+
+
 def cast_skill(area, uid, slot, target, data, forge, skill_id=None, allies=None):
     """Single-shot walk of a graph with NO input nodes -> (attack, killed_list, dmg).
     Unauthored/empty graphs fall back to a default hit so the slot still does something.
     Graphs WITH input nodes go through the streaming engine (begin_cast) instead."""
     caster = f"p:{uid}"
     order, nodes = _walk_graph(data or [], forge or [])
+    selected_aspect = INFINITY_ASPECT_SKILLS.get(skill_id)
+    if selected_aspect:
+        set_active_aspect(uid, selected_aspect)
     det_total, empowered = _apply_determination(uid, slot, skill_id)
     empower_mult, post, hits = _empower(skill_id, empowered)
     empower_mult *= _conviction_mult(uid, skill_id)    # Paladin per-stack scaling (1.0 else)
     out, killed, total = [], [], 0
     for _nid, props in order:
+        if skill_id == INFINITY_METEOR_SKILL_ID and props.get("Name") == "Damage":
+            props = _meteor_damage_props(uid, props)
         rendered, dmg, k = _render_nodes(area, slot, caster, [target] if target else [],
                                          nodes, props, det_total, empower_mult, hits, allies)
         out.extend(rendered)
         total += dmg
         killed += k
+    if skill_id == INFINITY_METEOR_SKILL_ID:
+        aspect_node = _meteor_aspect_node(area, uid, caster, out)
+        if aspect_node is not None:
+            out.append(aspect_node)
     if post:                                        # empowered self-heal / target stun
         fx_node = _empower_node(skill_id, uid, caster, area, [target] if target else [])
         if fx_node is not None:
@@ -855,7 +950,6 @@ CONV_SPENDERS = {90372,             # Paladin's Smite: consumes ALL stacks
                  90384}             # Voidwalker's Manifest Oblivion: consumes ALL stacks
 CONVICTION_SCALING = {              # skill_id -> bonus multiplier per stack this cast
     90369: 0.03,                    # Vow: +3%/stack physical (up to +150% at 50)
-    90370: 0.03,                    # Protection: +3%/stack healing
     90372: 0.05,                    # Smite: +5%/stack magical, on the CONSUMED stacks
     90381: 0.02,                    # Essence Siphon: +2%/stack magical
     90382: 0.02,                    # Hungering Maw: +2%/stack magical
@@ -1048,6 +1142,12 @@ AURA_FX = {
     "Radiance":   {"kind": "hot", "secs": 5, "tick": 0.20},                     # Healing Word
     "Weakened":   {"kind": "dmgdebuff", "secs": 5},                             # Incapacitate
     "Inhibition": {"kind": "dmgdebuff", "secs": 8},                             # Energy Flow
+    # InfinityHero Meteor: Warrior leaves a 5s INT/WIS-scaled burning crater; without
+    # positional ground-zone tracking we attach its magical ticks to the struck monster.
+    # Healer applies the tooltip's 6s -10% outgoing damage debuff (monster attacks do not
+    # currently crit, so the Crit Chance clause is retained in the client tooltip only).
+    "Burning Field": {"kind": "dot", "secs": 5, "tick": 0.25, "magical": True},
+    "Suppression":   {"kind": "dmgdebuff", "secs": 6},
     # Paladin's Guard (OURS): -25% incoming damage + outgoing damage up for the buffed —
     # the outgoing bonus scales with the caster's Conviction AT CAST (+0.2%/stack).
     "Paladin's Guard": {"kind": "guard", "secs": 6, "dr": 0.25,
@@ -1099,7 +1199,7 @@ def apply_aura(area, name, targets, caster):
 
 
 def is_dmg_debuffed(area, ts):
-    """Whether a target has an active damage-reduction debuff (Weakened/Inhibition)."""
+    """Whether a target has an active damage debuff (Weakened/Inhibition/Suppression)."""
     now = time.time()
     return any(a["kind"] == "dmgdebuff" and now < a["ends"]
                for a in (_auras.get((area, ts)) or {}).values())
@@ -1207,6 +1307,7 @@ def forget_player(uid):
     _resource_model.pop(uid, None)
     _class_mana.pop(uid, None)
     _rp_max.pop(uid, None)
+    _active_aspect.pop(uid, None)
     _conv_cast_stacks.pop(uid, None)
     _conv_last_cast.pop(uid, None)
     _conv_next_decay.pop(uid, None)

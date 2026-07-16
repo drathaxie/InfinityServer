@@ -13,14 +13,16 @@ import patterns
 
 from .registry import register
 from .context import (send_obj, _base_area, _is_staff, _refresh_pattern_stats,
-                      log_unhandled)
+                      load_shop, log_unhandled)
 from . import social
 from . import guild_cmds
 
 
 @register("cmd")
 async def slash_cmd(session, writer, cmd, params, msg):   # slash commands: Params=[name, args...]
-    sub = params[0] if params else ""
+    # Some client paths send Params=["shop 1"] instead of ["shop", "1"].
+    params = [tok for part in (params or []) for tok in str(part).strip().split()]
+    sub = (params[0].lstrip("/").lower() if params else "")
     if sub == "dbapop" and len(params) > 1 and _is_staff(session):
         try:
             arg = int(params[1])
@@ -51,12 +53,33 @@ async def slash_cmd(session, writer, cmd, params, msg):   # slash commands: Para
     if sub in ("modyell", "moderatoryell", "yell"):
         await social.modyell(session, writer, params)
         return
+    if sub in ("shop", "devshop", "wikishop", "wikiitems"):
+        if not _is_staff(session):
+            await send_obj(writer, {"Cmd": "chatm", "Name": "Server", "channel": "server",
+                                    "ID": 0, "msg": "You can not use that command."})
+            return
+        try:
+            arg = int(params[1]) if len(params) > 1 else None
+        except (ValueError, TypeError):
+            arg = None
+        if sub in ("wikishop", "wikiitems"):
+            page = max(1, arg or 1)
+            shop_id = 89891 + page - 1
+        else:
+            shop_id = arg or 89891
+        resp = load_shop(session.conn, [shop_id], is_staff=True)
+        await send_obj(writer, resp)
+        print(f"  [s2c] /{sub} -> loadShop {shop_id}")
+        return
     # guild extras that have no native client command -> arrive here via the `cmd` envelope.
     if sub in ("gleave", "guildleave", "gquit"):
         await guild_cmds.guild_leave(session, writer, params[1:])
         return
     if sub in ("guildhall", "gh"):
         await guild_cmds.guild_hall(session, writer, params[1:])
+        return
+    if sub in ("tagcolor", "tagcolour", "tagcolors", "guildcolor", "gtagcolor"):
+        await guild_cmds.tag_color(session, writer, params[1:])
         return
     if sub == "genderswap" and session.char is not None and session.member is not None:
         # Player gender swap (fired by an apop "chat" button, e.g. Bev). Flips M<->F, resets to
@@ -116,9 +139,41 @@ async def slash_cmd(session, writer, cmd, params, msg):   # slash commands: Para
             session.conn.commit()
             session.char = session.conn.execute("SELECT * FROM characters WHERE id=?",
                                                 (session.char["id"],)).fetchone()
-            await send_obj(writer, {"Cmd": "upgradeSync", "Coins": new, "UpgradeDays": 0,
-                                    "UpgradeExpires": game.DEFAULT_UPGRADE_EXPIRES})
+            await send_obj(writer, {"Cmd": "upgradeSync", "Coins": new,
+                                    "UpgradeDays": game.membership_days(session.char),
+                                    "UpgradeExpires": game.membership_expires(session.char)})
             print(f"  [addcoin] {session.char['name']} {amt:+d} -> {new}")
+        return
+    if sub in ("member", "membership", "upg", "upgrade") and _staff:
+        # /member [days] grants yourself membership days.
+        # /member <name> <days> grants another character, online or offline.
+        target_name = session.char["name"]
+        raw_days = params[1] if len(params) > 1 else "30"
+        if len(params) > 2:
+            target_name, raw_days = params[1], params[2]
+        try:
+            days = max(0, int(raw_days))
+        except (ValueError, TypeError):
+            return
+        target = session.conn.execute("SELECT * FROM characters WHERE LOWER(name)=LOWER(?)",
+                                      (target_name,)).fetchone()
+        if target is None:
+            await send_obj(writer, {"Cmd": "chatm", "Name": "Server", "channel": "server",
+                                    "ID": 0, "msg": f"No character named {target_name}."})
+            return
+        days, expires = game.set_membership(session.conn, target["id"], days)
+        session.conn.commit()
+        if target["id"] == session.char["id"]:
+            session.char = session.conn.execute("SELECT * FROM characters WHERE id=?",
+                                                (session.char["id"],)).fetchone()
+            if session.member is not None:
+                session.member.user_obj["iUpgDays"] = days
+            await send_obj(writer, {"Cmd": "upgradeSync", "Coins": session.char["coins"],
+                                    "UpgradeDays": days, "UpgradeExpires": expires})
+        await send_obj(writer, {"Cmd": "chatm", "Name": "Server", "channel": "server",
+                                "ID": 0,
+                                "msg": f"{target['name']} membership set to {days} day(s)."})
+        print(f"  [member] {target['name']} -> {days} day(s), expires {expires}")
         return
     if sub == "level" and _staff:
         try:

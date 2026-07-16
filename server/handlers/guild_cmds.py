@@ -1,6 +1,8 @@
 """Guild commands: create (gc), invite (gi) + accept/decline (gia/gid), promote/demote
 (gp/gd), kick (gk), MOTD (gmotd). Persistent via the guilds table + characters.guild_id.
 See guilds.py for the wire shapes."""
+import json
+
 import game
 import guilds
 import maps
@@ -217,6 +219,142 @@ async def guild_hall(session, writer, params=None):
     gname = session.conn.execute("SELECT name FROM guilds WHERE id=?", (gid,)).fetchone()["name"]
     print(f"  [guildhall] {session.char['name']} -> '{gname}' hall ({map_name}-g{gid}, "
           f"{len(hd['items'])} items)")
+    return
+
+
+def _owned_colors(char):
+    """The set of tag-colour palette names this character owns ('green' is always free)."""
+    try:
+        owned = set(json.loads(char["owned_tag_colors"] or "[]"))
+    except (TypeError, ValueError, KeyError):
+        owned = set()
+    owned.add("green")
+    return owned
+
+
+async def _push_tag_shop(session, writer):
+    """Send the client its current tag-colour palette/ownership/selection so the guild-panel
+    colour picker (mod UI) refreshes after a buy/wear/default change."""
+    if session.char is not None:
+        pk = {"Cmd": "tagShop"}
+        pk.update(game.guild_tag_shop(session.conn, session.char))
+        await send_obj(writer, pk)
+
+
+async def _refresh_tag(session):
+    """Push the character's current guild tag + colour to the room so the mod re-renders the
+    nameplate. Updates the cached user_obj and re-broadcasts AreaAdd to others (their client's
+    SetUserData carries the new guildTagColor; the mod refreshes the plate)."""
+    if session.member is None:
+        return
+    session.member.user_obj["guildName"] = game.guild_name_for(session.conn, session.char)
+    session.member.user_obj["guildTagColor"] = game.resolve_guild_tag_color(session.conn, session.char)
+    world.broadcast(session.area, {"Cmd": "AreaAdd", "userData": session.member.user_obj},
+                    exclude=session.member.uid)
+
+
+async def tag_color(session, writer, params=None):
+    """/tagcolor — the guild-tag colour store + selector (arrives via the `cmd` envelope).
+      /tagcolor                 -> list the palette (price + owned)
+      /tagcolor buy <name>      -> purchase a colour with gold/ACs
+      /tagcolor <name>          -> wear it as YOUR personal tag colour (must own)
+      /tagcolor off             -> clear your override (fall back to the guild default)
+      /tagcolor guild <name>    -> leader: set the GUILD default colour (must own)
+    """
+    if session.char is None or session.member is None:
+        return
+    params = params or []
+    sub = (str(params[0]).lower() if params else "")
+
+    if not sub or sub in ("list", "colors", "colours"):
+        owned = _owned_colors(session.char)
+        lines = []
+        for name, (hexv, cost, coins) in game.GUILD_TAG_PALETTE.items():
+            price = "free" if cost == 0 else f"{cost:,} {'ACs' if coins else 'gold'}"
+            mark = " (owned)" if name in owned else f" — {price}"
+            lines.append(f"{name}{mark}")
+        await _server_msg(writer, "Guild tag colours: " + ", ".join(lines)
+                          + ". Buy: /tagcolor buy <name>. Wear: /tagcolor <name>.")
+        return
+
+    if sub == "off":                                   # clear personal override
+        session.conn.execute("UPDATE characters SET guild_tag_color='' WHERE id=?",
+                             (session.char["id"],))
+        _reload_char(session)
+        await _refresh_tag(session)
+        await _push_tag_shop(session, writer)
+        await _server_msg(writer, "Your guild tag colour now follows the guild default.")
+        return
+
+    if sub == "buy":
+        name = (str(params[1]).lower() if len(params) > 1 else "")
+        entry = game.GUILD_TAG_PALETTE.get(name)
+        if entry is None:
+            await _server_msg(writer, f'No tag colour named "{name}". Try /tagcolor for the list.')
+            return
+        hexv, cost, coins = entry
+        owned = _owned_colors(session.char)
+        if name in owned:
+            await _server_msg(writer, f"You already own {name}.")
+            return
+        field = "coins" if coins else "gold"
+        bal = int(session.char[field] or 0)
+        if bal < cost:
+            await _server_msg(writer, f"Not enough {'ACs' if coins else 'gold'} for {name} "
+                                      f"({cost:,} needed).")
+            return
+        new_bal = bal - cost
+        owned_list = sorted(owned | {name})
+        session.conn.execute(f"UPDATE characters SET {field}=?, owned_tag_colors=? WHERE id=?",
+                             (new_bal, json.dumps(owned_list), session.char["id"]))
+        session.conn.commit()
+        _reload_char(session)
+        # reflect the spend live: ACs via upgradeSync (absolute), gold via addGoldXP (delta)
+        if coins:
+            await send_obj(writer, {"Cmd": "upgradeSync", "Coins": new_bal, "UpgradeDays": game.membership_days(session.char),
+                                    "UpgradeExpires": game.membership_expires(session.char)})
+        else:
+            await send_obj(writer, {"Cmd": "addGoldXP", "ExpTotal": int(session.char["exp"] or 0),
+                                    "Gold": {"val": -cost}})
+        await _push_tag_shop(session, writer)
+        await _server_msg(writer, f"Bought the {name} guild tag colour! Wear it with /tagcolor {name}.")
+        print(f"  [tagcolor] {session.char['name']} bought {name} (-{cost} {field})")
+        return
+
+    if sub == "guild":                                 # leader sets the guild default
+        if not session.char["guild_id"] or session.char["guild_rank"] < guilds.RANK_LEADER:
+            await _server_msg(writer, "Only the guild leader can set the guild's default colour.")
+            return
+        name = (str(params[1]).lower() if len(params) > 1 else "")
+        if name not in game.GUILD_TAG_PALETTE:
+            await _server_msg(writer, f'No tag colour named "{name}".')
+            return
+        if name not in _owned_colors(session.char):
+            await _server_msg(writer, f"Buy {name} first: /tagcolor buy {name}.")
+            return
+        session.conn.execute("UPDATE guilds SET tag_color=? WHERE id=?",
+                             (name, session.char["guild_id"]))
+        session.conn.commit()
+        await _refresh_tag(session)
+        await _push_tag_shop(session, writer)
+        await _server_msg(writer, f"Guild default tag colour set to {name}.")
+        print(f"  [tagcolor] {session.char['name']} set guild #{session.char['guild_id']} -> {name}")
+        return
+
+    # otherwise: wear `sub` as a personal colour
+    if sub not in game.GUILD_TAG_PALETTE:
+        await _server_msg(writer, f'No tag colour named "{sub}". Try /tagcolor for the list.')
+        return
+    if sub not in _owned_colors(session.char):
+        await _server_msg(writer, f"You don't own {sub}. Buy it: /tagcolor buy {sub}.")
+        return
+    session.conn.execute("UPDATE characters SET guild_tag_color=? WHERE id=?",
+                         (sub, session.char["id"]))
+    _reload_char(session)
+    await _refresh_tag(session)
+    await _push_tag_shop(session, writer)
+    await _server_msg(writer, f"Your guild tag colour is now {sub}.")
+    print(f"  [tagcolor] {session.char['name']} wears {sub}")
     return
 
 

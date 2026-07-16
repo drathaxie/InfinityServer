@@ -260,10 +260,36 @@ async def _shatter_mirror(area, clone_ts, uid, stun_secs):
 async def ai_loop():
     """Autonomous monster AI: every aggro'd monster swings at its target on its own
     timer (MON_ATTACK_CD), independent of player input. Runs for the server's life."""
+    cache_revisions = None
+    next_cache_poll = 0.0
     while True:
         await asyncio.sleep(0.5)
         try:
             now = time.time()
+            # The authoring web API is a separate process. It bumps DB revisions
+            # after an apop/dialog/quest save; notify connected clients so their
+            # new cacheReloaded handler refreshes the current area's live content.
+            if now >= next_cache_poll:
+                next_cache_poll = now + 1.0
+                c = db.connect()
+                try:
+                    current_revisions = {
+                        kind: db.kv_get(c, "cache_revision:" + kind, "")
+                        for kind in ("apop", "dialog", "quest")
+                    }
+                finally:
+                    c.close()
+                if cache_revisions is not None:
+                    for kind, revision in current_revisions.items():
+                        if revision == cache_revisions.get(kind):
+                            continue
+                        packet = {"Cmd": "cacheReloaded", "rType": kind}
+                        for sess in list(_players.values()):
+                            if sess.member is not None:
+                                await send_obj(sess.writer, packet)
+                        print(f"  [cache] {kind} revision {revision} -> clients refreshed")
+                cache_revisions = current_revisions
+
             # clear expired Dragon's Bane self-buffs — send an AuraChange remove so the red
             # glow doesn't linger forever (the cast applies the aura but never removed it).
             for uid in combat.expired_dragonbane():

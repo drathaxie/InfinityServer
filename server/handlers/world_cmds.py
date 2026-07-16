@@ -107,6 +107,11 @@ async def get_apop(session, writer, cmd, params, msg):
             if tok.lstrip("-").isdigit():
                 ids.append(int(tok))
     apop_data = game.load_apops(session.conn, ids)
+    if session.char is not None:
+        statue_url = ("https://130-162-189-229.sslip.io/statue/"
+                      f"{int(session.char['id'])}/download.png")
+        apop_data = {key: raw.replace("infinity://statue/download", statue_url)
+                     for key, raw in apop_data.items()}
     await send_obj(writer, {"Cmd": "getApop", "apopData": apop_data})
     print(f"  [s2c] getApop ({len(apop_data)}/{len(ids)} served)")
     return

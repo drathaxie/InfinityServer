@@ -56,9 +56,22 @@ public sealed class NpcBakerController : MonoBehaviour
         try { Directory.CreateDirectory(_outDir); } catch { }
     }
 
+    private static bool HasStaffAccess()
+    {
+        try { return Entity.mainPlayer != null && Entity.mainPlayer.hasAccess(100); }
+        catch { return false; }
+    }
     private void Update()
     {
-        try { if (Input.GetKeyDown(ToggleKey)) _open = !_open; } catch { }
+        try
+        {
+            if (Input.GetKeyDown(ToggleKey))
+            {
+                if (HasStaffAccess()) _open = !_open;
+                else { _open = false; InfinityLoaderMod.SafeLog("[npcbake] F9 denied: staff access 100 required"); }
+            }
+        }
+        catch { }
         try { UpdateBlocker(); } catch { }
         if (_preview != null)
         {
@@ -121,7 +134,7 @@ public sealed class NpcBakerController : MonoBehaviour
 
     private void OnGUI()
     {
-        if (!_open) return;
+        if (!_open || !HasStaffAccess()) return;
         try
         {
             EnsureStyles();

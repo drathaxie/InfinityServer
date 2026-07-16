@@ -11,6 +11,7 @@
         "desc": "string",
         "autoHRange": "float",
         "autoVRange": "float",
+        "autoHoldAtRange": "bool",
         "regMana": "int",
         "particleList": "List<string>"
       }
@@ -169,6 +170,13 @@
         "Success": "bool"
       }
     },
+    "cacheReloaded": {
+      "type": "ResponseCacheReloaded",
+      "cmd": "cacheReloaded",
+      "fields": {
+        "rType": "string"
+      }
+    },
     "CellMove": {
       "type": "ResponseCellMove",
       "cmd": "CellMove",
@@ -190,6 +198,8 @@
         "BaseColor": "int",
         "TrimColor": "int",
         "AccessoryColor": "int",
+        "hairID": "int",
+        "hairBundle": "AssetBundleData",
         "ID": "int"
       }
     },
@@ -313,6 +323,16 @@
         "gender": "string",
         "HairID": "int",
         "strHairName": "string"
+      }
+    },
+    "generateStatue": {
+      "type": "ResponseGenerateStatue",
+      "cmd": "generateStatue",
+      "fields": {
+        "Success": "bool",
+        "ItemID": "int",
+        "Message": "string",
+        "CooldownRemainingMs": "int"
       }
     },
     "getApop": {
@@ -518,6 +538,11 @@
       "type": "ResponseLoadHairShop",
       "cmd": "loadHairShop",
       "fields": {
+        "HairID": "int",
+        "sFile": "string",
+        "sName": "string",
+        "sGen": "string",
+        "bundle": "AssetBundleData",
         "HairShopID": "int"
       }
     },
@@ -711,6 +736,14 @@
         "entType": "int"
       }
     },
+    "portraitChange": {
+      "type": "ResponsePortraitChange",
+      "cmd": "portraitChange",
+      "fields": {
+        "uid": "int",
+        "portraitPref": "int"
+      }
+    },
     "QuestAccept": {
       "type": "ResponseQuestAccept",
       "cmd": "QuestAccept",
@@ -799,7 +832,8 @@
         "ExpTotal": "int",
         "CP": "Exp",
         "typ": "string",
-        "monID": "string",
+        "monID": "int",
+        "monMapID": "int",
         "factionID": "int",
         "Gold": "Gold",
         "items": "InventoryItem[]",
@@ -1146,6 +1180,11 @@
       "cmd": null,
       "fields": {}
     },
+    "generateStatue": {
+      "type": "RequestGenerateStatue",
+      "cmd": "generateStatue",
+      "fields": {}
+    },
     "getApop": {
       "type": "RequestGetApop",
       "cmd": "getApop",
@@ -1440,6 +1479,11 @@
     "RequestSavePad": {
       "type": "RequestSavePad",
       "cmd": null,
+      "fields": {}
+    },
+    "savePortrait": {
+      "type": "RequestSavePortrait",
+      "cmd": "savePortrait",
       "fields": {}
     },
     "savePrefs": {
