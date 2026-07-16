@@ -123,8 +123,23 @@ def main():
         mage_item = json.loads(mage_rig["rig"])["ID"]
         assert forge.class_for_armor_item(conn, mage_item) == int(init["classes"]["Mage"]["ID"]), \
             "the Mage class armor must switch to the Mage class"
+        # InfinityHero Meteor preloads the actual giant-sword composite. The bundle stores
+        # this victim-side finisher under S1_P4 even though it belongs to the slot-3 skill.
+        infinity = forge.build_seact(conn, seed.PALADIN_CLASS_ID)
+        assert "classInfinityHero_S1_P4" in infinity["particleList"],             "Meteor must preload its sword/lightning composite"
+        meteor_graph = json.loads(conn.execute(
+            "SELECT data FROM skills WHERE skill_id=?", (90370,)).fetchone()["data"])
+        sword = next(v for v in meteor_graph[1].values()
+                     if v.get("Particle") == "classInfinityHero_S1_P4")
+        assert sword["Lifetime"] == 6000 and sword.get("Targets"),             "Meteor sword must target the victim and survive its complete animation"
+
+    # SpellAnimation's projectile and impact are both preloaded when an authored graph uses it.
+    spell_graph = json.dumps([{}, {"1": {"Name": "SpellAnimation",
+                                        "SpellGraphic": "meteor_projectile",
+                                        "SpellImpact": "meteor_impact"}}])
+    assert forge._graph_particles(spell_graph) == ["meteor_projectile", "meteor_impact"]
     print(f"sEAct OK: Dragonslayer skill bar slots {sorted(se['skillList'])}, "
-          f"armor 15774->Mage switch wired")
+          f"armor 15774->Mage switch wired; InfinityHero sword/lightning VFX preloaded")
 
     # --- P0-2: per-class resource model (updateClass) + mana costs ---
     # Capture ground truth: DS bar = white(16777215)/MaxRP100/Threshold50/orange(16745728);

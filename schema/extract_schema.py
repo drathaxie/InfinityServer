@@ -7,7 +7,7 @@ members and the [JsonProperty]/Cmd wire name.
 
 Output: schema/schema.json  { "responses": {cmd: {...}}, "requests": {cmd: {...}} }
 """
-import re, json, pathlib
+import argparse, re, json, pathlib
 
 DECOMP = pathlib.Path(__file__).resolve().parent.parent / "docs" / "decomp"
 OUT = pathlib.Path(__file__).resolve().parent / "schema.json"
@@ -47,9 +47,16 @@ def parse_class(path: pathlib.Path):
     return cmd, fields
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--decomp", type=pathlib.Path, default=DECOMP,
+                        help="decompiled Assembly-CSharp source directory")
+    parser.add_argument("--out", type=pathlib.Path, default=OUT,
+                        help="schema JSON output path")
+    args = parser.parse_args()
+    decomp, output = args.decomp, args.out
     responses, requests = {}, {}
     unresolved = []
-    for cs in sorted(DECOMP.glob("*.cs")):
+    for cs in sorted(decomp.glob("*.cs")):
         name = cs.stem
         if not (name.startswith("Response") or name.startswith("Request")):
             continue
@@ -66,7 +73,8 @@ def main():
             unresolved.append(name)
 
     out = {"responses": responses, "requests": requests}
-    OUT.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(out, indent=2), encoding="utf-8")
     print(f"responses={len(responses)} requests={len(requests)}")
     print(f"types with no literal Cmd= (keyed by typename): {len(unresolved)}")
     print("examples:", ", ".join(sorted(responses)[:12]))

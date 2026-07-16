@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Stock the DEV "check everything" shop with the ENTIRE item catalog, so any item
+Stock the DEV "check everything" shop with the normal item catalog, so any item
 can be grabbed in-game for testing. Useful when a real shop's contents are gated
 (founder/staff) and couldn't be captured: pull the item into the catalog (e.g.
 via a bank/shop capture) and it shows up here.
@@ -14,7 +14,7 @@ import sys
 
 import db
 
-SHOP_ID = int(sys.argv[1]) if len(sys.argv) > 1 else 2722
+SHOP_ID = 2722
 NAME = "Dev Check All"
 
 
@@ -26,10 +26,10 @@ def fill(conn, shop_id=SHOP_ID, name=NAME):
         meta["shopID"], meta["Name"] = shop_id, name
         db.store_shop(conn, meta, shop_id=shop_id, replace=True)
 
-    # Rebuild the listing: one free, unlimited shop_item per catalog item. shop_item_id
+    # Rebuild the listing: one free, unlimited shop_item per normal catalog item. shop_item_id
     # = item_id (unique within the shop; buy() keys on (shop_id, shop_item_id)).
     conn.execute("DELETE FROM shop_items WHERE shop_id=?", (shop_id,))
-    ids = [r[0] for r in conn.execute("SELECT item_id FROM items ORDER BY item_id").fetchall()]
+    ids = [r[0] for r in conn.execute("SELECT item_id FROM items WHERE item_id < 900000 ORDER BY item_id").fetchall()]
     for iid in ids:
         conn.execute(
             "INSERT INTO shop_items(shop_id, shop_item_id, item_id, cost, coins, "
@@ -38,11 +38,12 @@ def fill(conn, shop_id=SHOP_ID, name=NAME):
 
 
 def main():
+    shop_id = int(sys.argv[1]) if len(sys.argv) > 1 else SHOP_ID
     db.init()
     with db.connect() as conn:
-        n = fill(conn)
+        n = fill(conn, shop_id)
         conn.commit()
-    print(f"[devshop] shop {SHOP_ID} '{NAME}' stocked with {n} items (free, unlimited)")
+    print(f"[devshop] shop {shop_id} '{NAME}' stocked with {n} items (free, unlimited)")
 
 
 if __name__ == "__main__":

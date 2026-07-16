@@ -23,6 +23,8 @@ import seed
 import patterns
 import combat        # weapon-damage coefficients (WEAPON_MIN/MAX) shared with the damage roll
 import forge         # build_seact: the class's skill bar + particle list (initPlayer.Actions)
+import friends       # initPlayer.friends (mutual persistent friends list)
+import guilds         # playerInfo.guild (persistent guild membership)
 
 
 # Wire field (user.customization / user.stats) -> character column. Plain ints,
@@ -50,6 +52,31 @@ DEFAULT_UPGRADE_EXPIRES = "2024-01-01T00:00:00"
 # PlayerInfo.ActivationFlag is deserialized but never gated on in the client (decomp: declared
 # only) — a neutral "activated" constant is safe and account-agnostic.
 DEFAULT_ACTIVATION_FLAG = 1
+
+
+def membership_days(char):
+    """Current client-visible membership days for a character row."""
+    try:
+        return max(0, int(char["upgrade_days"] or 0)) if "upgrade_days" in char.keys() else 0
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def membership_expires(char):
+    try:
+        exp = char["upgrade_expires"] if "upgrade_expires" in char.keys() else None
+    except AttributeError:
+        exp = None
+    return exp or DEFAULT_UPGRADE_EXPIRES
+
+
+def set_membership(conn, char_id, days):
+    days = max(0, int(days or 0))
+    expires = (time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() + days * 86400))
+               if days else DEFAULT_UPGRADE_EXPIRES)
+    conn.execute("UPDATE characters SET upgrade_days=?, upgrade_expires=? WHERE id=?",
+                 (days, expires, int(char_id)))
+    return days, expires
 
 # user-object display constants the client expects (rage bar + threshold colours). These are
 # fixed client-side presentation values, identical for every player — not account data.
@@ -113,6 +140,56 @@ DEV_ACCESS_LEVEL = 100
 # 0x7FF = all 11 tiers. Dev/owner accounts get the full set so every founder shop appears.
 FOUNDER_IP25 = 0x7FF
 _DEV_USERS_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "dev_users.txt"
+
+# Name-plate ("portrait") frame ownership. The client enum PortraitFrameId is
+# {Default=0, Tier0=1, Tier1=2, Tier2=3, Tier3=4} (the 5 shipped frames, kept 1:1). The picker
+# (NameplatePortraitFixer / PopulateAvailablePortraitFrames) ALWAYS offers Default and
+# then only the ints the server lists in playerInfo.ownedPortraitFrames — ownership is
+# 100% server-authoritative, there's no client-side achievement check. A live playtest
+# sample of a maxed founder account received [0,1,2,3] but NOT 4. We mirror founder tiers via
+# ip25 bits (frames 1-3); the FULL set is an explicit account allowlist. Each entry is
+# (frame_int, ip25_bit_index).
+_PORTRAIT_FRAME_GRANTS = [
+    (1, 2),   # Tier0  <- founder ip25 bit 2 ("Founder")
+    (2, 3),   # Tier1  <- founder ip25 bit 3 ("Epic")
+    (3, 4),   # Tier2  <- founder ip25 bit 4 ("Underworld")
+]
+
+# CUSTOM frames added on TOP of the shipped 0-4 (the enum is int-backed, so (PortraitFrameId)N
+# is valid for N>4). The client mod synthesizes a NameplatePortraitFixerData setting for these
+# ids from PNGs in UserData/Beyond/portraits/ (Harmony patch on FindByFrame). Keep in sync w/ mod.
+PORTRAIT_FRAME_POTATO = 5     # "Tato's Potato Frame" (potato/dirt themed)
+_CUSTOM_PORTRAIT_FRAMES = [PORTRAIT_FRAME_POTATO]
+
+# Accounts that get the FULL shipped set (0-4) PLUS the custom frames. Deliberately NOT tied to
+# access_level or a dev-users file (too easy to abuse) — an explicit username allowlist. Keep tiny.
+_PORTRAIT_FULL_ACCOUNTS = {"redux"}
+
+
+def account_username(conn, char):
+    """The account username owning this character (lowercased), or '' if unknown."""
+    if char is None or "account_id" not in char.keys():
+        return ""
+    row = conn.execute("SELECT username FROM accounts WHERE id=?",
+                       (char["account_id"],)).fetchone()
+    return (row["username"] or "").lower() if row else ""
+
+
+def owned_portrait_frames(username, achievements):
+    """Which name-plate frames this account owns, as the client's PortraitFrameId ints.
+    Frame 0 (Default) is always included; the allowlist gets all 5 shipped + the custom frames;
+    everyone else earns frames 1-3 via founder ip25 bits."""
+    if str(username or "").strip().lower() in _PORTRAIT_FULL_ACCOUNTS:
+        return [0, 1, 2, 3, 4] + _CUSTOM_PORTRAIT_FRAMES
+    owned = [0]
+    try:
+        ip25 = int((achievements or {}).get("ip25", 0))
+    except (TypeError, ValueError):
+        ip25 = 0
+    for frame_int, bit in _PORTRAIT_FRAME_GRANTS:
+        if ip25 & (1 << bit):
+            owned.append(frame_int)
+    return owned
 
 
 def _dev_users():
@@ -325,18 +402,62 @@ def save_customization(conn, char, params):
             applied[col] = int(params[i]) & 0xFFFFFF      # colours are 24-bit RGB ints
         except (TypeError, ValueError):
             pass
-    # hair id is the value right after the six colours (index 6), if present
+    # New clients dereference hairBundle.Name without a null guard. Accept only a
+    # catalog hair for this gender and repair old invalid hair ids to the default.
+    requested_hair = None
     if len(params) > 6:
         try:
-            applied["hair_id"] = int(params[6])
+            requested_hair = int(params[6])
         except (TypeError, ValueError):
-            pass
+            requested_hair = None
+    if requested_hair is not None and _hair_info(conn, requested_hair, char["gender"]):
+        applied["hair_id"] = requested_hair
+    elif _hair_info(conn, char["hair_id"], char["gender"]) is None:
+        applied["hair_id"] = _default_hair_id(conn, char["gender"])
     if not applied:
         return {}
     sets = ", ".join(f"{col}=?" for col in applied)
     conn.execute(f"UPDATE characters SET {sets} WHERE id=?",
                  (*applied.values(), char["id"]))
     return applied
+
+
+def save_portrait_pref(conn, char, pref):
+    """Persist the chosen name-plate style into the char's prefs JSON blob. Returns the
+    normalised int written. Kept alongside the userPrefs toggles but read back out as a
+    top-level `portraitPref` (see build_init_player)."""
+    try:
+        pref = int(pref)
+    except (TypeError, ValueError):
+        pref = 0
+    prefs = {}
+    if "prefs" in char.keys() and char["prefs"]:
+        try:
+            prefs = json.loads(char["prefs"]) or {}
+        except (TypeError, ValueError):
+            prefs = {}
+    prefs["PortraitPref"] = pref
+    conn.execute("UPDATE characters SET prefs=? WHERE id=?",
+                 (json.dumps(prefs), char["id"]))
+    return pref
+
+
+def save_user_pref(conn, char, name, value):
+    """Persist one userPrefs UI toggle (client `savePrefs`, Params=[name, "True"/"False"]) into
+    the char's prefs JSON blob so it survives relog. Only known toggle keys are accepted."""
+    if name not in _DEFAULT_USER_PREFS:
+        return None
+    val = str(value).strip().lower() in ("true", "1", "yes")
+    prefs = {}
+    if "prefs" in char.keys() and char["prefs"]:
+        try:
+            prefs = json.loads(char["prefs"]) or {}
+        except (TypeError, ValueError):
+            prefs = {}
+    prefs[name] = val
+    conn.execute("UPDATE characters SET prefs=? WHERE id=?",
+                 (json.dumps(prefs), char["id"]))
+    return val
 
 
 def _item_is_class(item):
@@ -559,8 +680,10 @@ def change_state(char, state=1):
     """ResponseChangeState for the joining player. The client resolves the entity by
     `unm` and only acts when it matches a known player (the joiner themselves), so
     `unm` must be THIS character's name — the old static sample hardcoded drathaxie,
-    making the packet a silent no-op for everyone else."""
-    name = char["name"] if char is not None else ""
+    making the packet a silent no-op for everyone else. `unm` MUST also be lowercase:
+    ResponseChangeState resolves via getPlayer(unm)/unm==mainPlayer.Name, both keyed on
+    the lowercase in-world name (same rule as rest_player/revive_player) — mixed case no-ops."""
+    name = char["name"].lower() if char is not None else ""
     return {"Cmd": "ChangeState", "unm": name, "State": state}
 
 
@@ -926,6 +1049,7 @@ def _house_item_wire(conn, ci):
         "sDesc": item.get("Description") or "",
         "bHouse": True,
         "bTemp": False,
+        "Meta": (ci["meta"] if "meta" in ci.keys() else "") or item.get("Meta") or "",
         "MobileCompatibility": 1,
     }
 
@@ -1016,6 +1140,42 @@ def build_house_data(conn, owner_char):
     return {"sHouseInfo": json.dumps(layout, separators=(",", ":")) if layout else "",
             "items": house_items(conn, owner_char["id"]),
             "unm": (owner_char["name"] or "").lower()}
+
+
+# A synthetic "house deed" injected into the guild hall's houseData.items so the client's
+# HouseUICanvasController.GetEquippedHouseID() (which returns the items[] entry with bEquip==1)
+# has a >0 id to echo in the Save request. It isn't a catalog item — it's only a routing token;
+# the server routes the save by session state (guildhall_gid), not by this id.
+GUILDHALL_ITEM_ID = 900001
+
+
+def _guild_hall_deed_item():
+    """The synthetic House-type houseItem (bEquip=1) that makes the hall's Save button live."""
+    return {"ItemID": GUILDHALL_ITEM_ID, "CharItemID": GUILDHALL_ITEM_ID, "Bundle": None,
+            "PrefabName": None, "sType": "House", "iQty": 1, "bEquip": 1, "sName": "Guild Hall",
+            "iCost": 0, "bCoins": False, "sDesc": "Your guild's hall.", "bHouse": True,
+            "bTemp": False, "MobileCompatibility": 1}
+
+
+def build_guild_hall_data(conn, guild_id):
+    """AreaJoin houseData for a guild hall: the guild's saved layout (sHouseInfo), the LEADER's
+    furniture as the palette (placements reference the leader's CharItemIDs), and unm = the
+    leader's lowercase name so ONLY the leader gets the client's owner/decorate controls. The
+    synthetic Guild Hall deed leads the items list so GetEquippedHouseID resolves to it (not the
+    leader's personal deed). Returns None if the guild or its leader can't be resolved."""
+    import guilds
+    leader = guilds.leader_row(conn, guild_id)
+    if leader is None:
+        return None
+    layout = guilds.hall_layout(conn, guild_id)
+    # furniture only (EquipSpot 9) — exclude real house deeds so the hall deed is the sole bEquip=1
+    furniture = [hw for hw in house_items(conn, leader["id"])
+                 if hw.get("sType") != "House"]
+    for hw in furniture:                       # a hall palette item is never "equipped" (placed via layout)
+        hw["bEquip"] = 0
+    return {"sHouseInfo": json.dumps(layout, separators=(",", ":")) if layout else "",
+            "items": [_guild_hall_deed_item()] + furniture,
+            "unm": (leader["name"] or "").lower()}
 
 
 def house_save(conn, char, house_id, frame, data):
@@ -1363,6 +1523,89 @@ def load_hairshop(conn, shop_id):
     return {"Cmd": "loadHairShop", "HairShopID": shop_id, "hair": hair}
 
 
+# --- guild nameplate tag colours (a preset palette sold for gold/ACs) -------------------------
+# Each entry: hex swatch + price + currency. Priced cosmetics = a pure money sink (no power).
+# The base green matches the guild chat colour, and is FREE (every guild starts with it).
+DEFAULT_GUILD_TAG_COLOR = "#99FF00"
+GUILD_TAG_PALETTE = {
+    # name:        (hex,        cost,   coins?)   coins=True -> AdventureCoins, else gold
+    "green":       (DEFAULT_GUILD_TAG_COLOR, 0, False),   # free starter colour
+    "white":       ("#FFFFFF",   5000,  False),
+    "silver":      ("#C0C0C0",  15000,  False),
+    "gold":        ("#FFD700",  50000,  False),
+    "crimson":     ("#DC143C",     50,  True),
+    "royal":       ("#4169E1",     50,  True),
+    "violet":      ("#9400D3",     75,  True),
+    "cyan":        ("#00FFFF",     75,  True),
+    "pink":        ("#FF69B4",    100,  True),
+    "orange":      ("#FF8C00",    100,  True),
+    "rainbow":     ("#FF00AA",    250,  True),   # premium flat colour (animated version = later)
+}
+
+
+def guild_tag_color_hex(name):
+    """The hex swatch for a palette colour name (None if unknown)."""
+    entry = GUILD_TAG_PALETTE.get((name or "").lower())
+    return entry[0] if entry else None
+
+
+ANIMATED_TAG_COLORS = {"rainbow"}   # names the client animates instead of drawing a flat hex
+
+
+def effective_tag_name(conn, char):
+    """The palette NAME a character's guild tag resolves to: personal override > guild default >
+    base green. '' if guildless."""
+    if char is None or not (char["guild_id"] if "guild_id" in char.keys() else 0):
+        return ""
+    personal = (char["guild_tag_color"] if "guild_tag_color" in char.keys() else "") or ""
+    if personal in GUILD_TAG_PALETTE:
+        return personal
+    g = conn.execute("SELECT tag_color FROM guilds WHERE id=?", (char["guild_id"],)).fetchone()
+    gdef = (g["tag_color"] if g else "") or ""
+    return gdef if gdef in GUILD_TAG_PALETTE else "green"
+
+
+def resolve_guild_tag_color(conn, char):
+    """The wire colour for a character's guild tag: a hex string for flat colours, or the animated
+    keyword (e.g. 'rainbow') the mod cycles per-frame. '' if they have no guild."""
+    name = effective_tag_name(conn, char)
+    if not name:
+        return ""
+    if name in ANIMATED_TAG_COLORS:
+        return name                                   # marker; the mod animates it
+    return guild_tag_color_hex(name) or DEFAULT_GUILD_TAG_COLOR
+
+
+def guild_tag_shop(conn, char):
+    """The palette + this character's ownership/selection, for the client-side guild-panel colour
+    picker (initPlayer.tagShop). owned always includes the free 'green'."""
+    try:
+        owned = set(json.loads(char["owned_tag_colors"] or "[]"))
+    except (TypeError, ValueError, KeyError):
+        owned = set()
+    owned.add("green")
+    palette = [{"name": n, "hex": hexv, "cost": cost, "coins": bool(coins),
+                "animated": n in ANIMATED_TAG_COLORS}
+               for n, (hexv, cost, coins) in GUILD_TAG_PALETTE.items()]
+    gid = (char["guild_id"] if "guild_id" in char.keys() else 0)
+    gdef = ""
+    if gid:
+        g = conn.execute("SELECT tag_color FROM guilds WHERE id=?", (gid,)).fetchone()
+        gdef = (g["tag_color"] if g else "") or ""
+    return {"palette": palette, "owned": sorted(owned),
+            "selected": (char["guild_tag_color"] if "guild_tag_color" in char.keys() else "") or "",
+            "guildDefault": gdef}
+
+
+def guild_name_for(conn, char):
+    """The character's guild name for the overhead nameplate tag ('' if guildless)."""
+    gid = (char["guild_id"] if char is not None and "guild_id" in char.keys() else 0)
+    if not gid:
+        return ""
+    row = conn.execute("SELECT name FROM guilds WHERE id=?", (gid,)).fetchone()
+    return row["name"] if row else ""
+
+
 def build_init_player(conn, char):
     """initPlayer built FRESH from this character's DB state — identity, currencies, level, the
     full stat block, customization, the equipped rig, inventory and the class skill bar — with NO
@@ -1378,6 +1621,18 @@ def build_init_player(conn, char):
             prefs.update(json.loads(char["prefs"]) or {})
         except (TypeError, ValueError):
             pass
+    # Name-plate style is persisted inside the prefs blob but is NOT a userPrefs UI toggle:
+    # AE carries it as a top-level `portraitPref` int on the user object (AreaAdd/uoBranch),
+    # not in the userPrefs dict. Pop it so the emitted userPrefs stays clean. 0 = default plate.
+    try:
+        portrait_pref = int(prefs.pop("PortraitPref", 0) or 0)
+    except (TypeError, ValueError):
+        portrait_pref = 0
+    # The client applies the saved frame ON LOGIN from userPrefs.PortraitPreference
+    # (ResponseInitPlayer.Execute), NOT from user.portraitPref (that's only the live/other-player
+    # path). So the pref MUST ride in the emitted userPrefs under this exact key, or it resets to
+    # Default every relog. [[name-plates]]
+    prefs["PortraitPreference"] = portrait_pref
 
     # The equipped class drives the visual rig (skin + ClassParticleBundle) AND the skill bar.
     # A real ClassID is REQUIRED for the client to activate the class; a fresh character has the
@@ -1427,7 +1682,7 @@ def build_init_player(conn, char):
         "strGender": char["gender"],
         "intLevel": char["level"],
         "intAccessLevel": access,                     # >=50 unlocks the dev panel
-        "iUpgDays": 0,                                # membership: UpgradeDays>0 == member; 0 = free
+        "iUpgDays": membership_days(char),            # membership: UpgradeDays>0 == member
         "intState": 1,                                # alive
         "intRPMax": USER_RP_MAX,
         "intRPColor": USER_RP_COLOR,
@@ -1437,22 +1692,30 @@ def build_init_player(conn, char):
         "intHPMax": maxhp,
         "showHelm": bool(prefs.get("ShowHelm", True)),
         "showCloak": bool(prefs.get("ShowCloak", True)),
+        "portraitPref": portrait_pref,                # name-plate style (savePortrait/portraitChange)
         "strFrame": "Enter",
         "strPad": "Spawn",
         "particleList": seact.get("particleList", []),
+        # Overhead guild tag (base client ignores these; the InfinityLoader mod reads them off the
+        # AreaAdd/uoBranch JSON and renders a coloured "«Guild»" line under the nameplate).
+        "guildName": guild_name_for(conn, char),
+        "guildTagColor": resolve_guild_tag_color(conn, char),
     }
 
     # playerInfo: THIS character's identity + neutral free-account defaults; never another
     # account's membership/slots/guild/achievements.
     created_iso = DEFAULT_CREATED
+    account_name = ""
     if "account_id" in char.keys():
-        arow = conn.execute("SELECT created FROM accounts WHERE id=?",
+        arow = conn.execute("SELECT username, created FROM accounts WHERE id=?",
                             (char["account_id"],)).fetchone()
-        if arow and arow["created"]:
-            try:
-                created_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(float(arow["created"])))
-            except (TypeError, ValueError):
-                pass
+        if arow:
+            account_name = arow["username"] or ""
+            if arow["created"]:
+                try:
+                    created_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(float(arow["created"])))
+                except (TypeError, ValueError):
+                    pass
     try:
         achievements = json.loads(char["achievements"] or "{}")   # per-char bitfields; ip25 gates
     except (ValueError, TypeError):                                # Despair's founder shops. NOT null.
@@ -1471,9 +1734,9 @@ def build_init_player(conn, char):
         # placeholder keeps it private AND un-typeable in normal chat. [[chat-email-guard-gotcha]]
         "Email": f"player{char['id']}@infinityserver.local",
         "dateCreated": created_iso,                   # the account's real creation time (or default)
-        "upgradeExpires": DEFAULT_UPGRADE_EXPIRES,    # DateTime; membership is gated on UpgradeDays
-        "UpgradeDays": 0,
-        "iUpg": 0,                                    # membership flag — free account
+        "upgradeExpires": membership_expires(char),   # DateTime; membership is gated on UpgradeDays
+        "UpgradeDays": membership_days(char),
+        "iUpg": 1 if membership_days(char) > 0 else 0,  # membership flag
         "ActivationFlag": DEFAULT_ACTIVATION_FLAG,
         "Age": 0,
         "Buyer": False,
@@ -1484,7 +1747,10 @@ def build_init_player(conn, char):
         "HouseSlots": DEFAULT_HOUSE_SLOTS,
         "EquippedHouseItemID": equipped_house_id(conn, char["id"]),   # -1 = no house
         "achievements": achievements,
-        "guild": None,                                # null is the client's real "no guild" value
+        # Name-plate frames this char may pick (client picker gates on this list). [[name-plates]]
+        "ownedPortraitFrames": owned_portrait_frames(account_name, achievements),
+        # Info.guild: the client reads the guild from playerInfo. null = no guild. [[name-plates]]
+        "guild": guilds.guild_object(conn, char["guild_id"] if "guild_id" in char.keys() else 0),
     }
 
     return {
@@ -1496,8 +1762,9 @@ def build_init_player(conn, char):
         "loot": [],                                   # pending loot is per-uid (loot.py); none at login
         "patterns": patterns.loose_gems(conn, char["id"]),   # the enhancement gem bag (equipPattern)
         "houseItems": house_items(conn, char["id"]),  # owned houses + furniture (houseItem shape)
-        "friends": [],                                # social — not modelled
+        "friends": friends.friend_list(conn, char["id"]),   # mutual persistent friends
         "Actions": seact,                             # the class skill bar (sEAct) the HUD shows
+        "tagShop": guild_tag_shop(conn, char),        # guild-tag colour palette + ownership (mod UI)
     }
 
 
@@ -1553,7 +1820,7 @@ def charselect_entry(conn, char):
         "intHPMax": maxhp,
         # --- preview-shell defaults (AE's CharSelect packet sends these as 0/null) ---
         "pvpTeam": 0,
-        "iUpgDays": 0,
+        "iUpgDays": membership_days(char),
         "isFounder": False,
         "intState": 0,
         "intRP": 0,
@@ -1590,13 +1857,13 @@ def build_account(conn, char, username, token):
     return {
         "userid": uid_for(char),
         "iAccess": access,
-        "iUpg": 0,
+        "iUpg": 1 if membership_days(char) > 0 else 0,
         "iAge": 0,
         "iLevel": char["level"],
         "mobileLevel": char["level"],
         "mobileGold": char["gold"],
         "mobileExp": char["exp"],
-        "iUpgDays": 0,
+        "iUpgDays": membership_days(char),
         "bCCOnly": 0,
         "intHours": 0,
         "iEmailStatus": 0,
@@ -1607,7 +1874,7 @@ def build_account(conn, char, username, token):
         "strEmail": f"player{char['id']}@infinityserver.local",
         "strCountryCode": "US",
         "unm": username,                          # the typed name the game-server Login echoes
-        "dUpgExp": DEFAULT_UPGRADE_EXPIRES,
+        "dUpgExp": membership_expires(char),
         "dCreated": created_iso,
         "hasAlphaAccess": True,
         "chars": [charselect_entry(conn, char)],
@@ -1750,15 +2017,21 @@ def shop_listing(conn, shop_item):
     return item
 
 
-def load_shop(conn, shop_id):
-    """Assemble a loadShop response from the normalized catalog (or None)."""
+def load_shop(conn, shop_id, item_filter=0):
+    """Assemble a loadShop response, honoring ApopButtonData's optional item-type filter."""
     blob = db.shop_blob(conn, shop_id)          # loadShop wrapper generated from columns
     if blob is None:
         return None
-    blob["shop"]["items"] = [
+    items = [
         shop_listing(conn, si) for si in conn.execute(
             "SELECT * FROM shop_items WHERE shop_id=? ORDER BY shop_item_id", (shop_id,))
     ]
+    try:
+        item_filter = int(item_filter or 0)
+    except (TypeError, ValueError):
+        item_filter = 0
+    blob["shop"]["items"] = [it for it in items if not item_filter
+                              or int(it.get("ItemType", 0) or 0) == item_filter]
     return blob
 
 

@@ -33,11 +33,13 @@ import hmac
 import json
 import os
 import pathlib
+import re
 import time
 import urllib.parse
 import urllib.request
 
 import db
+import statues
 import game
 import montemplates
 import placements
@@ -122,8 +124,33 @@ def get_monster_data(conn, qs):
     for mid in ids:
         c = montemplates.catalog(conn, mid)
         if c is not None:
+            _normalize_equipped_items(c)
             out.append(c)
     return out
+
+
+def _normalize_equipped_items(mon):
+    equipped = mon.get("equippedItems") if isinstance(mon, dict) else None
+    if not equipped:
+        if isinstance(mon, dict):
+            mon["equippedItems"] = {}
+        return
+    if isinstance(equipped, dict):
+        mon["equippedItems"] = {str(k): v for k, v in equipped.items()}
+        return
+    if isinstance(equipped, list):
+        out = {}
+        for item in equipped:
+            if not isinstance(item, dict):
+                continue
+            spot = item.get("EquipSpot")
+            if spot is None:
+                spot = item.get("equipSpot")
+            if spot is not None:
+                out[str(spot)] = item
+        mon["equippedItems"] = out
+        return
+    mon["equippedItems"] = {}
 
 
 # --- asset-bundle registry (id -> {ID,Name,Filename,Version*}) -----------------
@@ -351,6 +378,80 @@ def dialogger_load(conn, form):
     return row["raw"] if row else ""
 
 
+def _search_terms(value):
+    return re.findall(r"[a-z0-9]+", (value or "").lower())
+
+
+def _looks_like_background(name, link, load_type):
+    if load_type == "bg":
+        return True
+    words = set(_search_terms(f"{name} {link}"))
+    markers = {"bg", "background", "backdrop", "foreground", "fg", "scenery", "sky", "room"}
+    return bool(words & markers) or any(part.endswith("bg") or part.startswith("bg") or part.startswith("fg") for part in words)
+
+
+def cutscene_assets(conn, qs):
+    """Rank reusable art references found in saved Dialogger setup frames."""
+    if isinstance(qs, str):
+        qs = urllib.parse.parse_qs(qs)
+    query = (qs.get("q", [""])[0] or "").strip()
+    kind = (qs.get("kind", ["all"])[0] or "all").lower()
+    terms = _search_terms(query)
+    found = {}
+    for row in conn.execute("SELECT id, raw FROM cutscenes"):
+        try:
+            scene = json.loads(row["raw"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        frames = scene.get("frames") or []
+        if not frames:
+            continue
+        scene_name = scene.get("cutsceneName") or f"Cutscene {row['id']}"
+        for command in frames[0]:
+            if not isinstance(command, str) or not command.startswith("Load{"):
+                continue
+            body = command[5:-1] if command.endswith("}") else command[5:]
+            fields = body.split("|")
+            if len(fields) < 3 or fields[2] not in ("actor", "bg"):
+                continue
+            link, load_type = fields[1], fields[2]
+            raw_name = link.split(",", 1)[-1] if "," in link else link
+            name = re.sub(r"[_-]+", " ", raw_name).strip() or f"Asset {fields[0]}"
+            background = _looks_like_background(name, link, load_type)
+            if kind == "background" and not background:
+                continue
+            if kind == "actor" and background:
+                continue
+            haystack = " ".join(_search_terms(f"{name} {link} {scene_name}"))
+            if terms and not all(term in haystack for term in terms):
+                continue
+            lowered = name.lower()
+            score = (1000 if lowered == query.lower() else 0)
+            score += 300 if query and lowered.startswith(query.lower()) else 0
+            score += sum(80 if any(word.startswith(term) for word in _search_terms(name)) else 20 for term in terms)
+            score += 25 if background else 0
+            key = (load_type, link.lower())
+            candidate = {"type": load_type, "link": link, "name": name, "scene": scene_name,
+                         "background": background, "score": score}
+            if key not in found or score > found[key]["score"]:
+                found[key] = candidate
+    results = sorted(found.values(), key=lambda item: (-item["score"], item["name"].lower()))
+    for item in results:
+        item.pop("score", None)
+    return results
+
+
+def cutscene_npcs(conn, qs):
+    if isinstance(qs, str):
+        qs = urllib.parse.parse_qs(qs)
+    query = (qs.get("q", [""])[0] or "").strip().lower()
+    if query.isdigit():
+        rows = conn.execute("SELECT mon_id AS id, name FROM monsters WHERE mon_id=?", (int(query),))
+    else:
+        rows = conn.execute("SELECT mon_id AS id, name FROM monsters WHERE lower(name) LIKE ? "
+                            "ORDER BY CASE WHEN lower(name)=? THEN 0 WHEN lower(name) LIKE ? THEN 1 ELSE 2 END, name",
+                            (f"%{query}%", query, f"{query}%"))
+    return [{"id": row["id"], "name": row["name"] or f"NPC {row['id']}"} for row in rows]
 def create_new_apop(conn, form):
     """tweak/CreateNewApop {npcID} -> {"ID": n}: mint a blank apop owned by the
     NPC so the in-game '+' button works. The client reads only dictionary["ID"]."""
@@ -705,6 +806,8 @@ ROUTES = {
     "tweak/createnewapop":   ("POST", create_new_apop),
     "tweak/dialoggersave":   ("POST", dialogger_save),
     "tweak/dialoggerload":   ("POST", dialogger_load),
+    "tweak/csassets":       ("GET",  cutscene_assets),
+    "tweak/csnpcs":         ("GET",  cutscene_npcs),
     "apop/list":             ("GET",  apop_list),
     "apop/load":             ("GET",  apop_load),
     "apop/npcs":             ("GET",  apop_npcs),
@@ -842,6 +945,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_bytes(self, body, code=200, ctype="application/octet-stream", disposition=None):
+        body = body or b""
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        if disposition:
+            self.send_header("Content-Disposition", disposition)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send_text(self, text, code=200, ctype="text/plain; charset=utf-8"):
         body = (text or "").encode("utf-8")
         self.send_response(code)
@@ -932,13 +1046,60 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self._handle("POST")
 
+    def do_PUT(self):
+        self._handle("PUT")
+
     def _handle(self, method):
         key = self._route_key()
         qs = self.path.split("?", 1)[1] if "?" in self.path else ""
         body = b""
-        if method == "POST":
+        if method in ("POST", "PUT"):
             length = int(self.headers.get("Content-Length", 0) or 0)
+            if length > statues.MAX_RENDER_BYTES:
+                return self._send_json({"error": "statue render is too large"}, 413)
             body = self.rfile.read(length) if length else b""
+
+
+        # DynamicStatue's cid metadata resolves here. This is public game art, not
+        # an editor endpoint; the saved snapshot contains no account credentials.
+        # The current Unity client renders the fully assembled avatar locally, stone-grades
+        # it, and uploads the transparent PNG. Authenticate against the same account token
+        # used by the game socket; a client may only replace its own generated statue.
+        if method == "PUT" and key == "statue/upload":
+            cid = (self.headers.get("ccid", "") or "").strip()
+            token = (self.headers.get("token", "") or "").strip()
+            if not cid.isdigit() or not token:
+                return self._send_json({"error": "missing statue identity"}, 400)
+            conn = db.connect()
+            try:
+                account = conn.execute(
+                    "SELECT a.username FROM characters c JOIN accounts a ON a.id=c.account_id "
+                    "WHERE c.id=?", (int(cid),)).fetchone()
+                char = (game.resolve_session(conn, account["username"], token)
+                        if account is not None else None)
+                if char is None or int(char["id"]) != int(cid):
+                    return self._send_json({"error": "not authorized"}, 401)
+                if not statues.store_render(conn, int(cid), body):
+                    return self._send_json({"error": "generate the statue before uploading"}, 409)
+                conn.commit()
+            finally:
+                conn.close()
+            print(f"  [api] PUT statue/upload -> stored cid={int(cid)} ({len(body)}B)")
+            return self._send_json({"ok": True})
+
+        if method == "GET" and key.startswith("statue/") and key.endswith(".png"):
+            download = key.endswith("/download.png")
+            cid = key[len("statue/"):-len("/download.png")] if download else key[len("statue/"):-4]
+            if not cid.isdigit():
+                return self._send_bytes(b"", 404, "image/png")
+            conn = db.connect()
+            try:
+                image = statues.render_png(conn, int(cid))
+            finally:
+                conn.close()
+            disposition = (f'attachment; filename="infinity-statue-{int(cid)}.png"'
+                           if download and image else None)
+            return self._send_bytes(image, 200 if image else 404, "image/png", disposition)
 
         # public auth endpoints (the login flow itself — NOT gated, else redirect loop)
         if key == "editor/login":
@@ -966,6 +1127,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 arg = urllib.parse.parse_qs(body.decode("utf-8", "replace")) if method == "POST" else qs
                 result = route[1](conn, arg)
+                reload_type = {"tweak/createnewapop": "apop", "apop/save": "apop",
+                               "tweak/dialoggersave": "dialog",
+                               "quest/save": "quest"}.get(key)
+                if reload_type and (not isinstance(result, dict) or result.get("ok", True)):
+                    db.kv_set(conn, "cache_revision:" + reload_type, time.time_ns())
+                    conn.commit()
             finally:
                 conn.close()
             print(f"  [api] {method} {key} -> served")

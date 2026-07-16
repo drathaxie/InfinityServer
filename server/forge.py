@@ -59,6 +59,7 @@ def skill_object(row):
         "ForgeData": _parse(row["forge_data"], [{}, {}]),
         "AutoHRange": row["auto_h_range"],
         "AutoVRange": row["auto_v_range"],
+        "AutoHoldAtRange": bool(row["auto_hold_at_range"]),
         "mana": row["mana"],
     }
 
@@ -101,6 +102,12 @@ def _graph_particles(data_json):
             continue
         if props.get("Name") == "Particle" and props.get("Particle"):
             out.append(props["Particle"])
+        elif props.get("Name") == "SpellAnimation":
+            # NodeSpellAnimation queues both assets from the equipped class bundle.
+            # Preloading them in sEAct prevents the first cast racing the async load.
+            for key in ("SpellGraphic", "SpellImpact"):
+                if props.get(key):
+                    out.append(props[key])
         elif props.get("Name") == "AuraVFX" and props.get("VFX"):
             out.append(props["VFX"] + "_Appear")
             out.append(props["VFX"] + "_Exit")
@@ -116,12 +123,13 @@ def build_seact(conn, class_id):
     particles = []
     for r in conn.execute(
             "SELECT cs.slot AS cslot, s.skill_id, s.action, s.name, s.icon, s.description, "
-            "s.auto_h_range, s.auto_v_range, s.mana, s.data "
+            "s.auto_h_range, s.auto_v_range, s.auto_hold_at_range, s.mana, s.data "
             "FROM class_skills cs JOIN skills s ON s.skill_id=cs.skill_id "
             "WHERE cs.class_id=? ORDER BY cs.slot", (int(class_id),)):
         entry = {"id": r["skill_id"], "act": r["action"], "nam": r["name"] or "",
                  "icon": r["icon"] or "", "desc": r["description"] or "",
-                 "autoHRange": r["auto_h_range"], "autoVRange": r["auto_v_range"]}
+                 "autoHRange": r["auto_h_range"], "autoVRange": r["auto_v_range"],
+                 "autoHoldAtRange": bool(r["auto_hold_at_range"])}
         if r["mana"]:
             entry["regMana"] = r["mana"]
         skill_list[str(r["cslot"])] = entry
