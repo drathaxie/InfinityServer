@@ -156,6 +156,32 @@ def main():
         assert new_g == "F", "gender flipped to F"
         assert "genderSwap" in _cmds(wa), "genderSwap broadcast"
 
+        # --- titles: list owned, equip a valid one (persist + broadcast), reject a spoofed one ---
+        import titles as titlesvc
+
+        def _reload(c):
+            return conn.execute("SELECT * FROM characters WHERE id=?", (c["id"],)).fetchone()
+
+        wa.data.clear()
+        await server.dispatch(sa, wa, _pkt("getPlayerTitles"))
+        assert "getPlayerTitles" in _cmds(wa), "getPlayerTitles returns a list"
+
+        wa.data.clear(); wb.data.clear()
+        await server.dispatch(sa, wa, _pkt("savePlayerTitle", "Hero"))
+        assert "savePlayerTitle" in _cmds(wa), "setter gets ResponseSavePlayerTitle"
+        assert "AreaAdd" in _cmds(wb), "room-mate gets a nameplate refresh (AreaAdd)"
+        assert titlesvc.selected(_reload(alice_c)) == "Hero", "title persisted to prefs"
+        assert game.build_init_player(conn, _reload(alice_c))["user"]["Title"] == "Hero", \
+            "Title rides the user object"
+
+        # a title the character doesn't own is silently ignored (server-authoritative)
+        await server.dispatch(sa, wa, _pkt("savePlayerTitle", "Game Master"))
+        assert titlesvc.selected(_reload(alice_c)) == "Hero", "spoofed title ignored"
+
+        # clearing ('No title') removes it
+        await server.dispatch(sa, wa, _pkt("savePlayerTitle", ""))
+        assert titlesvc.selected(_reload(alice_c)) == "", "title cleared"
+
         print("ALL SOCIAL SYSTEM TESTS PASSED")
 
     asyncio.run(run())

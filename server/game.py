@@ -1634,6 +1634,12 @@ def build_init_player(conn, char):
     # Default every relog. [[name-plates]]
     prefs["PortraitPreference"] = portrait_pref
 
+    # Cosmetic title (the selectable subtitle under the nameplate) is persisted in the prefs blob
+    # like PortraitPref; pop it out so it rides the user object as the top-level "Title"
+    # (ComUserData.Title -> Player.Title) and doesn't leak into the emitted userPrefs toggles.
+    # The InfinityLoader mod draws it below the name (the guild tag moved above). [[titles]]
+    title_pref = prefs.pop("Title", "") or ""
+
     # The equipped class drives the visual rig (skin + ClassParticleBundle) AND the skill bar.
     # A real ClassID is REQUIRED for the client to activate the class; a fresh character has the
     # starter Warrior, so fall back to it only for a class-less edge case.
@@ -1693,6 +1699,7 @@ def build_init_player(conn, char):
         "showHelm": bool(prefs.get("ShowHelm", True)),
         "showCloak": bool(prefs.get("ShowCloak", True)),
         "portraitPref": portrait_pref,                # name-plate style (savePortrait/portraitChange)
+        "Title": title_pref,                          # cosmetic title -> Player.Title (nameplate subtitle) [[titles]]
         "strFrame": "Enter",
         "strPad": "Spawn",
         "particleList": seact.get("particleList", []),

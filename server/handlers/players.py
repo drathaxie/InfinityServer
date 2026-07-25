@@ -6,6 +6,7 @@ import time
 import db
 import game
 import statues
+import titles as titlesvc
 import world
 import friends as friendsvc
 
@@ -75,6 +76,38 @@ async def gender_swap(session, writer, cmd, params, msg):
           "coins": session.char["coins"]}
     world.broadcast(session.area, pk)
     print(f"  [s2c] genderSwap uid={session.member.uid} -> {new_gender}")
+    return
+
+
+@register("getPlayerTitles")
+async def get_player_titles(session, writer, cmd, params, msg):
+    # RequestGetPlayerTitles (no params) -> the titles this char may equip. The client caches these
+    # into Game.PlayerTitles and populates the TitleOption picker. [[titles]]
+    if session.char is None:
+        return
+    await send_obj(writer, {"Cmd": "getPlayerTitles",
+                            "Titles": titlesvc.available_titles(session.char)})
+    return
+
+
+@register("savePlayerTitle")
+async def save_player_title(session, writer, cmd, params, msg):
+    # RequestSavePlayerTitle Params=[title] ("" clears). Server-authoritative: silently ignore a
+    # title the char doesn't own. Persist, confirm to the setter (ResponseSavePlayerTitle applies it
+    # to their mainPlayer + closes the picker), and rebroadcast the user object so everyone else's
+    # nameplate refreshes (SetUserData -> our RefreshNameplate postfix). [[titles]]
+    if session.char is None or session.member is None:
+        return
+    title = (params[0] if params else "") or ""
+    if not titlesvc.is_allowed(session.char, title):
+        return
+    titlesvc.set_selected(session.conn, session.char, title)
+    session.char = session.conn.execute(
+        "SELECT * FROM characters WHERE id=?", (session.char["id"],)).fetchone()
+    session.member.user_obj["Title"] = title      # keep the live render object current for late-joiners
+    await send_obj(writer, {"Cmd": "savePlayerTitle", "CharID": session.char["id"], "Title": title})
+    world.broadcast(session.area, {"Cmd": "AreaAdd", "userData": session.member.user_obj})
+    print(f"  [s2c] savePlayerTitle uid={session.member.uid} -> '{title}'")
     return
 
 
