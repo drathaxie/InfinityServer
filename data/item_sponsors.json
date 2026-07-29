@@ -1,0 +1,11 @@
+{
+  "_comment": "Item sponsorship credits (AE Kickstarter 'Benevolent Founder' tier): a player who sponsored an item's full conversion to Infinity gets their name in the item's credits (client shows a golden-star Sponsors button -> list with char-page + house links). Keyed by item ID -> ordered list of sponsors. Item 1 (Default Sword) captured from LIVE AQW:Infinity (getItemSponsors s2c). Item 3 (Default Staff) -> Mythrandia is named by Artix in Kickstarter Update #29 (2026-07-23, 'Sponsored Items Now Have Credits': 'the first and only sponsored item... was the Default Staff... Mythrandia'). has_house is forced false: on live these players return :true (houses THERE) but they have no house on this server, so :true would show a 'visit home' button that errors; :false hides only that button and keeps the working char-page link. Seeded by seed_item_sponsors (insert-if-absent).",
+  "1": [
+    { "name": "LukeFriday", "has_house": false },
+    { "name": "Jod", "has_house": false },
+    { "name": "Metaqrion", "has_house": false }
+  ],
+  "3": [
+    { "name": "Mythrandia", "has_house": false }
+  ]
+}

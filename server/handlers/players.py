@@ -50,6 +50,21 @@ async def item_query(session, writer, cmd, params, msg):
     return
 
 
+@register("getItemSponsors")
+async def get_item_sponsors(session, writer, cmd, params, msg):
+    # Params=[itemID]. Reply {Cmd:getItemSponsors, Sponsors:[name | "name:false"]}. The client's
+    # ItemPreviewNew panel fires this whenever an item is shown and reveals a Sponsors button/list
+    # when the list is non-empty (AE's Benevolent Founder item credit). RequestItemSponsors
+    if not params:
+        return
+    try:
+        sponsors = db.item_sponsors(session.conn, int(params[0]))
+    except (ValueError, TypeError):
+        return
+    await send_obj(writer, {"Cmd": "getItemSponsors", "Sponsors": sponsors})
+    return
+
+
 @register("genderSwap")
 async def gender_swap(session, writer, cmd, params, msg):
     # Flip M<->F, re-resolve the hair for the new gender (hair bundles are gendered), persist,
