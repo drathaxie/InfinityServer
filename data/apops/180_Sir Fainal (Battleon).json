@@ -1,7 +1,7 @@
 {
   "ID": 180,
   "nextElementId": 36,
-  "name": "Sir Fainal reuse",
+  "name": "Sir Fainal (Battleon)",
   "bgImage": "",
   "bgImageScale": 1,
   "startingPanels": [
@@ -43,7 +43,7 @@
           "changeBoxColor": "#FFFFFF",
           "nameplateTextColor": "#FFFFFF",
           "nameplateBoxColor": "#000000",
-          "text": "Oh? No, I don't got anything new for you. I just saw everyone gathering around looking important, and I wanted to look cool too, so I joined them.\n\nAlthough... you could help me fight the Undead at the /Graveyard if you haven't already...\n",
+          "text": "@name ! I'm so glad to find you in town. The Undead are rising once again! A new Lich has risen a horde of Undead that is threatening to invade town.\n\nI could use your help putting these Undead in place.\n\nJoin me in this re-imagined adventure and expansion on the Graveyard! ",
           "hideLead": false,
           "borderless": false,
           "addNameplate": false,
@@ -59,7 +59,7 @@
           "acceptQuests": [],
           "turninQuests": [],
           "action": "Join",
-          "label": "Fight the Undead at Graveyard!",
+          "label": "The Return of the Living Undead!",
           "subtitle": "",
           "intMin": 0,
           "intMax": 0,
@@ -99,7 +99,7 @@
   ],
   "actors": [
     {
-      "npcid": 382,
+      "npcid": 381,
       "name": "Sir Fainal",
       "subtitle": "Paladin in Training",
       "targetNode": 0,
