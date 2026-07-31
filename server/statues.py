@@ -176,6 +176,23 @@ def store_render(conn, char_id, image):
     return True
 
 
+def store_render_force(conn, char_id, image):
+    """Staff/batch path: store a render for ANY character, creating the statue row if it doesn't
+    exist yet. Used by /genstatues (the FounderTower roster), which renders characters that never
+    ran generateStatue themselves. Only the render (statues.image) is needed for the tower; the
+    house char_item is left to the normal generate() flow."""
+    char_id = int(char_id)
+    if not validate_render_png(image):
+        return False
+    snapshot = json.dumps({"version": 1, "char_id": char_id, "source": "genstatues"},
+                          separators=(",", ":"))
+    conn.execute(
+        "INSERT INTO statues(char_id,item_id,generated_at,snapshot,image) VALUES(?,?,?,?,?) "
+        "ON CONFLICT(char_id) DO UPDATE SET image=excluded.image, generated_at=excluded.generated_at",
+        (char_id, STATUE_ITEM_ID, float(time.time()), snapshot, bytes(image)))
+    return True
+
+
 def render_png(conn, char_id):
     """Return only the uploaded real-character render; never invent substitute art."""
     row = conn.execute("SELECT image FROM statues WHERE char_id=?", (int(char_id),)).fetchone()

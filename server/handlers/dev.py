@@ -3,6 +3,7 @@
 
 The slash cmds gate themselves on _is_staff inside this handler (they all share
 the "cmd" envelope, so the central STAFF_CMDS gate in dispatch can't split them)."""
+import asyncio
 import json
 
 import db
@@ -23,6 +24,49 @@ async def slash_cmd(session, writer, cmd, params, msg):   # slash commands: Para
     # Some client paths send Params=["shop 1"] instead of ["shop", "1"].
     params = [tok for part in (params or []) for tok in str(part).strip().split()]
     sub = (params[0].lstrip("/").lower() if params else "")
+
+    # Batch statue generation via the REAL render pipeline: summon each character's assembled
+    # avatar into THIS dev's client (AreaAdd — same path other players use), tell the mod to run it
+    # through the statue capture (stone-grade + pedestal + upload), then remove it. `/genstatue <id>`
+    # does one; `/genstatues` does the whole roster. Only this client sees the summoned avatars.
+    if sub in ("genstatue", "genstatues") and _is_staff(session):
+        conn = session.conn
+        my_id = int(session.char["id"]) if session.char is not None else 0
+        if sub == "genstatue" and len(params) > 1:
+            try:
+                ids = [int(params[1])]
+            except ValueError:
+                ids = []
+        else:
+            ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM characters ORDER BY id").fetchall() if int(r["id"]) != my_id]
+
+        async def _say(m):
+            await send_obj(writer, {"Cmd": "chatm", "Name": "Server", "channel": "server",
+                                    "ID": 0, "msg": m})
+
+        await _say(f"Generating {len(ids)} statue(s) via the render pipeline — stay in this map.")
+        done = 0
+        for cid in ids:
+            char = conn.execute("SELECT * FROM characters WHERE id=?", (cid,)).fetchone()
+            if char is None:
+                continue
+            try:
+                user = game.build_init_player(conn, char)["user"]
+            except Exception as ex:
+                print(f"  [genstatue] build failed cid={cid}: {ex}")
+                continue
+            uid, name = user.get("uid"), user.get("Name")
+            await send_obj(writer, {"Cmd": "AreaAdd", "userData": user})
+            await asyncio.sleep(4.0)                       # client loads the avatar's item bundles
+            await send_obj(writer, {"Cmd": "captureStatue", "cid": int(cid), "name": name})
+            await asyncio.sleep(3.0)                       # mod renders + uploads
+            await send_obj(writer, {"Cmd": "AreaRemove", "uid": uid, "unm": name})
+            await asyncio.sleep(0.4)
+            done += 1
+        await _say(f"Statue generation complete ({done} rendered).")
+        return
+
     if sub == "dbapop" and len(params) > 1 and _is_staff(session):
         try:
             arg = int(params[1])

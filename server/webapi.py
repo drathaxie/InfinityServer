@@ -33,6 +33,7 @@ import hmac
 import json
 import os
 import pathlib
+import random
 import re
 import time
 import urllib.parse
@@ -794,6 +795,39 @@ def get_base_classes(conn, qs):
     return out
 
 
+# FounderTower pedestal world coords (parented under each frame's MapCell by the client mod).
+# TUNE THESE HERE — editing + restarting infinity-api re-places the statues with NO client rebuild.
+FOUNDER_STATUE_PPU = 88      # pixels-per-unit for tower statues (lower = larger). Tune live.
+FOUNDER_PEDESTALS = [
+    # Statue rooms R2/R3/R9. Coords are cell-local (parented under each MapCell). Starting anchors
+    # = the Left/Right spawn pads pulled from the bundle; nudge x/y here per in-client feedback.
+    # flip=True mirrors the statue to face the other way (right-column statues face inward/left).
+    {"x": -31.0, "y": -4.25, "frame": "R2"},
+    {"x":  31.0, "y": -4.25, "frame": "R2", "flip": True},
+    {"x": -31.0, "y": -4.25, "frame": "R3"},
+    {"x":  31.0, "y": -4.25, "frame": "R3", "flip": True},
+    {"x": -31.0, "y": -4.25, "frame": "R9"},
+    {"x":  31.0, "y": -4.25, "frame": "R9", "flip": True},
+]
+
+
+def founder_statues(conn, qs):
+    """FounderTower pedestal roster + positions. Returns the pedestal world coords AND a RANDOMIZED
+    subset (sized to the pedestal count) of the characters who have a generated Custom Hero Statue
+    (statues.image present). Owners intentionally outnumber pedestals, so each visit shows a
+    different random slice. `statues[i]` fills `pedestals[i]`; extra pedestals stay empty. Public
+    game data, same as the statue PNGs themselves (no credentials in the payload)."""
+    peds = FOUNDER_PEDESTALS
+    rows = conn.execute(
+        "SELECT s.char_id, c.name FROM statues s JOIN characters c ON c.id=s.char_id "
+        "WHERE s.image IS NOT NULL ORDER BY s.char_id").fetchall()
+    owners = [{"cid": int(r["char_id"]), "name": r["name"] or ""} for r in rows]
+    random.shuffle(owners)
+    # ppu = pixels-per-unit for the statue sprite (higher = smaller). Tune the tower statue size here.
+    return {"statues": owners[:len(peds)], "pedestals": peds, "ppu": FOUNDER_STATUE_PPU,
+            "total": len(owners)}
+
+
 # path (lowercased, no query) -> (method, handler taking (conn, query_or_form))
 ROUTES = {
     "data/getbaseclasses":   ("GET",  get_base_classes),
@@ -832,6 +866,7 @@ ROUTES = {
     "map/load":              ("GET",  map_load),
     "map/monsters":          ("GET",  apop_npcs),     # monster picker for placing NPCs
     "map/save":              ("POST", map_save),
+    "founderstatues":        ("GET",  founder_statues),
 }
 
 # Editor pages (staff-gated) -> the HTML file served for each. The in-game pencil opens apop;
@@ -1077,9 +1112,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "WHERE c.id=?", (int(cid),)).fetchone()
                 char = (game.resolve_session(conn, account["username"], token)
                         if account is not None else None)
-                if char is None or int(char["id"]) != int(cid):
+                is_self = char is not None and int(char["id"]) == int(cid)
+                # Staff bypass: the /genstatues batch tool renders statues for OTHER characters and
+                # uploads them with the DEV's own session token. Allow it when the token belongs to a
+                # staff account, and force-create the statue row (the target never ran generateStatue).
+                staff = conn.execute(
+                    "SELECT MAX(c.access_level) AS a FROM accounts ac "
+                    "JOIN characters c ON c.account_id=ac.id WHERE ac.session_token=?",
+                    (token,)).fetchone()
+                is_staff = bool(staff and int(staff["a"] or 0) >= game.DEV_ACCESS_LEVEL)
+                if not is_self and not is_staff:
                     return self._send_json({"error": "not authorized"}, 401)
-                if not statues.store_render(conn, int(cid), body):
+                ok = (statues.store_render(conn, int(cid), body) if is_self
+                      else statues.store_render_force(conn, int(cid), body))
+                if not ok:
                     return self._send_json({"error": "generate the statue before uploading"}, 409)
                 conn.commit()
             finally:

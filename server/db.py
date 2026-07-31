@@ -119,6 +119,36 @@ CREATE TABLE IF NOT EXISTS item_sponsors (
 );
 CREATE INDEX IF NOT EXISTS idx_item_sponsors_item ON item_sponsors(item_id);
 
+-- Redeem codes (client RedeemCodeModal: redeem_code / redeem_history). A code grants one or
+-- more rewards atomically to an account, once per account, capped by max_uses. Each reward is
+-- an item grant or an achievement-bitfield bit (reward_field/reward_value); redeem_code_uses is
+-- the per-account ledger that enforces single-use. Schema was live on prod before it was ever
+-- in git — added here so a fresh seed is self-contained (CREATE IF NOT EXISTS = no-op on prod).
+CREATE TABLE IF NOT EXISTS redeem_codes (
+    code         TEXT NOT NULL PRIMARY KEY,
+    description  TEXT NOT NULL DEFAULT '',
+    max_uses     INTEGER NOT NULL DEFAULT 0,
+    active       INTEGER NOT NULL DEFAULT 1,
+    created      REAL
+);
+CREATE TABLE IF NOT EXISTS redeem_code_rewards (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    code         TEXT NOT NULL,
+    reward_type  TEXT NOT NULL,
+    reward_value INTEGER NOT NULL,
+    reward_qty   INTEGER NOT NULL DEFAULT 1,
+    reward_field TEXT NOT NULL DEFAULT 'ip25'
+);
+CREATE TABLE IF NOT EXISTS redeem_code_uses (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   INTEGER NOT NULL,
+    code         TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    redeemed_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_redeem_rewards_code ON redeem_code_rewards(code);
+CREATE INDEX IF NOT EXISTS idx_redeem_uses_account ON redeem_code_uses(account_id);
+
 -- Generated hero statues are ordinary floor items whose rendered appearance is a
 -- server-side snapshot. DynamicStatue carries cid:<char_id> in houseItem.Meta;
 -- the image endpoint resolves that stable id through this table.
