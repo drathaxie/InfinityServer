@@ -237,7 +237,14 @@ public static class InfinityStatueCapture
         int targetW = AvatarTargetRightX - AvatarTargetLeftX + 1;
         int targetH = AvatarTargetTopY - AvatarFootTargetY + 1;
         int localFootX = Mathf.Clamp(footPixelX, minX, maxX) - minX;
-        int localFootY = Mathf.Clamp(footPixelY, minY, maxY) - minY;
+        // Deliberately NOT footPixelY-based: footPixelY tracks the character's transform root,
+        // which sits ABOVE the ground for a wide/clawed stance (root.transform.position is a rig
+        // pivot, not the literal lowest rendered pixel). Anchoring to that root let splayed
+        // paws/claws render past AvatarFootTargetY  visibly hanging off the pedestal's front
+        // edge. Always bottom-aligning the avatar's own true lowest pixel (row 0 of the fitted
+        // sprite = source minY) guarantees nothing ever renders below the target line, for any
+        // stance or species.
+        int localFootY = 0;
         int rightOfFoot = Mathf.Max(1, srcW - localFootX - 1);
         int leftOfFoot = Mathf.Max(1, localFootX);
         float canvasScale = Mathf.Min(
