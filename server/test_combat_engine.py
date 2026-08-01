@@ -303,10 +303,112 @@ def test_full_vocabulary():
           f"{len(cases)} schema cases")
 
 
+def test_safe_eval():
+    from combat_engine.rules import safe_eval
+    env = {"STR": 40, "INT": 10, "DEX": 20, "WIS": 5, "rp": 30, "spent": 25,
+           "aura": "Armor Melted"}
+    assert safe_eval("0.6*STR + 0.4*DEX", env) == 0.6 * 40 + 0.4 * 20
+    assert safe_eval("1 + 0.05*spent", env) == 2.25
+    assert safe_eval("rp >= 25 and STR > 10", env) is True
+    assert safe_eval("min(rp, 25)", env) == 25
+    assert safe_eval("2 if rp >= 50 else 1", env) == 1
+    assert safe_eval("aura == 'Armor Melted'", env) is True
+    for evil in ("__import__('os')", "().__class__", "STR.__add__(1)",
+                 "[x for x in (1,)]", "lambda: 1", "open('x')",
+                 "min(rp, key=int)", "env['STR']"):
+        try:
+            safe_eval(evil, env)
+        except (ValueError, NameError, SyntaxError):
+            continue
+        raise AssertionError(f"evil expression evaluated: {evil}")
+    print("safe_eval OK: arithmetic/branching/strings, hostile input rejected")
+
+
+def test_rules():
+    from combat_engine.rules import run_rules, run_skill
+    from combat_engine.state import CombatState
+
+    def ctx_for(state):
+        c = RenderContext(caster="p:1", slot=1, target="m:5", source=ReplayValueSource(),
+                          state=state, stats={"STR": 40, "INT": 10, "DEX": 20, "WIS": 5})
+        return c
+
+    # Formula -> var -> $-expression in a render node prop
+    st = CombatState("p:1", rp_max=50)
+    ctx = ctx_for(st)
+    out = run_rules([
+        {"Do": "Formula", "Var": "power", "Expr": "0.5*STR + 0.5*INT"},
+        {"Do": "Emit", "Node": {"Name": "Resource", "Amount": {"$": "int(power)"}}},
+    ], ctx)
+    assert out == [{"Name": "Resource", "Amount": 25}]
+
+    # ResourceOp gain/spend_all + threshold Branch
+    st = CombatState("p:1", rp_max=50)
+    ctx = ctx_for(st)
+    seq = [
+        {"Do": "Branch", "If": "rp >= 25",
+         "Then": [{"Do": "ResourceOp", "Op": "spend_all"},
+                  {"Do": "Emit", "Node": {"Name": "Cooldown", "Slot": 1,
+                                          "CD": {"$": "1000 + spent*10"}}}],
+         "Else": [{"Do": "ResourceOp", "Op": "gain", "Amount": 10}]},
+    ]
+    assert run_rules(seq, ctx) == [] and st.rp == 10, "below threshold: builds"
+    st.rp = 30
+    out = run_rules(seq, ctx_for(st))
+    assert st.rp == 0 and out == [{"Name": "Cooldown", "Slot": 1, "CD": 1300,
+                                   "Animation": ""}], "at threshold: spends all"
+
+    # aspect Branch + SetAspect exclusivity
+    st = CombatState("p:1", rp_max=50)
+    ctx = ctx_for(st)
+    st.set_aspect("Mage Aspect")
+    out = run_rules([
+        {"Do": "Branch", "On": "aspect",
+         "Cases": {"Warrior Aspect": [{"Do": "Emit", "Node": {"Name": "Channel"}}],
+                   "Mage Aspect": [{"Do": "Emit", "Node": {"Name": "StopChannel"}}]},
+         "Default": []},
+        {"Do": "SetAspect", "Aspect": "Warrior Aspect",
+         "Group": ["Warrior Aspect", "Mage Aspect"]},
+    ], ctx)
+    assert out == [{"Name": "StopChannel"}], "branches on the PRE-cast aspect"
+    assert st.aspect_active("Warrior Aspect") and not st.aspect_active("Mage Aspect")
+
+    # ApplyAura: registry mods land on state, Aura node emitted, events fire
+    # the class trigger (the Heroic +1-per-Aspect-Effect shape)
+    st = CombatState("p:1", rp_max=50)
+    ctx = ctx_for(st)
+    config = {"triggers": {"aspect_effect": [
+        {"Do": "ResourceOp", "Op": "gain", "Amount": 1}]},
+        "skills": {"169": [
+            {"Do": "ApplyAura", "Aura": "Armor Melted", "Targets": ["m:5"]},
+            {"Name": "Resource", "Amount": {"$": "rp"}},
+        ]}}
+    nodes = run_skill(config, 169, ctx)
+    assert nodes[0]["Name"] == "Aura" and nodes[0]["AuraName"] == "Armor Melted"
+    assert st.rp == 1, "aspect_effect trigger granted +1 Heroic"
+    assert nodes[1] == {"Name": "Resource", "Amount": 1}, \
+        "Resource after the trigger sees the post-gain pool"
+    from combat_engine.state import get_state, drop_state
+    tstate = get_state("m:5")
+    assert tstate.aura("Armor Melted") is not None
+    assert tstate.modifier("dmg_taken_mult") == 0.20
+    drop_state("m:5")
+
+    # SetIndex drives combo state; inline Trigger registers for this cast
+    st = CombatState("p:1", rp_max=50)
+    ctx = ctx_for(st)
+    run_rules([{"Do": "SetIndex", "Slot": 1, "Index": 2}], ctx)
+    assert st.combo_index(1) == 2
+    print("rules OK: Formula/$-props, threshold+aspect Branch, ResourceOp, "
+          "ApplyAura->registry mods+events->trigger, SetIndex")
+
+
 def main():
     test_state()
     test_graph_walk()
     test_full_vocabulary()
+    test_safe_eval()
+    test_rules()
     total_casts = total_nodes = total_fails = total_uncovered = 0
     for name in ("golden_attack_fixtures.json", "infinity_hero_casts.json",
                  "monster_casts.json"):

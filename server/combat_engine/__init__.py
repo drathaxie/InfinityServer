@@ -22,3 +22,5 @@ from .state import CombatState, get_state, drop_state, all_states          # noq
 from .engine import (ValueSource, ReplayValueSource, RenderContext,        # noqa: F401
                      render_graph, build_attack, walk_graph)
 from .nodes import RENDERERS, render_node                                  # noqa: F401
+from .rules import safe_eval, run_rules, run_skill, fire_triggers          # noqa: F401
+from .auras import AURA_REGISTRY                                           # noqa: F401

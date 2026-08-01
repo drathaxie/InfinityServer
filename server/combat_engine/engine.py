@@ -83,7 +83,7 @@ class RenderContext:
     server knows the area; replay pins explicit lists)."""
 
     def __init__(self, caster, slot=0, target=None, targets=None, nodes=None,
-                 state=None, source=None, allies=None, enemies=None):
+                 state=None, source=None, allies=None, enemies=None, stats=None):
         self.caster = caster
         self.slot = slot
         self.target = target
@@ -93,6 +93,11 @@ class RenderContext:
         self.source = source or ReplayValueSource()
         self._allies = allies
         self._enemies = enemies
+        self.stats = dict(stats or {})      # STR/INT/DEX/WIS/... for Formula
+        self.vars = {}                      # per-cast scratch (Formula vars, spent)
+        self.rules_config = {}              # the class rule config (rules.run_skill)
+        self.cast_triggers = {}             # inline Trigger registrations this cast
+        self.triggered_nodes = []           # render nodes trigger sequences emitted
 
     def resolve_targets(self, props, default=None):
         """Resolve a node's Targets: an explicit list passes through (replay /
