@@ -1415,6 +1415,7 @@ def seed_void(conn):
 INFINITY_HERO_CLASS_ID = 2022
 INFINITY_HERO_ARMOR_ITEM = 200022
 INFINITY_HERO_GRAPH_VERSION = 1
+CLASS_SHOP_ID = 2468                    # Gravelyn's Infinity — where classes are bought
 
 _IH_RESOURCE = {"model": "heroic", "ResourceColor": 16773977, "MaxRP": 50,
                 "Threshold": 25, "ThresholdColor": 16766720}
@@ -1877,6 +1878,13 @@ def seed_infinity_hero(conn):
     if refresh:
         _seed_class_rules(conn, INFINITY_HERO_CLASS_ID, INFINITY_HERO_RULES)
     _db.store_item(conn, _IH_ITEM)                     # the class armor (insert-if-absent)
+    # Sell it where every other class is sold (Gravelyn's Infinity, the class shop) on the
+    # same free/coin-flagged terms as the base classes — otherwise the class exists but no
+    # player can reach it. Insert-if-absent, so a later price edit sticks.
+    conn.execute(
+        "INSERT INTO shop_items(shop_id, shop_item_id, item_id, cost, coins, quantity_remain) "
+        "VALUES(?,?,?,?,?,?) ON CONFLICT(shop_id, shop_item_id) DO NOTHING",
+        (CLASS_SHOP_ID, INFINITY_HERO_ARMOR_ITEM, INFINITY_HERO_ARMOR_ITEM, 0, 1, -1))
 
     n = 0
     for slot, skill_id, name, icon, desc, node_list in _IH_SKILLS:

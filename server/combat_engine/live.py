@@ -110,11 +110,10 @@ def _r_heal(ctx, r, out):
     out.append(node)
 
 
-def cast_skill_data(area, uid, slot, target, data, forge, skill_id, rules_config,
-                    allies=None, stats=None):
-    """Data-path cast -> (attack, killed_list, total_dmg) — the same contract
-    as combat.cast_skill, with mechanics from `rules_config` instead of the
-    skill_id-keyed Python."""
+def _cast(area, uid, slot, target, data, forge, skill_id, rules_config,
+          allies=None, stats=None):
+    """One data-path cast -> (attack, killed, dmg, extra_packets, delayed_packets),
+    with the mechanics coming from `rules_config` instead of skill_id-keyed Python."""
     caster = f"p:{uid}"
     res_cfg = (rules_config or {}).get("resource") or {}
     state = get_state(caster, rp_max=int(res_cfg.get("max")
@@ -135,7 +134,8 @@ def cast_skill_data(area, uid, slot, target, data, forge, skill_id, rules_config
     out = run_skill(rules_config or {}, skill_id, ctx)
 
     combat._rp[uid] = state.rp                          # bridge OUT
-    if res_cfg.get("model", "stacking") in ("stacking", "conviction"):
+    model = res_cfg.get("model", "stacking")
+    if model in ("stacking", "conviction"):
         combat._conv_last_cast[uid] = time.time()       # decay idle timer parity
         # the post-cast pool is the LAST node so it's the final bar-set
         # instruction (combat.cast_skill's Smite "stacks didn't drop" fix)
@@ -148,4 +148,32 @@ def cast_skill_data(area, uid, slot, target, data, forge, skill_id, rules_config
         if n.get("Name") == "Aura" and n.get("AuraName"):
             combat.apply_aura(area, n["AuraName"], n.get("Targets") or [], caster)
     attack = build_attack(caster, slot, out)
-    return attack, list(ctx.vars.get("_killed") or []), ctx.vars.get("dmg_total", 0)
+    return (attack, list(ctx.vars.get("_killed") or []), ctx.vars.get("dmg_total", 0),
+            list(ctx.extra_packets), list(ctx.delayed_packets))
+
+
+def cast_skill_data(area, uid, slot, target, data, forge, skill_id, rules_config,
+                    allies=None, stats=None):
+    """The live entry point combat.begin_cast routes to -> (packets, killed, total_dmg),
+    the same contract begin_cast has. The first packet is the cast itself; the rest are the
+    side packets its rules asked for — the combo-rebind broadcasts ride their own
+    StatusCode-3 Attack, exactly as AE sends them. A packet with a Delay goes to combat's
+    scheduler instead of out now, so the meteor's ground fire lands after the meteor does."""
+    attack, killed, dmg, extra, delayed = _cast(area, uid, slot, target, data, forge,
+                                                skill_id, rules_config, allies, stats)
+    caster = f"p:{uid}"
+    held = {id(nodes) for _d, _s, nodes in delayed}
+    packets = [attack]
+    for status, nodes in extra:
+        if id(nodes) in held:                   # scheduled below, not sent with the cast
+            continue
+        packets.append(build_attack(caster, slot, nodes, status=status))
+    combat.queue_delayed(area, [(d, s, (caster, slot, n)) for d, s, n in delayed])
+    return packets, killed, dmg
+
+
+def delayed_attack(payload, status):
+    """Rebuild the Attack for a scheduled packet whose timer elapsed (server.py's tick loop
+    broadcasts it). Kept here so the envelope shape stays with the engine."""
+    caster, slot, nodes = payload
+    return build_attack(caster, slot, nodes, status=status)

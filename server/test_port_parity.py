@@ -23,7 +23,6 @@ import random
 import combat
 import forge
 import seed
-from combat_engine import live
 from combat_engine.state import _states as _engine_states
 
 REPORT = pathlib.Path(__file__).resolve().parent.parent / "docs" / "combat-engine" \
@@ -76,12 +75,17 @@ def run_sequence(area, mons, skills, rules, casts, path):
         random.seed(4000 + i)
         allies = [f"p:{ALLY1}", f"p:{ALLY2}"]
         if path == "python":
+            combat.set_class_rules(UID, None)            # force the Python route
             attack, killed, dmg = combat.cast_skill(
                 area, UID, slot, target, data, fg, skill_id=skill_id, allies=allies)
         else:
-            attack, killed, dmg = live.cast_skill_data(
-                area, UID, slot, target, data, fg, skill_id, rules,
-                allies=allies, stats=STATS)
+            # exercise the REAL cutover route the live server takes — register the
+            # class's rules and let begin_cast dispatch — not the engine directly
+            combat.set_class_rules(UID, rules)
+            pkts, killed, dmg = combat.begin_cast(
+                area, UID, slot, target, data, fg, skill_id, allies)
+            assert len(pkts) == 1, f"cast produced {len(pkts)} packets, expected 1"
+            attack = pkts[0]
         out.append((skill_id, combat._rp.get(UID, 0), norm(attack), killed, dmg))
     return out
 

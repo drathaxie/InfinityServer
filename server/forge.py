@@ -183,6 +183,22 @@ def resource_for_class(conn, class_id):
     return dict(_RESOURCE_DEFAULT)
 
 
+def rules_for_class(conn, class_id):
+    """The class's combat-engine RULE CONFIG (classes.raw["rules"]) or None. A class that
+    carries one runs its mechanics as DATA through combat_engine instead of per-class
+    Python — see server/combat_engine/rules.py for the authoring format."""
+    row = conn.execute("SELECT raw FROM classes WHERE class_id=?",
+                       (int(class_id),)).fetchone()
+    if not (row and row["raw"]):
+        return None
+    try:
+        raw = json.loads(row["raw"])
+    except Exception:
+        return None
+    rules = raw.get("rules") if isinstance(raw, dict) else None
+    return rules if isinstance(rules, dict) and rules.get("skills") else None
+
+
 def build_updateclass(conn, class_id, uid, rp=None):
     """s2c updateClass (ResponseClass) carrying the class's real resource bar — colors,
     MaxRP, and the Determined threshold. `rp` overrides the starting fill; by default a

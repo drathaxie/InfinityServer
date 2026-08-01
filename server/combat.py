@@ -635,8 +635,12 @@ def has_graph(data, forge):
 
 
 def begin_cast(area, uid, slot, target, data, forge, skill_id=None, allies=None):
-    """Handle c2s gar. Returns (packets, killed_list, total_dmg). Graphs with no input
-    nodes resolve in one Attack (cast_skill); graphs with input nodes start the handshake."""
+    """Handle c2s gar. Returns (packets, killed_list, total_dmg). A class carrying a rule
+    config resolves through the DATA path; otherwise graphs with no input nodes resolve in
+    one Attack (cast_skill) and graphs with input nodes start the handshake."""
+    cfg = class_rules(uid, skill_id)
+    if cfg is not None:
+        return cast_skill_rules(area, uid, slot, target, data, forge, skill_id, cfg, allies)
     order, nodes = _walk_graph(data or [], forge or [])
     if not any(p.get("Name") in INPUT_NODES for _id, p in order):
         attack, killed, dmg = cast_skill(area, uid, slot, target, data, forge, skill_id, allies)
@@ -648,6 +652,30 @@ def begin_cast(area, uid, slot, target, data, forge, skill_id=None, allies=None)
         packets.append(_attack(cast, batch, NS_PENDING))
     packets.append(_igai(cast, cast.order[cast.i][1], _new_ctx(cast)))
     return packets, killed, cast.total
+
+
+def cast_skill_rules(area, uid, slot, target, data, forge, skill_id, cfg, allies=None):
+    """DATA path: resolve one cast from the class's rule config -> (packets, killed, dmg).
+    Imported lazily so combat.py keeps working if combat_engine is ever absent, and so a
+    failure here falls back to the Python path rather than eating the player's cast."""
+    try:
+        from combat_engine import live
+    except Exception as exc:                                    # pragma: no cover
+        print(f"  [rules] engine unavailable ({exc}) -> Python path")
+        set_class_rules(uid, None)
+        return begin_cast(area, uid, slot, target, data, forge, skill_id, allies)
+    try:
+        return live.cast_skill_data(area, uid, slot, target, data, forge, skill_id, cfg,
+                                    allies=allies, stats=_power.get(uid))
+    except Exception as exc:
+        # A bad rule config must never brick a class mid-fight: drop this player back to the
+        # Python path for the session and let the normal machinery answer the cast.
+        import traceback
+        print(f"  [rules] cast failed for uid={uid} skill={skill_id}: {exc!r} "
+              f"-> falling back to the Python path")
+        traceback.print_exc()
+        set_class_rules(uid, None)
+        return begin_cast(area, uid, slot, target, data, forge, skill_id, allies)
 
 
 def resume_cast(ctx, gai_params):
@@ -896,18 +924,74 @@ def _dragon_bonus(caster, area, mon_ts):
 #                   BUILD stacks, each stack multiplies the basic abilities (CONVICTION_SCALING),
 #                   and Smite CONSUMES the whole pool for its payoff. Idle stacks decay
 #                   (conviction_decay). Class MaxRP (50) is honored via _rp_max.
-_resource_model = {}        # uid -> "determination" | "mana" | "conviction"
+#   heroic        — the DATA-driven stacking pool (Infinity Hero, class 2022). Same shape as
+#                   conviction except it does NOT decay: the captured AE sessions climb
+#                   steadily to the 25 threshold across minutes of play with no drain, and
+#                   the whole build/spend is authored in the class's rule config rather than
+#                   keyed by skill_id here.
+_resource_model = {}        # uid -> "determination" | "mana" | "conviction" | "heroic"
 _class_mana = {}            # uid -> {skill_id: mana_cost} (for the mana model)
 _rp_max = {}                # uid -> the class's resource cap (updateClass MaxRP; default 100)
+
+STACK_MODELS = ("conviction", "heroic")     # pools that build and dump rather than spend
 
 
 def set_resource_model(uid, model, max_rp=MAX_RP):
     """Record a player's class resource model so casts build/spend the right pool. A mana
-    class starts at full mana; a Determination/Conviction class starts empty."""
-    model = model if model in ("mana", "determination", "conviction") else "determination"
+    class starts at full mana; a Determination/Conviction/Heroic class starts empty."""
+    model = model if model in ("mana", "determination", "conviction", "heroic") \
+        else "determination"
     _resource_model[uid] = model
     _rp_max[uid] = int(max_rp or MAX_RP)
     _rp[uid] = _rp_max[uid] if model == "mana" else 0
+
+
+# --- the DATA path: classes whose mechanics come from a rule config --------------------
+# A class carrying classes.raw["rules"] runs its casts through combat_engine instead of the
+# skill_id-keyed Python in this module. Both paths share the same rolls, HP and pools
+# (combat_engine/live.py bridges onto here), which is what let test_port_parity.py prove
+# them identical cast-for-cast before this switchover.
+_class_rules = {}           # uid -> the equipped class's rule config (absent = Python path)
+_delayed = []               # [(due_ts, area, status, nodes)] async sends (the meteor's fire)
+
+
+def set_class_rules(uid, rules):
+    """Record the equipped class's rule config. None/empty puts the player back on the
+    Python path, so this doubles as the per-class kill switch."""
+    if rules:
+        _class_rules[uid] = rules
+    else:
+        _class_rules.pop(uid, None)
+
+
+def class_rules(uid, skill_id=None):
+    """The caster's rule config, or None. With a skill_id, only when THAT skill is authored
+    there — an unported slot on a ported class still falls through to the Python path."""
+    cfg = _class_rules.get(uid)
+    if not cfg:
+        return None
+    if skill_id is None:
+        return cfg
+    return cfg if str(skill_id) in (cfg.get("skills") or {}) else None
+
+
+def queue_delayed(area, packets, now=None):
+    """Schedule packets a cast asked to send LATER (the Packet/Delay rule node — the meteor's
+    burning ground lands a second after the impact). The AI loop flushes due_delayed()."""
+    base = now if now is not None else time.time()
+    for delay_ms, status, nodes in packets or []:
+        _delayed.append((base + delay_ms / 1000.0, area, status, nodes))
+
+
+def due_delayed(now=None):
+    """-> [(area, status, nodes)] whose delay has elapsed, removing them from the queue."""
+    now = now if now is not None else time.time()
+    if not _delayed:
+        return []
+    out = [(a, s, n) for due, a, s, n in _delayed if due <= now]
+    if out:
+        _delayed[:] = [row for row in _delayed if row[0] > now]
+    return out
 
 
 def set_class_mana(uid, costs):
@@ -999,7 +1083,7 @@ def conviction_decay():
     now = time.time()
     out = []
     for uid, model in list(_resource_model.items()):
-        if model != "conviction":
+        if model != "conviction":       # NOT heroic: that pool holds until it is spent
             continue
         cur = _rp.get(uid, 0)
         if cur <= 0 or now - _conv_last_cast.get(uid, 0.0) < CONV_DECAY_IDLE:
