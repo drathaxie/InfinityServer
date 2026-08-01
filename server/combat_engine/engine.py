@@ -50,7 +50,16 @@ class ValueSource:
         st = ctx.state
         return st.rp if st is not None else int(props.get("Amount") or 0)
 
-    def timestamp_ms(self):
+    def cooldown_ms(self, ctx, props):
+        """A Cooldown node's CD. Authored by default; live combat may scale it
+        by haste, and capture replay pins the recorded value (AE's CDs shift
+        with the caster's gear mid-session)."""
+        return int(props.get("CD") or 0)
+
+    def timestamp_ms(self, kind=None):
+        """Server send-time in ms. `kind` is the requesting node's name — live
+        callers ignore it; replay uses it to hand back the right captured
+        stamp when one packet carries several independently-stamped nodes."""
         return int(time.time() * 1000)
 
     def now(self):
@@ -99,6 +108,8 @@ class RenderContext:
         self.rules_config = {}              # the class rule config (rules.run_skill)
         self.cast_triggers = {}             # inline Trigger registrations this cast
         self.triggered_nodes = []           # render nodes trigger sequences emitted
+        self.extra_packets = []             # (status, nodes) side packets (rebinds)
+        self.delayed_packets = []           # (delay_ms, status, nodes) async sends
 
     def resolve_targets(self, props, default=None):
         """Resolve a node's Targets: an explicit list passes through (replay /

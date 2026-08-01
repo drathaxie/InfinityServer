@@ -133,7 +133,9 @@ def build_env(ctx):
     env = dict(ctx.stats or {})
     env.update({"rp": st.rp if st else 0, "rp_max": st.rp_max if st else 0,
                 "slot": ctx.slot,
-                "combo": st.combo_index(ctx.slot) if st else 0})
+                "combo": st.combo_index(ctx.slot) if st else 0,
+                "hits": len(ctx.vars.get("_hits") or []),
+                "targets": len(ctx.targets)})
     env.update(st.vars if st else {})
     env.update(ctx.vars)
     return env
@@ -221,7 +223,34 @@ def _r_set_index(ctx, r, out):
 
 @rule("SetAspect")
 def _r_set_aspect(ctx, r, out):
-    ctx.state.set_aspect(r["Aspect"], exclusive_group=r.get("Group"))
+    ends = float("inf")
+    if r.get("Duration"):
+        ends = ctx.source.now() + float(r["Duration"])
+    ctx.state.set_aspect(r["Aspect"], ends=ends, exclusive_group=r.get("Group"))
+
+
+@rule("SetVar")
+def _r_set_var(ctx, r, out):
+    """Persist a value on the caster's state (survives across casts) — the
+    armed-ultimate flag and friends. Expr evaluates like Formula."""
+    ctx.state.vars[r["Var"]] = safe_eval(r["Expr"], build_env(ctx))
+
+
+@rule("Packet")
+def _r_packet(ctx, r, out):
+    """Render a node sequence into its OWN Attack packet (ctx.extra_packets) —
+    the combo-rebind broadcasts ride a separate StatusCode-3 Attack, the Meteor
+    ground-field a trailing StatusCode-4 one. `Delay` (ms) marks a packet the
+    server sends LATER, whose target refs therefore resolve against the world
+    as it is at delivery; ctx.delayed_packets records those for the host loop
+    to schedule (the replay harness grades them structurally for that reason)."""
+    nodes = run_rules(r.get("Nodes") or [], ctx)
+    if not nodes:
+        return
+    delay = int(r.get("Delay") or 0)
+    ctx.extra_packets.append((int(r.get("Status", 1)), nodes))
+    if delay:
+        ctx.delayed_packets.append((delay, int(r.get("Status", 1)), nodes))
 
 
 @rule("ApplyAura")
@@ -230,14 +259,21 @@ def _r_apply_aura(ctx, r, out):
     emit the client Aura node. Fires 'aura_applied' + the aura's own events."""
     name = r["Aura"]
     reg = AURA_REGISTRY.get(name) or {}
-    targets = resolve_props(r, ctx).get("Targets")
-    if targets is None:
-        targets = [ctx.caster]
+    targets = ctx.resolve_targets(resolve_props(r, ctx), default=[ctx.caster])
+    if r.get("MaxTargets") is not None:
+        targets = targets[:int(r["MaxTargets"])]
+    # An aura aimed at a resolved SET (e.g. "@hits" — what the swing actually
+    # hit) simply does not happen when that set came back empty: AE drops the
+    # node rather than sending an empty one. A self/caster-defaulted aura still
+    # goes out (captured casts do carry empty-Targets self auras).
+    if not targets and isinstance(r.get("Targets"), str):
+        return
     now = ctx.source.now()
     for ts in targets:
         tstate = ctx.state if ts == ctx.caster else _target_state(ctx, ts)
         if reg.get("aspect"):
-            tstate.set_aspect(name, exclusive_group=reg.get("group"))
+            ends = now + reg["secs"] if reg.get("secs") else float("inf")
+            tstate.set_aspect(name, ends=ends, exclusive_group=reg.get("group"))
         elif reg:
             tstate.apply_aura(name, reg.get("secs", 0) or float("inf"),
                               mods=reg.get("mods"),
@@ -334,10 +370,19 @@ def run_rules(seq, ctx):
 
 def run_skill(config, skill_id, ctx):
     """Execute a class rule config's sequence for one skill -> Attack Nodes
-    (including anything triggers appended). The caller owns the envelope."""
+    (including anything triggers appended). Extra packets (rebinds, trailing
+    fields) accumulate on ctx.extra_packets. The caller owns the envelopes.
+    config["vars"] seeds persistent state defaults; config["post"] runs after
+    every skill whose slot is in config["post_slots"] (the combo rebind +
+    armed-ultimate bookkeeping)."""
     ctx.rules_config = config or {}
+    for k, v in (ctx.rules_config.get("vars") or {}).items():
+        ctx.state.vars.setdefault(k, v)
     seq = (ctx.rules_config.get("skills") or {}).get(str(skill_id)) or []
     nodes = run_rules(seq, ctx)
+    post = ctx.rules_config.get("post")
+    if post and ctx.slot in (ctx.rules_config.get("post_slots") or []):
+        nodes.extend(run_rules(post, ctx))
     if ctx.triggered_nodes:
         nodes.extend(ctx.triggered_nodes)
         ctx.triggered_nodes = []

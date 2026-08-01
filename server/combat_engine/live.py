@@ -62,10 +62,8 @@ class LiveValueSource(ValueSource):
                 ctx.vars.setdefault("_killed", []).append(ts)
             damages.append(d); hps.append(hp); dtypes.append(dtype)
             ctx.vars["dmg_total"] = ctx.vars.get("dmg_total", 0) + d
-            # the aspect-effect target set: monsters this cast struck that are
-            # still alive (mirrors combat._meteor_aspect_node's filter)
-            if hp > 0 and ts not in (ctx.vars.get("_hits") or []):
-                ctx.vars.setdefault("_hits", []).append(ts)
+        # (the surviving-target set behind "@hits" is recorded by the Damage
+        # renderer itself, so the live and replay paths agree by construction)
         return (dtypes, damages, mtgts, hps)
 
     def _heal(self, ctx, props):

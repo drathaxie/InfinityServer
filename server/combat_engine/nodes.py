@@ -51,9 +51,26 @@ def _damage(ctx, props):
     if resolved is None:
         return None
     dtypes, damages, targets, hps = resolved
+    _record_hits(ctx, damages, targets, hps)
     out = {"Name": "Damage", "DamageTypes": dtypes, "Damages": damages,
            "Targets": targets, "TargetHPs": hps}
     return _opt(out, props, "Immediate")
+
+
+def _record_hits(ctx, damages, targets, hps):
+    """Remember which enemies this cast actually struck (and survived), so a
+    later rule node can target them with "@hits" — that is how the branch
+    debuffs land on "what the swing hit" rather than the single cast target."""
+    hits = ctx.vars.setdefault("_hits", [])
+    for i, ts in enumerate(targets):
+        if not (isinstance(ts, str) and ts.startswith("m:")):
+            continue
+        if i < len(damages) and damages[i] < 0:
+            continue                                   # a heal, not a hit
+        if i < len(hps) and hps[i] <= 0:
+            continue                                   # died to this hit
+        if ts not in hits:
+            hits.append(ts)
 
 
 @renderer("InstantDamage")
@@ -83,7 +100,7 @@ def _cooldown(ctx, props):
     Animation cue. (Two captured variants exist: the normal one, and a bare
     {Slot,CD,success} ack with no Animation — preserve whichever is authored.)"""
     out = {"Name": "Cooldown", "Slot": props.get("Slot", ctx.slot),
-           "CD": int(props.get("CD") or 0)}
+           "CD": ctx.source.cooldown_ms(ctx, props)}
     if "success" in props:
         _opt(out, props, "success", "Animation")
     else:
@@ -106,7 +123,7 @@ def _index_reset(ctx, props):
     """NodeIndexReset: arm the combo reset ring on a slot — after Time ms the
     icon reverts (Icon), optionally sharing the timer across slots (Shared).
     TS is the server's send-time (ms) so the client can skew-correct."""
-    ts = props["TS"] if "TS" in props else ctx.source.timestamp_ms()
+    ts = props["TS"] if "TS" in props else ctx.source.timestamp_ms("IndexReset")
     return {"Name": "IndexReset", "Slot": props.get("Slot", ctx.slot),
             "Index": int(props.get("Index") or 0),
             "Time": int(props.get("Time") or 0),
@@ -178,7 +195,7 @@ def _dash_to_target(ctx, props):
 def _player_hit_stream(ctx, props):
     """NodePlayerHitStream: a player-owned damage-over-area tile (PlayerHotTile)
     ticking every Interval ms for Duration ms. Time is the server epoch-ms."""
-    ts = props["Time"] if "Time" in props else ctx.source.timestamp_ms()
+    ts = props["Time"] if "Time" in props else ctx.source.timestamp_ms("PlayerHitStream")
     out = {"Name": "PlayerHitStream",
            "X": props.get("X", 0.0), "Y": props.get("Y", 0.0),
            "Width": props.get("Width", 1.0), "Height": props.get("Height", 1.0),
@@ -202,7 +219,10 @@ def _player_animation(ctx, props):
     out = {"Name": "PlayerAnimation", "Animation": props.get("Animation") or "",
            "Priority": props.get("Priority") or "Attack"}
     _opt(out, props, "Speed")
-    out["Targets"] = props.get("Targets", 1)
+    # Targets is a COUNT on the wire (how many actors play it) — a captured
+    # packet already carries the number; an authored ref resolves to its size.
+    t = props.get("Targets", 1)
+    out["Targets"] = t if isinstance(t, int) else len(ctx.resolve_targets(props))
     return out
 
 

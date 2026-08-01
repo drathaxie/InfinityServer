@@ -35,11 +35,12 @@ _OVERRIDE_FILE = pathlib.Path(__file__).resolve().parent.parent.parent \
 _IH_ASPECTS = ["Warrior Aspect", "Mage Aspect", "Healer Aspect", "Rogue Aspect"]
 
 AURA_REGISTRY = {
-    # --- the four Infinity Hero aspect markers (hidden, until replaced) ------
-    "Warrior Aspect": {"aspect": True, "group": _IH_ASPECTS, "hide": True},
-    "Mage Aspect":    {"aspect": True, "group": _IH_ASPECTS, "hide": True},
-    "Healer Aspect":  {"aspect": True, "group": _IH_ASPECTS, "hide": True},
-    "Rogue Aspect":   {"aspect": True, "group": _IH_ASPECTS, "hide": True},
+    # --- the four Infinity Hero aspect markers (hidden; 15s — the captured
+    # --- IndexReset rings revert the branch icons after 15000ms) -------------
+    "Warrior Aspect": {"aspect": True, "group": _IH_ASPECTS, "hide": True, "secs": 15},
+    "Mage Aspect":    {"aspect": True, "group": _IH_ASPECTS, "hide": True, "secs": 15},
+    "Healer Aspect":  {"aspect": True, "group": _IH_ASPECTS, "hide": True, "secs": 15},
+    "Rogue Aspect":   {"aspect": True, "group": _IH_ASPECTS, "hide": True, "secs": 15},
 
     # --- the six Infinity Hero branch buffs (each is an "Aspect Effect") -----
     # Armor Melted: +20% damage taken for 10s (NODE_SPEC's example numbers).
@@ -51,20 +52,22 @@ AURA_REGISTRY = {
                         "max_stacks": 1, "refresh": True, "consume_on": "hit",
                         "events": ["aspect_effect"]},
     # Suppression: -10% Crit Chance / Physical / Magical for 6s (the Meteor
-    # tooltip's numbers, already live in combat.py's AURA_FX).
+    # tooltip's numbers, already live in combat.py's AURA_FX). uniquenessType 0
+    # on the wire, per the captured class-2022 casts.
     "Suppression": {"secs": 6, "mods": {"crit_chance": -0.10,
                                         "dmg_dealt_mult": -0.10},
-                    "max_stacks": 1, "refresh": True,
+                    "max_stacks": 1, "refresh": True, "uniquenessType": 0,
                     "events": ["aspect_effect"]},
     # Holy Guard: -20% incoming damage for 6s (magnitude OURS, mirrors the
     # Paladin's Guard band).
     "Holy Guard": {"secs": 6, "mods": {"dmg_taken_mult": -0.20},
                    "max_stacks": 1, "refresh": True,
                    "events": ["aspect_effect"]},
-    # Hallowed Footsteps: a 20%-of-SP heal each second for 6s (numbers OURS).
+    # Hallowed Footsteps: a 20%-of-SP heal each second for 6s (numbers OURS;
+    # uniquenessType 0 on the wire, per capture).
     "Hallowed Footsteps": {"secs": 6, "mods": {"hot_sp_frac": 0.20},
                            "tick_secs": 1.0, "max_stacks": 1, "refresh": True,
-                           "events": ["aspect_effect"]},
+                           "uniquenessType": 0, "events": ["aspect_effect"]},
     # Concealed Blade: next strike +50% and +25% crit chance (numbers OURS).
     "Concealed Blade": {"secs": 8, "mods": {"next_hit_mult": 0.50,
                                             "crit_chance": 0.25},
@@ -75,7 +78,7 @@ AURA_REGISTRY = {
     # --- sky-blade AoE window; the damage payoff rides the skill's own
     # --- Branch, this aura is the visible marker) ----------------------------
     "Heroic Empowerment": {"secs": 2.5, "mods": {}, "max_stacks": 1,
-                           "refresh": True},
+                           "refresh": True, "hide": True},
 }
 
 
