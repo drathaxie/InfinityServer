@@ -411,7 +411,11 @@ _DS_BANE = [                                            # 105, slot 4: self-buff
 #       rate-cap — the firewalls' enter/exit reports were stacking into a one-shot.
 #   v10: Ragnafluff "Ruinous Echoes" — summons 2 Ragnafluff Clones (server-side spawnMob, real
 #        fightable adds) on an 18s rotation slot, from the captured clone spawn.
-SKILL_GRAPH_VERSION = 14
+#   v15: the Abomilich fight (InfinityLichBoss 429/430) — AE built and placed this boss but never
+#        gave it a moveset. Seven skills across the whole captured tile vocabulary (HitTiles,
+#        TileWave, TileCluster, TileSafe, TileTrack, HitStream, Summon); see _ABOMILICH_SKILLS
+#        for exactly which parts are capture-verified and which are ours.
+SKILL_GRAPH_VERSION = 15
 
 
 # Authored per-skill element + damage multiplier (P1-4). NEITHER is minable — a resolved Damage
@@ -550,6 +554,135 @@ _RAGNAFLUFF_SKILLS = [
 # cosmetic (never sent to the client — only the tile node becomes a MonReq; damage is applied
 # server-side as a normal hit on the gmah report); Multiplier scales that hit.
 # (class_id, class_name, (mon_ids,), [(slot, skill_id, name, desc, node_list), ...])
+# --- Abomilich (InfinityLichBoss, mon 429/430) ---------------------------------------------
+# AE built the art and placed the monster but never gave it a fight. This is that fight,
+# authored entirely in the captured tile vocabulary — the same node types Ragnafluff and the
+# elementals use, so the client renders it with code AE already shipped and no mod is needed.
+#
+# GROUNDING, stated plainly:
+#   * The node TYPES, prop names and defaults are capture-verified (docs/combat-engine
+#     fixtures; the render layer replays 3837 captured nodes byte-for-byte).
+#   * The monster, its art bundles and its two map placements are real AE data (mon 429 on
+#     map 2239, 430 on 2241, bundles 78661 + the 78742 boss pet).
+#   * The ROTATION ITSELF — which tiles, what shapes, cadence, damage — is OURS. No capture of
+#     this boss fighting exists: AE's telegraphed tiles are client-rendered and reported back
+#     (MonReq s2c / gmah c2s), so they never appear as monster Attack packets at all, which is
+#     why monster_casts.json holds only plain autos. Tuned against Ragnafluff's captured
+#     cadence (4.5s/5s/7s/18s) so it reads like an AE fight rather than guesswork.
+#
+# Art note: mon 429's row points at bundle 78660, which 404s on the live CDN at every version
+# (78661 resolves at v1-v3), so 429 renders as nothing. seed_abomilich repoints it — see the
+# guarded UPDATE below.
+ABOMILICH_CLASS_ID = 9429
+ABOMILICH_MON_IDS = (429, 430)
+ABOMILICH_THRALL_MON = 431
+ABOMILICH_LIVE_BUNDLE = 78661
+
+_ABOMILICH_SKILLS = [
+    # The lich opens graves under everyone standing still.
+    (0, 94290, "Grasping Tombs", "Grave-circles open underfoot — step off the red.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 4500}),
+        ("2", {"Name": "HitTiles", "Shape": "Circle", "VFX": "Ground_Fire_Attack-This_moves_VFX",
+               "Speed": 1.8, "ScaleX": 1.2, "ScaleY": 1.2, "CastAnimation": "Attack1",
+               "FinishAnimation": "Attack1", "ImpactSound": "SFX_Impact_Fire_C"}),
+        ("3", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 1.0}),
+    ]),
+    # A wave of undeath rolls the length of the arena.
+    (1, 94291, "Deathwave", "A wall of undeath sweeps the arena — jump the gap.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 6000}),
+        ("2", {"Name": "TileWave", "Speed": 2.2, "CastAnimation": "Attack2",
+               "DuringAnimation": "Attack2", "FinishAnimation": "Attack2",
+               "ImpactSound": "SFX_Impact_Lightning_B"}),
+        ("3", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 1.25}),
+    ]),
+    # Bone shrapnel scattered across the floor. Offsets pin the pattern server-side so every
+    # client draws the same shards (the Ice Elemental's captured cluster does the same).
+    (2, 94292, "Bone Scatter", "Shattered bone rains across the floor in a scatter.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 5500}),
+        ("2", {"Name": "TileCluster", "Speed": 2.4, "ScaleX": 1.1, "ScaleY": 1.1,
+               "CastAnimation": "Attack3", "DuringAnimation": "Attack3",
+               "FinishAnimation": "Attack3", "ImpactSound": "SFX_Impact_Earth_A",
+               "ClusterOffsets": [-8.5, 1.9, 6.25, -1.4, -3.75, 2.35, 9.5, 1.15,
+                                  -6.0, -1.85, 2.5, 2.1, -1.25, -1.6, 7.75, -2.25]}),
+        ("3", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 1.15}),
+    ]),
+    # The signature inverse telegraph: the ward is the ONLY safe ground.
+    (3, 94293, "Soul Cage", "Only the warded ground is safe — get inside the circle.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 9000}),
+        ("2", {"Name": "TileSafe", "Speed": 1.4, "ScaleX": 1.6, "ScaleY": 1.6,
+               "VFX": "Ground_Fire_Attack-This_moves_VFX", "CastAnimation": "Attack1",
+               "DuringAnimation": "Attack1", "FinishAnimation": "Attack1",
+               "ImpactSound": "SFX_Impact_Fire_C", "SafeOffsetX": 0.0, "SafeOffsetY": -2.0}),
+        ("3", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 1.5}),
+    ]),
+    # A hunting circle that follows you before it locks.
+    (4, 94294, "Grave Chase", "A death-mark hunts you across the floor before it locks.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 7000}),
+        ("2", {"Name": "TileTrack", "Track": "Center", "Shape": "Circle", "Speed": 1.6,
+               "ScaleX": 1.3, "ScaleY": 1.3, "CastAnimation": "Attack2",
+               "FinishAnimation": "Attack2", "ImpactSound": "SFX_Impact_Lightning_B",
+               "DelayedAnimation": "Attack2", "DelayedAnimationTime": 0.6}),
+        ("3", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 1.2}),
+    ]),
+    # Lingering miasma along both flanks — one cast, several strips (Ragnafluff's firewall shape).
+    (5, 94295, "Creeping Miasma", "Corpse-fog seeps in from the flanks and lingers.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 12000}),
+        ("2", {"Name": "HitStream", "PosX": -22.0, "PosY": -0.85, "Speed": 1.0,
+               "Duration": 12000, "ScaleX": 0.25, "ScaleY": 2.2,
+               "VFX": "Ground_Fire_Attack-This_moves_VFX", "FinishAnimation": "Attack3",
+               "ImpactSound": "SFX_Impact_Fire_C"}),
+        ("3", {"Name": "HitStream", "PosX": 20.0, "PosY": -0.85, "Speed": 1.0,
+               "Duration": 12000, "ScaleX": 0.25, "ScaleY": 2.2,
+               "VFX": "Ground_Fire_Attack-This_moves_VFX",
+               "ImpactSound": "SFX_Impact_Fire_C"}),
+        ("4", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 0.9}),
+    ]),
+    # Raise the dead: real fightable adds using AE's own boss-pet art (78742, live on the CDN).
+    (6, 94296, "Raise Thrall", "The lich drags two thralls up out of the floor.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 20000}),
+        ("2", {"Name": "Summon", "MonID": ABOMILICH_THRALL_MON, "Count": 2, "MaxAlive": 2,
+               "HP": 400, "Level": 5, "X": 0.0, "Y": -10.4}),
+    ]),
+]
+
+
+def seed_abomilich(conn):
+    """Seed the Abomilich fight: the skill-holder class + its seven skills, linked onto
+    InfinityLichBoss (429/430). Same non-clobbering rules as the other monster classes.
+    Also repoints mon 429's dead art bundle (see the module comment). Returns # linked."""
+    import forge
+    row = conn.execute("SELECT v FROM kv WHERE k='skill_graph_version'").fetchone()
+    stored = int(row["v"]) if row and str(row["v"]).isdigit() else 0
+    refresh = stored < SKILL_GRAPH_VERSION
+    n = _seed_mon_class(conn, forge, ABOMILICH_CLASS_ID, "Abomilich",
+                        _ABOMILICH_SKILLS, ABOMILICH_MON_IDS, refresh)
+    # mon 429 shipped pointing at bundle 78660, which does not exist on the live CDN at any
+    # version (probed: 78660 404s at v0-v4; 78661 serves at v1-v3), so the boss renders as an
+    # invisible hitbox. Repoint it at the live twin — guarded, so a later real 78660 upload or
+    # a hand-edit is never clobbered. Same self-healing shape as the greendragon fix above.
+    row = conn.execute("SELECT bundle FROM monsters WHERE mon_id=?",
+                       (ABOMILICH_MON_IDS[0],)).fetchone()
+    if row and row["bundle"]:
+        try:
+            b = json.loads(row["bundle"])
+        except ValueError:
+            b = None
+        if isinstance(b, dict) and int(b.get("ID") or 0) == 78660:
+            conn.execute("UPDATE monsters SET bundle=? WHERE mon_id=?",
+                         (json.dumps({"ID": ABOMILICH_LIVE_BUNDLE, "Name": "InfinityLichBoss",
+                                      "Filename": "npcs/78661_infinitylichboss.unity3d",
+                                      "VersionStage": 2, "VersionLive": 2},
+                                     separators=(",", ":")), ABOMILICH_MON_IDS[0]))
+    return n
+
+
 _BOSS_CLASSES = [
     (9236, "Rock Elemental", (236,), [
         (0, 92360, "Stone Spikes", "Rock spikes erupt in a ring — step off the red.", [
@@ -740,6 +873,7 @@ def seed_monster_skills(conn):
                         RAGNAFLUFF_MON_IDS, refresh)
     for class_id, class_name, mon_ids, skills in _BOSS_CLASSES:
         n += _seed_mon_class(conn, forge, class_id, class_name, skills, mon_ids, refresh)
+    n += seed_abomilich(conn)               # InfinityLichBoss (429/430) tile fight
     # The greendragon boss must stay Hostile (attackable). greendragon.json has reactionType:1,
     # but the monster row predated that and the seed is INSERT-IF-ABSENT, so reaction_type was
     # NULL -> the authored/compiled monBranch served it as a neutral click-to-talk NPC. Backfill
