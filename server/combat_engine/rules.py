@@ -22,9 +22,26 @@ nodes ({"Do": ...} — executed server-side against the caster's CombatState):
     {"Do":"ResourceOp", "Op":"gain|spend|spend_all|set", "Amount": 1}
     {"Do":"SetIndex",   "Slot":1, "Index":2}
     {"Do":"SetAspect",  "Aspect":"Warrior Aspect", "Group":["...", ...]}
-    {"Do":"ApplyAura",  "Aura":"Armor Melted", "Targets":["..."]|omitted}
+    {"Do":"SetVar",     "Var":"armed", "Expr":"1"}   (PERSISTS on the caster)
+    {"Do":"ApplyAura",  "Aura":"Armor Melted", "Targets":"@hits"|[...]|omitted}
+    {"Do":"Heal",       "Amount":{"$":"..."}, "Targets":"@allies"}  (live.py)
     {"Do":"Trigger",    "On":"<event>", "Run":[...]}     (inline registration)
     {"Do":"Emit",       "Node":{"Name": ...}}            (explicit render)
+    {"Do":"Graph",      "Overlay":{"Damage":{"MultScale":{"$":"..."}}}}
+    {"Do":"Packet",     "Status":3, "Delay":0, "Nodes":[...]}
+
+`Graph` renders the skill's stored SkillForge graph, optionally overlaying
+props by node name — that is how the Paladin/Void port keeps its render
+content in the editor while the rule config supplies only the mechanics.
+`Packet` splits nodes into their own Attack (the combo-rebind broadcasts ride
+a StatusCode-3 packet); with `Delay` it is a LATER send whose target refs
+resolve against the world at delivery, not at cast time.
+
+Target refs, anywhere a node or rule takes "Targets":
+    "@self"  "@target"  "@allies"  "@enemies"
+    "@hits"  — what this cast's Damage nodes actually struck AND left alive.
+An aura aimed at a "@ref" that resolves empty is dropped rather than sent
+empty, which is what AE does.
 
 Any prop value in a render node (or rule field marked expr-capable) may be
 {"$": "<expr>"} — evaluated against the environment before use, so authored
@@ -34,9 +51,10 @@ graphs write {"Multiplier": {"$": "1 + 0.05*spent"}}.
 
 Safe AST evaluation only — no eval(); names resolve from the environment:
 caster stats (STR/INT/DEX/WIS/END/LCK, ap/sp), rp/rp_max, spent (what the
-last spend_all consumed), combo (this slot's rebind index), slot, plus every
-Formula-defined var. Operators: arithmetic, comparison, and/or/not, ternary;
-functions: min/max/abs/round/int/float/floor/ceil.
+last spend_all consumed), combo (this slot's rebind index), slot, hits (how
+many enemies this cast struck and left alive), targets, every SetVar on the
+caster, plus every Formula-defined var. Operators: arithmetic, comparison,
+and/or/not, ternary; functions: min/max/abs/round/int/float/floor/ceil.
 
 ## Events
 
