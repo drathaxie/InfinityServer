@@ -267,6 +267,29 @@ def _r_emit(ctx, r, out):
         out.append(node)
 
 
+@rule("Graph")
+def _r_graph(ctx, r, out):
+    """Render the skill's stored SkillForge graph (ctx.graph_order, set by the
+    cast driver) — the render CONTENT stays in the skills table where the
+    editor owns it; the rule config only overlays mechanics. Overlay is
+    {nodeName: {prop: value}} merged over each matching node's authored props
+    (null deletes a prop; values may be {"$": expr})."""
+    overlay = r.get("Overlay") or {}
+    for _nid, props in (getattr(ctx, "graph_order", None) or []):
+        name = props.get("Name")
+        if name in (None, "OnRequest"):
+            continue
+        merged = dict(props)
+        for k, v in (overlay.get(name) or {}).items():
+            if v is None:
+                merged.pop(k, None)
+            else:
+                merged[k] = v
+        node = render_node(ctx, resolve_props(merged, ctx))
+        if node is not None:
+            out.append(node)
+
+
 def _target_state(ctx, ts):
     from .state import get_state
     return get_state(ts)

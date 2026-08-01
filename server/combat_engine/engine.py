@@ -72,6 +72,7 @@ class ReplayValueSource(ValueSource):
 
 # helper-node names a Targets ref may point at (SkillForge authoring)
 _SELF = {"self"}
+_TARGET = {"target"}
 _ALLIES = {"allies", "allallies", "party", "allinrangeallies"}
 _ENEMIES = {"allenemies", "allinrange", "area"}
 
@@ -102,18 +103,29 @@ class RenderContext:
     def resolve_targets(self, props, default=None):
         """Resolve a node's Targets: an explicit list passes through (replay /
         pre-resolved); a {id} ref dispatches on the helper node's Name
-        (Self/Allies/AllEnemies/Target); absent -> the cast's default set."""
+        (Self/Target/Allies/AllEnemies); an "@keyword" string is the rule
+        layer's direct form (@self/@target/@allies/@enemies/@hits — @hits is
+        the monsters this cast's Damage nodes actually struck); absent -> the
+        cast's default set."""
         t = props.get("Targets")
         if isinstance(t, list):
             return list(t)
-        if isinstance(t, dict) and t.get("id") is not None:
+        name = None
+        if isinstance(t, str) and t.startswith("@"):
+            name = t[1:].lower()
+        elif isinstance(t, dict) and t.get("id") is not None:
             name = (self.nodes.get(str(t["id"]), {}) or {}).get("Name", "").lower()
+        if name is not None:
             if name in _SELF:
                 return [self.caster]
+            if name in _TARGET:
+                return list(self.targets) or [self.caster]
             if name in _ALLIES:
                 return self._ally_list()
             if name in _ENEMIES:
                 return self._enemy_list() or list(self.targets)
+            if name == "hits":
+                return list(self.vars.get("_hits") or [])
         if default is not None:
             return list(default)
         return list(self.targets) or [self.caster]

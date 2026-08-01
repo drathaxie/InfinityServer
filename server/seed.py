@@ -777,7 +777,11 @@ PALADIN_CLASS_ID = 69420
 # v6: uses the actual classInfinityHero_S1_P4 composite for Meteor's victim-side finisher.
 #     That prefab owns InfinitySword-Animation plus the giant sword, three lightning strikes,
 #     gold pillars, runes, smoke, and explosion; a 6s lifetime lets its full sequence finish.
-PALADIN_GRAPH_VERSION = 6
+# v7: writes the combat-engine RULE CONFIG (PALADIN_RULES) into classes.raw — the Conviction
+#     mechanic expressed as data (combat_engine/rules.py). The graphs are unchanged; the
+#     Python special-cases in combat.py still drive live combat until the cutover
+#     (test_port_parity.py proves the two paths emit identical Attacks).
+PALADIN_GRAPH_VERSION = 7
 
 _PALADIN_RESOURCE = {"model": "conviction", "ResourceColor": 16764498, "MaxRP": 50}
 # The rig carries the ReduxPaladin class-armor item id (69420) — forge.class_for_armor_item
@@ -897,6 +901,75 @@ _PALADIN_SKILLS = [
 ]
 
 
+# --- Conviction as DATA (combat_engine rule config, stage-4 port) --------------------------
+# The exact mechanics combat.py hardcodes for class 69420, re-expressed in the rule-graph
+# authoring format (combat_engine/rules.py docstring): stacks snapshot BEFORE the gain (a
+# cast scales on the stacks you HAD), builders +3 auto/+2 Vow, Smite consumes all for
+# +5%/stack and a 30% party lifelink, the Meteor aspect branch, guard auras on allies.
+# Stored in classes.raw["rules"]; live combat still runs the Python path until cutover.
+_PALADIN_ASPECT_GROUP = ["warrior", "healer"]
+PALADIN_RULES = {
+    "engine": 1,
+    "resource": {"model": "conviction", "max": 50},
+    "skills": {
+        "90373": [                                          # Auto: +3 Conviction
+            {"Do": "Formula", "Var": "stacks", "Expr": "rp"},
+            {"Do": "ResourceOp", "Op": "gain", "Amount": 3},
+            {"Do": "Graph"},
+        ],
+        "90369": [                                          # Vow: +2, +3%/stack
+            {"Do": "Formula", "Var": "stacks", "Expr": "rp"},
+            {"Do": "ResourceOp", "Op": "gain", "Amount": 2},
+            {"Do": "Graph",
+             "Overlay": {"Damage": {"MultScale": {"$": "1 + 0.03*stacks"}}}},
+        ],
+        "90370": [                                          # Meteor: aspect branch
+            {"Do": "Branch", "On": "aspect",
+             "Cases": {"healer": [
+                 {"Do": "Graph", "Overlay": {"Damage": {"MaxTargets": 4}}},
+                 {"Do": "ApplyAura", "Aura": "Suppression",
+                  "Targets": "@hits", "MaxTargets": 4},
+             ]},
+             "Default": [                                   # warrior (the default aspect)
+                 {"Do": "Graph", "Overlay": {"Damage": {"Targets": None,
+                                                        "MaxTargets": 1,
+                                                        "MultScale": 1.5}}},
+                 {"Do": "ApplyAura", "Aura": "Burning Field",
+                  "Targets": "@hits", "MaxTargets": 1},
+             ]},
+        ],
+        "90371": [                                          # Healer Aspect: party guard
+            {"Do": "SetAspect", "Aspect": "healer", "Group": _PALADIN_ASPECT_GROUP},
+            {"Do": "Graph", "Overlay": {"Aura": {"Targets": "@allies"}}},
+        ],
+        "90372": [                                          # Smite: spend all + lifelink
+            {"Do": "SetAspect", "Aspect": "warrior", "Group": _PALADIN_ASPECT_GROUP},
+            {"Do": "ResourceOp", "Op": "spend_all"},
+            {"Do": "Graph",
+             "Overlay": {"Damage": {"MultScale": {"$": "1 + 0.05*spent"}}}},
+            {"Do": "Branch", "If": "dmg_total > 0", "Then": [
+                {"Do": "Heal", "Amount": {"$": "max(1, round(dmg_total*0.30))"},
+                 "Targets": "@allies", "MaxTargets": 6, "Immediate": True}]},
+        ],
+    },
+}
+
+
+def _seed_class_rules(conn, class_id, rules):
+    """Write a class's combat-engine rule config into classes.raw["rules"]
+    (merging over any other raw keys). Caller gates on its refresh flag."""
+    crow = conn.execute("SELECT raw FROM classes WHERE class_id=?", (class_id,)).fetchone()
+    try:
+        raw = json.loads(crow["raw"]) if crow and crow["raw"] else {}
+    except ValueError:
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    raw["rules"] = rules
+    conn.execute("UPDATE classes SET raw=? WHERE class_id=?",
+                 (json.dumps(raw, separators=(",", ":")), class_id))
+
+
 def seed_paladin(conn):
     """Seed the Paladin class row (resource + rig), its five skill graphs and slot links.
     Same rules as the other canonical graphs: INSERT-IF-ABSENT for the class/slots, graphs
@@ -952,6 +1025,8 @@ def seed_paladin(conn):
             "INSERT INTO class_skills(class_id, slot, skill_id) VALUES(?,?,?) "
             "ON CONFLICT(class_id, slot) DO NOTHING",
             (PALADIN_CLASS_ID, slot, skill_id))
+    if refresh:
+        _seed_class_rules(conn, PALADIN_CLASS_ID, PALADIN_RULES)    # v7: Conviction as data
     conn.execute("INSERT INTO kv(k,v) VALUES('paladin_graph_version',?) "
                  "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (str(PALADIN_GRAPH_VERSION),))
     return n
@@ -987,9 +1062,50 @@ def seed_paladin(conn):
 #     monster (bundle 66126, the "IT" red-eyed shadow mass) for 8s of Shadow Form (+25% dmg,
 #     -15% incoming; combat.py aura expiry sends the detransform automatically). The client's
 #     NodeMonTransform replicates the morph to the whole area.
+# v4: writes the combat-engine RULE CONFIG (VOID_RULES) into classes.raw — Hunger as data,
+#     same port pattern as PALADIN_RULES (graphs untouched, Python path still live).
 VOID_CLASS_ID = 2064
 VOID_ARMOR_ITEM = 47465
-VOID_GRAPH_VERSION = 3
+VOID_GRAPH_VERSION = 4
+
+# --- Hunger as DATA (stage-4 port): the same stacking machinery, Void-flavored — builders
+# --- +3 Rend/+2 Siphon/+5 Maw, Siphon drinks back 35%, Manifest consumes all for +5%/stack.
+VOID_RULES = {
+    "engine": 1,
+    "resource": {"model": "conviction", "max": 50},
+    "skills": {
+        "90380": [                                          # Void Rend: +3 Hunger
+            {"Do": "Formula", "Var": "stacks", "Expr": "rp"},
+            {"Do": "ResourceOp", "Op": "gain", "Amount": 3},
+            {"Do": "Graph"},
+        ],
+        "90381": [                                          # Essence Siphon: +2, +2%/stack,
+            {"Do": "Formula", "Var": "stacks", "Expr": "rp"},   # 35% party lifelink
+            {"Do": "ResourceOp", "Op": "gain", "Amount": 2},
+            {"Do": "Graph",
+             "Overlay": {"Damage": {"MultScale": {"$": "1 + 0.02*stacks"}}}},
+            {"Do": "Branch", "If": "dmg_total > 0", "Then": [
+                {"Do": "Heal", "Amount": {"$": "max(1, round(dmg_total*0.35))"},
+                 "Targets": "@allies", "MaxTargets": 6, "Immediate": True}]},
+        ],
+        "90382": [                                          # Hungering Maw: +5, +2%/stack,
+            {"Do": "Formula", "Var": "stacks", "Expr": "rp"},   # Umbral Rot on the victim
+            {"Do": "ResourceOp", "Op": "gain", "Amount": 5},
+            {"Do": "Graph",
+             "Overlay": {"Damage": {"MultScale": {"$": "1 + 0.02*stacks"}},
+                         "Aura": {"Targets": "@target"}}},
+        ],
+        "90383": [                                          # Event Horizon: party guard
+            {"Do": "Graph", "Overlay": {"Aura": {"Targets": "@allies"}}},
+        ],
+        "90384": [                                          # Lethal Abomination: spend all,
+            {"Do": "ResourceOp", "Op": "spend_all"},        # +5%/stack, Shadow Form morph
+            {"Do": "Graph",
+             "Overlay": {"Damage": {"MultScale": {"$": "1 + 0.05*spent"}},
+                         "Aura": {"Targets": "@allies"}}},
+        ],
+    },
+}
 
 _VOID_RESOURCE = {"model": "conviction", "ResourceColor": 10170623, "MaxRP": 50}
 _VOID_RIG = {
@@ -1127,6 +1243,8 @@ def seed_void(conn):
             "INSERT INTO class_skills(class_id, slot, skill_id) VALUES(?,?,?) "
             "ON CONFLICT(class_id, slot) DO NOTHING",
             (VOID_CLASS_ID, slot, skill_id))
+    if refresh:
+        _seed_class_rules(conn, VOID_CLASS_ID, VOID_RULES)          # v4: Hunger as data
     conn.execute("INSERT INTO kv(k,v) VALUES('void_graph_version',?) "
                  "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (str(VOID_GRAPH_VERSION),))
     return n

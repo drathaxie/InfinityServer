@@ -292,10 +292,15 @@ def _aura(ctx, props):
     """NodeAura: add AuraName to Targets (Hide=no popup — AE's aspect markers
     are hidden auras). The server-side effect (stat mods, duration) is the rule
     layer's job; this node is the client notification."""
+    tgts = ctx.resolve_targets(props, default=[ctx.caster])
+    if props.get("MaxTargets") is not None:     # authored cap (party buffs); the
+        tgts = tgts[:int(props["MaxTargets"])]  # key itself never hits the wire
+    # NB: an EMPTY Targets list still renders — real AE casts carry
+    # {"Targets": []} Aura nodes (Concealed Blade, Heroic Empowerment).
     return {"Name": "Aura", "Hide": bool(props.get("Hide")),
             "Animation": props.get("Animation") or "",
             "AuraName": props.get("AuraName") or "",
-            "Targets": ctx.resolve_targets(props, default=[ctx.caster]),
+            "Targets": tgts,
             "casterTS": props.get("casterTS", ctx.caster),
             "uniquenessType": props.get("uniquenessType", 1)}
 
