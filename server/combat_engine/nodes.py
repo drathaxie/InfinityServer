@@ -298,3 +298,257 @@ def _aura(ctx, props):
             "Targets": ctx.resolve_targets(props, default=[ctx.caster]),
             "casterTS": props.get("casterTS", ctx.caster),
             "uniquenessType": props.get("uniquenessType", 1)}
+
+
+# --- the remaining AE vocabulary (no fixture coverage — schemas read straight
+# --- from each Node*'s decompiled Execute/Input body) -------------------------
+
+@renderer("AnimationCancel")
+def _animation_cancel(ctx, props):
+    """NodeAnimationCancel: force-cancel the caster's current animation."""
+    return {"Name": "AnimationCancel"}
+
+
+@renderer("AuraVFX")
+def _aura_vfx(ctx, props):
+    """NodeAuraVFX: bind a persistent <VFX>_Appear/_Exit particle pair to an
+    aura's lifetime on the caster."""
+    return {"Name": "AuraVFX", "AuraName": props.get("AuraName") or "",
+            "VFX": props.get("VFX") or ""}
+
+
+@renderer("ImpactAura")
+def _impact_aura(ctx, props):
+    """NodeImpactAura: queue SpellImpact to fire when AuraName lands."""
+    return {"Name": "ImpactAura", "AuraName": props.get("AuraName") or "",
+            "SpellImpact": props.get("SpellImpact") or ""}
+
+
+@renderer("Channel")
+def _channel(ctx, props):
+    """NodeChannel: start the client's skill-stream (channelled cast) loop."""
+    return {"Name": "Channel"}
+
+
+@renderer("StopChannel")
+def _stop_channel(ctx, props):
+    """NodeStopChannel: end the skill-stream loop."""
+    return {"Name": "StopChannel"}
+
+
+@renderer("Hit")
+def _hit_cue(ctx, props):
+    """NodeHit: register a hit cue at Time s into Animation (drives impact
+    sounds/damage-ticket dispensing on that frame)."""
+    return {"Name": "Hit", "Animation": props.get("Animation") or "",
+            "Time": props.get("Time", 0.0)}
+
+
+@renderer("Hitbox")
+def _hitbox(ctx, props):
+    """NodeHitbox: an immediate spatial box (Input-resolved client-side; the
+    Execute body is empty). Emitted with its box geometry for the igai path."""
+    out = {"Name": "Hitbox", "X": props.get("X", 0.0), "Y": props.get("Y", 0.0),
+           "Width": props.get("Width", 1.0), "Height": props.get("Height", 1.0)}
+    return _opt(out, props, "OriginTarget")
+
+
+@renderer("Dash")
+def _dash(ctx, props):
+    """NodeDash: dash the caster OffsetX over Duration ms (Animation-gated on
+    the input side)."""
+    out = {"Name": "Dash", "Duration": int(props.get("Duration") or 400),
+           "OffsetX": props.get("OffsetX", 0.0)}
+    return _opt(out, props, "Animation")
+
+
+@renderer("MoveTargets")
+def _move_targets(ctx, props):
+    """NodeMoveTargets: group-move entities toward the caster. Targets is a
+    COMMA-JOINED STRING on this node (unlike every list-shaped node)."""
+    t = props.get("Targets")
+    if not isinstance(t, str):
+        t = ",".join(ctx.resolve_targets(props))
+    return {"Name": "MoveTargets", "Targets": t,
+            "OffsetX": props.get("OffsetX", 0.0),
+            "Duration": int(props.get("Duration") or 0)}
+
+
+@renderer("DisableSkill")
+def _disable_skill(ctx, props):
+    """NodeDisableSkill: grey out / re-enable a skill slot."""
+    return {"Name": "DisableSkill", "Slot": props.get("Slot", ctx.slot),
+            "Disabled": bool(props.get("Disabled", True))}
+
+
+@renderer("SkillGlow")
+def _skill_glow(ctx, props):
+    """NodeSkillGlow: toggle a slot's ready-glow."""
+    return {"Name": "SkillGlow", "Slot": props.get("Slot", ctx.slot),
+            "Active": bool(props.get("Active", True))}
+
+
+@renderer("UpdateIcon")
+def _update_icon(ctx, props):
+    """NodeUpdateIcon: permanently swap a slot's icon (no reset ring)."""
+    return {"Name": "UpdateIcon", "Slot": props.get("Slot", ctx.slot),
+            "Icons": props.get("Icons") or ""}
+
+
+@renderer("SwapSkill")
+def _swap_skill(ctx, props):
+    """NodeSwapSkill: replace the SKILL in a slot (a full SkillData object, or
+    a string to clear). The InfinityHero-style combo uses SetSkillIndex (icon
+    only); SwapSkill rebinds what the slot casts."""
+    return {"Name": "SwapSkill", "Slot": props.get("Slot", ctx.slot),
+            "Skill": props.get("Skill", "")}
+
+
+@renderer("MaxSkillHold")
+def _max_skill_hold(ctx, props):
+    """NodeMaxSkillHold: show the hold-to-release bar on a slot for Time ms."""
+    return {"Name": "MaxSkillHold", "Slot": props.get("Slot", ctx.slot),
+            "Time": int(props.get("Time") or 0)}
+
+
+@renderer("GlobalCooldown")
+def _global_cooldown(ctx, props):
+    """NodeGlobalCooldown: per-slot cooldown list (index = slot; -1 skips)."""
+    return {"Name": "GlobalCooldown", "CD": list(props.get("CD") or [])}
+
+
+@renderer("Message")
+def _message(ctx, props):
+    """NodeMessage: modal message box."""
+    return {"Name": "Message", "Title": props.get("Title") or "",
+            "Text": props.get("Text") or ""}
+
+
+@renderer("MonTransform")
+def _mon_transform(ctx, props):
+    """NodeMonTransform: morph the caster into a monster prefab
+    (Bundle+Linkage+Scale), or detransform:true to revert."""
+    if props.get("detransform"):
+        return {"Name": "MonTransform", "detransform": True}
+    out = {"Name": "MonTransform", "Bundle": props.get("Bundle"),
+           "Linkage": props.get("Linkage") or ""}
+    return _opt(out, props, "Scale")
+
+
+@renderer("MonsterMove")
+def _monster_move(ctx, props):
+    """NodeMonsterMove: reposition a monster to (destX, destY) — Mode "Teleport"
+    snaps (TeleportApply), anything else walks at speed (WalkApply)."""
+    out = {"Name": "MonsterMove", "destX": props.get("destX", 0.0),
+           "destY": props.get("destY", 0.0)}
+    return _opt(out, props, "speed", "Mode")
+
+
+@renderer("SpawnPickup")
+def _spawn_pickup(ctx, props):
+    """NodeSpawnPickup: drop a walk-over pickup near the caster/OriginTarget."""
+    out = {"Name": "SpawnPickup", "PickupId": int(props.get("PickupId") or 0),
+           "SpawnOffsetX": props.get("SpawnOffsetX", 0.0),
+           "SpawnOffsetY": props.get("SpawnOffsetY", 0.0)}
+    return _opt(out, props, "OriginTarget", "Prefab", "CollisionWidth",
+                "CollisionHeight", "IAcceptNextQuest")
+
+
+@renderer("ConditionalRange")
+def _conditional_range(ctx, props):
+    """NodeConditionalRange (Input-only): range gate on the current target.
+    Lowercase keys — this node rides the igai Response, not Attack Nodes."""
+    return {"Name": "ConditionalRange", "hrange": props.get("hrange", 5.0),
+            "vrange": props.get("vrange", 1.0),
+            "type": props.get("type") or "Hostile"}
+
+
+@renderer("RestrictRelease")
+def _restrict_release(ctx, props):
+    """NodeRestrictRelease: lift a Restrict early (all locks, or only the one
+    keyed to Animation)."""
+    out = {"Name": "RestrictRelease"}
+    return _opt(out, props, "Animation")
+
+
+# --- monster tile telegraphs (MonsterInput-side: these ride a MonReq packet's
+# --- Response, keyed by Name — the client renders the telegraph and reports
+# --- hits back via gmah/RequestMonHit; see forge.monster_skills) --------------
+
+def _tile(ctx, props, required, optional):
+    out = {"Name": props["Name"]}
+    for k, d in required:
+        out[k] = props.get(k, d)
+    return _opt(out, props, *optional)
+
+
+@renderer("HitTiles")
+def _hit_tiles(ctx, props):
+    """NodeHitTiles.MonsterInput: one filled telegraph tile under the player
+    (Shape: Circle | Rectangle | VerticalRectangle)."""
+    return _tile(ctx, props,
+                 [("Shape", "Circle"), ("Speed", 1.0),
+                  ("ScaleX", 1.0), ("ScaleY", 1.0)],
+                 ["CastAnimation", "VFX", "FinishAnimation"])
+
+
+@renderer("TileWave")
+def _tile_wave(ctx, props):
+    """NodeTileWave.MonsterInput: a wave sweeping the frame (WaveTile prefab);
+    hits report immediately (OnHit), a survived finish reports success."""
+    return _tile(ctx, props, [("Speed", 1.0)],
+                 ["CastAnimation", "DuringAnimation", "FinishAnimation",
+                  "ImpactSound"])
+
+
+@renderer("TileCluster")
+def _tile_cluster(ctx, props):
+    """NodeTileCluster.MonsterInput: a scatter of tiles; ClusterOffsets (a flat
+    [x1,y1,x2,y2,...] of >=8 pairs) pins the pattern server-side."""
+    return _tile(ctx, props,
+                 [("Speed", 1.0), ("ScaleX", 1.0), ("ScaleY", 1.0)],
+                 ["CastAnimation", "VFX", "DuringAnimation", "FinishAnimation",
+                  "ImpactSound", "ClusterOffsets"])
+
+
+@renderer("TileMove")
+def _tile_move(ctx, props):
+    """NodeTileMove.MonsterInput: a MOVE-HERE tile the player must reach."""
+    return _tile(ctx, props, [("Speed", 1.0)],
+                 ["CastAnimation", "FinishAnimation"])
+
+
+@renderer("TileSafe")
+def _tile_safe(ctx, props):
+    """NodeTileSafe.MonsterInput: the inverse telegraph — stand IN the tile to
+    be safe; being caught outside reports the hit."""
+    return _tile(ctx, props,
+                 [("Speed", 1.0), ("ScaleX", 1.0), ("ScaleY", 1.0)],
+                 ["CastAnimation", "VFX", "DuringAnimation", "FinishAnimation",
+                  "ImpactSound", "DelayedAnimation", "DelayedAnimationTime",
+                  "SafeOffsetX", "SafeOffsetY"])
+
+
+@renderer("TileTrack")
+def _tile_track(ctx, props):
+    """NodeTileTrack.MonsterInput: a tile that TRACKS the player (Track:
+    Sides | Center) before locking and detonating."""
+    return _tile(ctx, props,
+                 [("Track", "Sides"), ("Shape", "Circle"), ("Speed", 1.0),
+                  ("ScaleX", 1.0), ("ScaleY", 1.0)],
+                 ["CastAnimation", "VFX", "FinishAnimation",
+                  "DelayedAnimation", "DelayedAnimationTime"])
+
+
+@renderer("HitStream")
+def _hit_stream(ctx, props):
+    """NodeHitStream.Execute: a lingering damage strip (HotTile) at PosX/PosY —
+    Ragnafluff's firewalls. Time is the server epoch-ms the zone armed."""
+    ts = props["Time"] if "Time" in props else ctx.source.timestamp_ms()
+    out = {"Name": "HitStream",
+           "PosX": props.get("PosX", 0.0), "PosY": props.get("PosY", 0.0),
+           "Speed": props.get("Speed", 1.0),
+           "ScaleX": props.get("ScaleX", 1.0), "ScaleY": props.get("ScaleY", 1.0),
+           "Time": ts, "Duration": int(props.get("Duration") or 0)}
+    return _opt(out, props, "CastAnimation", "VFX", "DuringAnimation",
+                "CompletedAnimation", "FinishAnimation")

@@ -189,9 +189,124 @@ def test_graph_walk():
     print("graph walk OK: linear_graph -> walk -> render -> Attack")
 
 
+# every Node* class in docs/combat-engine/ae_node_semantics.cs (the 49 real types)
+AE_NODE_TYPES = [
+    "AnimationCancel", "AnimationHitbox", "Aura", "AuraVFX", "Channel",
+    "ConditionalRange", "Cooldown", "Damage", "Dash", "DashToTarget",
+    "DisableSkill", "DispenseDamage", "GlobalCooldown", "Hit", "HitStream",
+    "HitTiles", "Hitbox", "ImpactAura", "ImpactSoundFX", "IndexReset",
+    "InstantDamage", "Interruptable", "MaxSkillHold", "Message", "MonTransform",
+    "MonsterMove", "MoveTargets", "Particle", "PlayerAnimation",
+    "PlayerHitStream", "Range", "RangeMulti", "Resource", "Restrict",
+    "RestrictRelease", "SetSkillIndex", "SkillGlow", "SoundFX", "SpawnPickup",
+    "SpellAnimation", "StopChannel", "SwapSkill", "TileCluster", "TileMove",
+    "TileSafe", "TileTrack", "TileWave", "UpdateAnimation", "UpdateIcon",
+]
+
+
+def test_full_vocabulary():
+    """All 49 AE node types have a renderer, and each of the fixture-less ones
+    emits the key set its decompiled Execute/Input body reads."""
+    assert len(AE_NODE_TYPES) == 49
+    missing = [n for n in AE_NODE_TYPES if n not in RENDERERS]
+    assert not missing, f"unimplemented node types: {missing}"
+    ctx = RenderContext(caster="m:429", slot=1, target="p:7",
+                        source=ReplayValueSource())
+    # (authored props, expected resolved node) — expectations read from the
+    # matching Node* body in ae_node_semantics.cs
+    cases = [
+        ({"Name": "AnimationCancel"}, {"Name": "AnimationCancel"}),
+        ({"Name": "AuraVFX", "AuraName": "Event Horizon", "VFX": "classMage_MageShield"},
+         {"Name": "AuraVFX", "AuraName": "Event Horizon", "VFX": "classMage_MageShield"}),
+        ({"Name": "ImpactAura", "AuraName": "Armor Melted", "SpellImpact": "IH_Impact"},
+         {"Name": "ImpactAura", "AuraName": "Armor Melted", "SpellImpact": "IH_Impact"}),
+        ({"Name": "Channel"}, {"Name": "Channel"}),
+        ({"Name": "StopChannel"}, {"Name": "StopChannel"}),
+        ({"Name": "Hit", "Animation": "Attack1", "Time": 0.3},
+         {"Name": "Hit", "Animation": "Attack1", "Time": 0.3}),
+        ({"Name": "Hitbox", "X": 2.0, "Y": 0.0, "Width": 6.0, "Height": 2.0},
+         {"Name": "Hitbox", "X": 2.0, "Y": 0.0, "Width": 6.0, "Height": 2.0}),
+        ({"Name": "Dash", "OffsetX": 3.0},
+         {"Name": "Dash", "Duration": 400, "OffsetX": 3.0}),
+        ({"Name": "MoveTargets", "Targets": ["p:7", "p:8"], "OffsetX": 1.0,
+          "Duration": 300},
+         {"Name": "MoveTargets", "Targets": "p:7,p:8", "OffsetX": 1.0,
+          "Duration": 300}),
+        ({"Name": "DisableSkill", "Slot": 3},
+         {"Name": "DisableSkill", "Slot": 3, "Disabled": True}),
+        ({"Name": "SkillGlow", "Slot": 2, "Active": False},
+         {"Name": "SkillGlow", "Slot": 2, "Active": False}),
+        ({"Name": "UpdateIcon", "Slot": 1, "Icons": "InfinityHero/InfinityHeroA1"},
+         {"Name": "UpdateIcon", "Slot": 1, "Icons": "InfinityHero/InfinityHeroA1"}),
+        ({"Name": "SwapSkill", "Slot": 4, "Skill": {"id": 172}},
+         {"Name": "SwapSkill", "Slot": 4, "Skill": {"id": 172}}),
+        ({"Name": "MaxSkillHold", "Slot": 1, "Time": 2500},
+         {"Name": "MaxSkillHold", "Slot": 1, "Time": 2500}),
+        ({"Name": "GlobalCooldown", "CD": [1000, -1, 2000]},
+         {"Name": "GlobalCooldown", "CD": [1000, -1, 2000]}),
+        ({"Name": "Message", "Title": "Hm", "Text": "..."},
+         {"Name": "Message", "Title": "Hm", "Text": "..."}),
+        ({"Name": "MonTransform", "detransform": True},
+         {"Name": "MonTransform", "detransform": True}),
+        ({"Name": "MonTransform", "Bundle": {"ID": 66126}, "Linkage": "monster-X",
+          "Scale": 1.5},
+         {"Name": "MonTransform", "Bundle": {"ID": 66126}, "Linkage": "monster-X",
+          "Scale": 1.5}),
+        ({"Name": "MonsterMove", "destX": 4.0, "destY": -1.0, "speed": 2.0},
+         {"Name": "MonsterMove", "destX": 4.0, "destY": -1.0, "speed": 2.0}),
+        ({"Name": "SpawnPickup", "PickupId": 9, "SpawnOffsetX": 1.0,
+          "SpawnOffsetY": 0.0},
+         {"Name": "SpawnPickup", "PickupId": 9, "SpawnOffsetX": 1.0,
+          "SpawnOffsetY": 0.0}),
+        ({"Name": "ConditionalRange", "hrange": 8.0, "vrange": 2.0},
+         {"Name": "ConditionalRange", "hrange": 8.0, "vrange": 2.0,
+          "type": "Hostile"}),
+        ({"Name": "RestrictRelease"}, {"Name": "RestrictRelease"}),
+        ({"Name": "RestrictRelease", "Animation": "DS Skill1C"},
+         {"Name": "RestrictRelease", "Animation": "DS Skill1C"}),
+        # tile telegraphs (MonReq Response payloads)
+        ({"Name": "HitTiles", "Shape": "VerticalRectangle", "Speed": 1.2,
+          "ScaleX": 2.0, "ScaleY": 8.0, "CastAnimation": "Castcharge"},
+         {"Name": "HitTiles", "Shape": "VerticalRectangle", "Speed": 1.2,
+          "ScaleX": 2.0, "ScaleY": 8.0, "CastAnimation": "Castcharge"}),
+        ({"Name": "TileWave", "Speed": 0.8, "ImpactSound": "SFX_Wave"},
+         {"Name": "TileWave", "Speed": 0.8, "ImpactSound": "SFX_Wave"}),
+        ({"Name": "TileCluster", "Speed": 1.0, "ScaleX": 2.0, "ScaleY": 2.0,
+          "ClusterOffsets": [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7]},
+         {"Name": "TileCluster", "Speed": 1.0, "ScaleX": 2.0, "ScaleY": 2.0,
+          "ClusterOffsets": [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7]}),
+        ({"Name": "TileMove", "Speed": 1.0},
+         {"Name": "TileMove", "Speed": 1.0}),
+        ({"Name": "TileSafe", "Speed": 1.0, "ScaleX": 3.0, "ScaleY": 3.0,
+          "SafeOffsetX": 5.0, "SafeOffsetY": 0.0},
+         {"Name": "TileSafe", "Speed": 1.0, "ScaleX": 3.0, "ScaleY": 3.0,
+          "SafeOffsetX": 5.0, "SafeOffsetY": 0.0}),
+        ({"Name": "TileTrack", "Track": "Center", "Shape": "Circle",
+          "Speed": 1.0, "ScaleX": 4.0, "ScaleY": 4.0},
+         {"Name": "TileTrack", "Track": "Center", "Shape": "Circle",
+          "Speed": 1.0, "ScaleX": 4.0, "ScaleY": 4.0}),
+        ({"Name": "HitStream", "PosX": -6.0, "PosY": 0.0, "Speed": 1.0,
+          "ScaleX": 2.0, "ScaleY": 12.0, "Time": 1785514131321,
+          "Duration": 15000, "VFX": "FireWall"},
+         {"Name": "HitStream", "PosX": -6.0, "PosY": 0.0, "Speed": 1.0,
+          "ScaleX": 2.0, "ScaleY": 12.0, "Time": 1785514131321,
+          "Duration": 15000, "VFX": "FireWall"}),
+    ]
+    for authored, want in cases:
+        got = render_node(ctx, authored)
+        assert got == want, f"{authored['Name']}:\n want {want}\n got  {got}"
+    # a fresh HitStream/IndexReset stamps its own server timestamp
+    hs = render_node(ctx, {"Name": "HitStream", "Duration": 1000})
+    assert isinstance(hs["Time"], int) and hs["Time"] > 10 ** 12, \
+        "HitStream must stamp epoch-ms when unauthored"
+    print(f"vocabulary OK: {len(RENDERERS)}/49 AE node types registered, "
+          f"{len(cases)} schema cases")
+
+
 def main():
     test_state()
     test_graph_walk()
+    test_full_vocabulary()
     total_casts = total_nodes = total_fails = total_uncovered = 0
     for name in ("golden_attack_fixtures.json", "infinity_hero_casts.json",
                  "monster_casts.json"):
