@@ -309,6 +309,14 @@ async def ai_loop():
                 sess = _players.get(uid)
                 if sess is not None and sess.member is not None:
                     await send_obj(sess.writer, combat.resource_packet(uid, sess.member.name))
+            # data-path casts can schedule a packet for LATER (the Infinity Hero meteor's
+            # burning ground lands a second after the impact) — send those now that they're due
+            for area, status, payload in combat.due_delayed(now):
+                try:
+                    from combat_engine import live as _engine_live
+                    world.broadcast(area, _engine_live.delayed_attack(payload, status))
+                except Exception as exc:                # never let a late packet kill the loop
+                    print(f"  [rules] delayed packet dropped: {exc!r}")
             # monsters swing at the players they've aggro'd (unless stunned)
             for area, mon, uid in combat.engagements():
                 mem = next((m for m in world.members(area) if m.uid == uid), None)

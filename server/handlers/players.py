@@ -141,7 +141,7 @@ async def _generate_statue_unavailable_legacy(session, writer, cmd, params, msg)
 async def generate_statue_live(session, writer, cmd, params, msg):
     if session.member is None or session.char is None:
         return
-    result, house_item = statues.generate(session.conn, session.char)
+    result, house_item, version = statues.generate(session.conn, session.char)
     session.conn.commit()
     # ResponseGenerateStatue owns the modal/pending state. Resolve it before an
     # optional inventory refresh; sending buyItem first left the client in its
@@ -151,6 +151,20 @@ async def generate_statue_live(session, writer, cmd, params, msg):
         # Make the custom house item immediately visible without requiring a relog.
         await send_obj(writer, {"Cmd": "buyItem", "Success": True, "Show": False,
                                 "IsDrop": False, "Cost": 0, "houseItem": house_item})
+    if version is not None:
+        # Real AE pushes statueVersion so any already-spawned DynamicStatue live-refreshes
+        # instead of needing a leave/re-enter. ResponseGenerateStatue.Execute() only
+        # bootstraps a version LOCALLY on the player's first-ever generation, so without this
+        # push a *re*-generation would never refresh an already-loaded statue for anyone,
+        # including the owner standing next to their own. Push to the actor directly, plus
+        # broadcast to their house instance (visitors currently browsing that house) since
+        # that's the only place a DynamicStatue for this cid can currently be spawned.
+        push = statues.version_push(session.char["id"], version)
+        await send_obj(writer, push)
+        hid = game.equipped_house_id(session.conn, session.char["id"])
+        if hid > 0:
+            house_area = f"{game.house_map_for(session.conn, hid)}-{game.uid_for(session.char)}"
+            world.broadcast(house_area, push, exclude=session.member.uid)
     return
 
 

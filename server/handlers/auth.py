@@ -31,6 +31,8 @@ async def login(session, writer, cmd, params, msg):
     res = forge.resource_for_class(session.conn, session.equipped_class)
     combat.set_resource_model(uid, res["model"], res.get("MaxRP") or 100)
     combat.set_class_mana(uid, forge.class_mana_costs(session.conn, session.equipped_class))
+    # a class whose mechanics are authored as DATA casts through combat_engine
+    combat.set_class_rules(uid, forge.rules_for_class(session.conn, session.equipped_class))
     # Double-login / stale reconnect: a second live session on this character would clobber
     # the first (same uid keys _players, the world room, and combat), and the loser's later
     # disconnect would tear down the survivor. Evict the old session first — pull it from the

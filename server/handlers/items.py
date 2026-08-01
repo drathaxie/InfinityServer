@@ -59,6 +59,9 @@ async def equip_item(session, writer, cmd, params, msg):
                 res = forge.resource_for_class(session.conn, new_class)
                 combat.set_resource_model(uid, res["model"], res.get("MaxRP") or 100)
                 combat.set_class_mana(uid, forge.class_mana_costs(session.conn, new_class))
+                # data-driven classes swap ONTO the engine here — and back OFF it when the
+                # player equips a class that still runs on the Python path
+                combat.set_class_rules(uid, forge.rules_for_class(session.conn, new_class))
                 await send_obj(writer, forge.build_updateclass(session.conn, new_class, uid))
             await send_obj(writer, forge.build_seact(session.conn, new_class))
             name = session.conn.execute("SELECT name FROM classes WHERE class_id=?",

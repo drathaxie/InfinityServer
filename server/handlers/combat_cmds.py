@@ -139,13 +139,19 @@ async def begin_cast(session, writer, cmd, params, msg):
         # AUTO-ATTACK: single-shot (no igai handshake, so it re-fires cleanly) and
         # SERVER-SUSTAINED (the AI loop keeps swinging on the cooldown until the target
         # dies or you leave) so you don't have to spam it.
-        if has_graph:
+        if has_graph and combat.class_rules(uid, sk["skill_id"]) is not None:
+            # data-driven class: the auto is authored in the rule config too (the Infinity
+            # Hero's Heroic Strike becomes the sky-blade once the pool is armed)
+            pkts, killed, dmg = combat.begin_cast(session.area, uid, 0, target,
+                                                  data, forge_data, sk["skill_id"], allies)
+        elif has_graph:
             attack, killed, dmg = combat.cast_skill(session.area, uid, 0, target,
                                                     data, forge_data, sk["skill_id"], allies)
+            pkts = [attack]
         else:
             attack, hit, _ = combat.auto_attack(session.area, target, uid)
             killed = [target] if hit else []
-        pkts = [attack]
+            pkts = [attack]
         combat.auto_engage(uid, session.area, target, data, forge_data, cd or 600)
     elif has_graph:                     # authored skill: run its graph (handshake)
         pkts, killed, dmg = combat.begin_cast(session.area, uid, slot_i, target,
@@ -164,7 +170,7 @@ async def begin_cast(session, writer, cmd, params, msg):
                 print(f"        [combat] slot {slot_i}: {summ}")
     # push a live resource re-sync so a consume (Smite empties Conviction) shows on the bar
     # THIS cast, not on the next one (the in-Attack Resource node repaints a beat late).
-    if combat.resource_model(uid) == "conviction":
+    if combat.resource_model(uid) in combat.STACK_MODELS:
         await send_obj(writer, combat.resource_packet(uid, session.member.name))
     combat.engage(session.area, target, session.member.uid)   # monster now aggros
     await _handle_kills(session, writer, killed)

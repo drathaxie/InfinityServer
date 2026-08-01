@@ -9,6 +9,7 @@ import forge
 import game
 import seed
 import statues
+import world
 from handlers import players as player_handlers
 
 
@@ -20,15 +21,16 @@ def main():
 
     achievements = {"ip25": 1 << 6}
 
-    made, house_item = statues.generate(conn, char, now=1000)
+    made, house_item, version = statues.generate(conn, char, now=1000)
     conn.commit()
     assert made["Success"] and made["ItemID"] == statues.STATUE_ITEM_ID
+    assert version == 1000 * 1000
     assert house_item["sType"] == "FloorItem" and house_item["Meta"].startswith(
         f"custom:1,cid:{char['id']},rev:")
     assert house_item["MobileCompatibility"] == 1
     custom = db.item(conn, statues.STATUE_ITEM_ID)
-    assert custom["Name"] == "Custom Hero Statue"
-    assert custom.get("Bundle") is None
+    assert custom["Name"] == "Player KS Statue"
+    assert custom.get("Bundle") is not None, "978659 ships AE's real bundle 78659"
     day_one = db.item(conn, 99514)
     if day_one is not None:
         assert day_one["Name"] == "Day 1 Backer of DOOOOM Statue"
@@ -60,32 +62,69 @@ def main():
         async def drain(self):
             return None
 
-    session = SimpleNamespace(conn=conn, char=wire_char, member=object())
+    session = SimpleNamespace(conn=conn, char=wire_char,
+                              member=SimpleNamespace(uid=game.uid_for(wire_char)))
     asyncio.run(player_handlers.generate_statue_live(
         session, Writer(), "generateStatue", [], {}))
-    assert [p["Cmd"] for p in packets] == ["generateStatue", "buyItem"]
+    # statueVersion is pushed to the actor directly after generateStatue/buyItem (no house
+    # equipped yet, so no house-area broadcast fires for this fresh character).
+    assert [p["Cmd"] for p in packets] == ["generateStatue", "buyItem", "statueVersion"]
     assert packets[0]["Success"] is True
     assert packets[1]["houseItem"]["ItemID"] == statues.STATUE_ITEM_ID
+    assert packets[2]["cid"] == wire_char["id"]
+    assert isinstance(packets[2]["version"], int)
 
-    cooldown, duplicate = statues.generate(conn, char, now=1001)
+    cooldown, duplicate, no_version = statues.generate(conn, char, now=1001)
     assert not cooldown["Success"] and cooldown["CooldownRemainingMs"] > 0
-    assert duplicate is None
+    assert duplicate is None and no_version is None
 
     dev_char = game.login(conn, "__client_delta_dev__", "pw")
     conn.execute("UPDATE characters SET access_level=40 WHERE id=?",
                  (dev_char["id"],))
     dev_char = conn.execute(
         "SELECT * FROM characters WHERE id=?", (dev_char["id"],)).fetchone()
-    dev_first, dev_item = statues.generate(conn, dev_char, now=2000)
-    dev_second, dev_refresh_item = statues.generate(conn, dev_char, now=2001)
+    dev_first, dev_item, dev_v1 = statues.generate(conn, dev_char, now=2000)
+    dev_second, dev_refresh_item, dev_v2 = statues.generate(conn, dev_char, now=2001)
     assert dev_first["Success"] and dev_first["CooldownRemainingMs"] == 0
     assert dev_second["Success"] and dev_second["CooldownRemainingMs"] == 0, \
         "dev accounts bypass the statue cooldown"
     assert dev_item is not None and dev_refresh_item is None
+    assert dev_v1 == 2000 * 1000 and dev_v2 == 2001 * 1000, \
+        "each successful (re)generation bumps the statueVersion, even without a new house item"
 
-    refreshed, refresh_item = statues.generate(conn, char, now=1301)
+    refreshed, refresh_item, refresh_version = statues.generate(conn, char, now=1301)
     conn.commit()
-    assert refreshed["Success"] and refresh_item is None
+    assert refreshed["Success"] and refresh_item is None and refresh_version == 1301 * 1000
+
+    # statueVersion also reaches a VISITOR currently standing in the owner's house (the only
+    # place besides the owner's own client where a DynamicStatue for this cid can be spawned).
+    homeowner = game.login(conn, "__client_delta_homeowner__", "pw")
+    game.give_item(conn, homeowner, 5291, 1)                 # Hollowsoul Castle deed
+    game.equip_house(conn, homeowner, 5291)
+    conn.commit()
+    house_area = f"{game.house_map_for(conn, 5291)}-{game.uid_for(homeowner)}"
+
+    visitor = game.login(conn, "__client_delta_visitor__", "pw")
+    visitor_packets = []
+
+    class VisitorWriter:
+        def write(self, payload):
+            visitor_packets.append(json.loads(payload.rstrip(b"\x00").decode("utf-8")))
+
+        def is_closing(self):
+            return False
+
+    visitor_member = SimpleNamespace(uid=game.uid_for(visitor), writer=VisitorWriter(), area=None)
+    world.join(visitor_member, house_area)
+
+    home_session = SimpleNamespace(conn=conn, char=homeowner,
+                                   member=SimpleNamespace(uid=game.uid_for(homeowner)))
+    asyncio.run(player_handlers.generate_statue_live(
+        home_session, Writer(), "generateStatue", [], {}))
+    assert [p["Cmd"] for p in visitor_packets] == ["statueVersion"], \
+        "a visitor in the owner's house gets the live refresh without leave/re-enter"
+    assert visitor_packets[0]["cid"] == homeowner["id"]
+    world.leave(visitor_member)
     count = conn.execute(
         "SELECT COUNT(*) AS n FROM char_items WHERE char_id=? AND item_id=?",
         (char["id"], statues.STATUE_ITEM_ID)).fetchone()["n"]

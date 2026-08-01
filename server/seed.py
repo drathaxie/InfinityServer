@@ -411,7 +411,11 @@ _DS_BANE = [                                            # 105, slot 4: self-buff
 #       rate-cap — the firewalls' enter/exit reports were stacking into a one-shot.
 #   v10: Ragnafluff "Ruinous Echoes" — summons 2 Ragnafluff Clones (server-side spawnMob, real
 #        fightable adds) on an 18s rotation slot, from the captured clone spawn.
-SKILL_GRAPH_VERSION = 14
+#   v15: the Abomilich fight (InfinityLichBoss 429/430) — AE built and placed this boss but never
+#        gave it a moveset. Seven skills across the whole captured tile vocabulary (HitTiles,
+#        TileWave, TileCluster, TileSafe, TileTrack, HitStream, Summon); see _ABOMILICH_SKILLS
+#        for exactly which parts are capture-verified and which are ours.
+SKILL_GRAPH_VERSION = 15
 
 
 # Authored per-skill element + damage multiplier (P1-4). NEITHER is minable — a resolved Damage
@@ -550,6 +554,135 @@ _RAGNAFLUFF_SKILLS = [
 # cosmetic (never sent to the client — only the tile node becomes a MonReq; damage is applied
 # server-side as a normal hit on the gmah report); Multiplier scales that hit.
 # (class_id, class_name, (mon_ids,), [(slot, skill_id, name, desc, node_list), ...])
+# --- Abomilich (InfinityLichBoss, mon 429/430) ---------------------------------------------
+# AE built the art and placed the monster but never gave it a fight. This is that fight,
+# authored entirely in the captured tile vocabulary — the same node types Ragnafluff and the
+# elementals use, so the client renders it with code AE already shipped and no mod is needed.
+#
+# GROUNDING, stated plainly:
+#   * The node TYPES, prop names and defaults are capture-verified (docs/combat-engine
+#     fixtures; the render layer replays 3837 captured nodes byte-for-byte).
+#   * The monster, its art bundles and its two map placements are real AE data (mon 429 on
+#     map 2239, 430 on 2241, bundles 78661 + the 78742 boss pet).
+#   * The ROTATION ITSELF — which tiles, what shapes, cadence, damage — is OURS. No capture of
+#     this boss fighting exists: AE's telegraphed tiles are client-rendered and reported back
+#     (MonReq s2c / gmah c2s), so they never appear as monster Attack packets at all, which is
+#     why monster_casts.json holds only plain autos. Tuned against Ragnafluff's captured
+#     cadence (4.5s/5s/7s/18s) so it reads like an AE fight rather than guesswork.
+#
+# Art note: mon 429's row points at bundle 78660, which 404s on the live CDN at every version
+# (78661 resolves at v1-v3), so 429 renders as nothing. seed_abomilich repoints it — see the
+# guarded UPDATE below.
+ABOMILICH_CLASS_ID = 9429
+ABOMILICH_MON_IDS = (429, 430)
+ABOMILICH_THRALL_MON = 431
+ABOMILICH_LIVE_BUNDLE = 78661
+
+_ABOMILICH_SKILLS = [
+    # The lich opens graves under everyone standing still.
+    (0, 94290, "Grasping Tombs", "Grave-circles open underfoot — step off the red.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 4500}),
+        ("2", {"Name": "HitTiles", "Shape": "Circle", "VFX": "Ground_Fire_Attack-This_moves_VFX",
+               "Speed": 1.8, "ScaleX": 1.2, "ScaleY": 1.2, "CastAnimation": "Attack1",
+               "FinishAnimation": "Attack1", "ImpactSound": "SFX_Impact_Fire_C"}),
+        ("3", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 1.0}),
+    ]),
+    # A wave of undeath rolls the length of the arena.
+    (1, 94291, "Deathwave", "A wall of undeath sweeps the arena — jump the gap.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 6000}),
+        ("2", {"Name": "TileWave", "Speed": 2.2, "CastAnimation": "Attack2",
+               "DuringAnimation": "Attack2", "FinishAnimation": "Attack2",
+               "ImpactSound": "SFX_Impact_Lightning_B"}),
+        ("3", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 1.25}),
+    ]),
+    # Bone shrapnel scattered across the floor. Offsets pin the pattern server-side so every
+    # client draws the same shards (the Ice Elemental's captured cluster does the same).
+    (2, 94292, "Bone Scatter", "Shattered bone rains across the floor in a scatter.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 5500}),
+        ("2", {"Name": "TileCluster", "Speed": 2.4, "ScaleX": 1.1, "ScaleY": 1.1,
+               "CastAnimation": "Attack3", "DuringAnimation": "Attack3",
+               "FinishAnimation": "Attack3", "ImpactSound": "SFX_Impact_Earth_A",
+               "ClusterOffsets": [-8.5, 1.9, 6.25, -1.4, -3.75, 2.35, 9.5, 1.15,
+                                  -6.0, -1.85, 2.5, 2.1, -1.25, -1.6, 7.75, -2.25]}),
+        ("3", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 1.15}),
+    ]),
+    # The signature inverse telegraph: the ward is the ONLY safe ground.
+    (3, 94293, "Soul Cage", "Only the warded ground is safe — get inside the circle.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 9000}),
+        ("2", {"Name": "TileSafe", "Speed": 1.4, "ScaleX": 1.6, "ScaleY": 1.6,
+               "VFX": "Ground_Fire_Attack-This_moves_VFX", "CastAnimation": "Attack1",
+               "DuringAnimation": "Attack1", "FinishAnimation": "Attack1",
+               "ImpactSound": "SFX_Impact_Fire_C", "SafeOffsetX": 0.0, "SafeOffsetY": -2.0}),
+        ("3", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 1.5}),
+    ]),
+    # A hunting circle that follows you before it locks.
+    (4, 94294, "Grave Chase", "A death-mark hunts you across the floor before it locks.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 7000}),
+        ("2", {"Name": "TileTrack", "Track": "Center", "Shape": "Circle", "Speed": 1.6,
+               "ScaleX": 1.3, "ScaleY": 1.3, "CastAnimation": "Attack2",
+               "FinishAnimation": "Attack2", "ImpactSound": "SFX_Impact_Lightning_B",
+               "DelayedAnimation": "Attack2", "DelayedAnimationTime": 0.6}),
+        ("3", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 1.2}),
+    ]),
+    # Lingering miasma along both flanks — one cast, several strips (Ragnafluff's firewall shape).
+    (5, 94295, "Creeping Miasma", "Corpse-fog seeps in from the flanks and lingers.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 12000}),
+        ("2", {"Name": "HitStream", "PosX": -22.0, "PosY": -0.85, "Speed": 1.0,
+               "Duration": 12000, "ScaleX": 0.25, "ScaleY": 2.2,
+               "VFX": "Ground_Fire_Attack-This_moves_VFX", "FinishAnimation": "Attack3",
+               "ImpactSound": "SFX_Impact_Fire_C"}),
+        ("3", {"Name": "HitStream", "PosX": 20.0, "PosY": -0.85, "Speed": 1.0,
+               "Duration": 12000, "ScaleX": 0.25, "ScaleY": 2.2,
+               "VFX": "Ground_Fire_Attack-This_moves_VFX",
+               "ImpactSound": "SFX_Impact_Fire_C"}),
+        ("4", {"Name": "Damage", "DamageType": "Fire", "Multiplier": 0.9}),
+    ]),
+    # Raise the dead: real fightable adds using AE's own boss-pet art (78742, live on the CDN).
+    (6, 94296, "Raise Thrall", "The lich drags two thralls up out of the floor.", [
+        ("0", {"Name": "OnRequest"}),
+        ("1", {"Name": "Cooldown", "CD": 20000}),
+        ("2", {"Name": "Summon", "MonID": ABOMILICH_THRALL_MON, "Count": 2, "MaxAlive": 2,
+               "HP": 400, "Level": 5, "X": 0.0, "Y": -10.4}),
+    ]),
+]
+
+
+def seed_abomilich(conn):
+    """Seed the Abomilich fight: the skill-holder class + its seven skills, linked onto
+    InfinityLichBoss (429/430). Same non-clobbering rules as the other monster classes.
+    Also repoints mon 429's dead art bundle (see the module comment). Returns # linked."""
+    import forge
+    row = conn.execute("SELECT v FROM kv WHERE k='skill_graph_version'").fetchone()
+    stored = int(row["v"]) if row and str(row["v"]).isdigit() else 0
+    refresh = stored < SKILL_GRAPH_VERSION
+    n = _seed_mon_class(conn, forge, ABOMILICH_CLASS_ID, "Abomilich",
+                        _ABOMILICH_SKILLS, ABOMILICH_MON_IDS, refresh)
+    # mon 429 shipped pointing at bundle 78660, which does not exist on the live CDN at any
+    # version (probed: 78660 404s at v0-v4; 78661 serves at v1-v3), so the boss renders as an
+    # invisible hitbox. Repoint it at the live twin — guarded, so a later real 78660 upload or
+    # a hand-edit is never clobbered. Same self-healing shape as the greendragon fix above.
+    row = conn.execute("SELECT bundle FROM monsters WHERE mon_id=?",
+                       (ABOMILICH_MON_IDS[0],)).fetchone()
+    if row and row["bundle"]:
+        try:
+            b = json.loads(row["bundle"])
+        except ValueError:
+            b = None
+        if isinstance(b, dict) and int(b.get("ID") or 0) == 78660:
+            conn.execute("UPDATE monsters SET bundle=? WHERE mon_id=?",
+                         (json.dumps({"ID": ABOMILICH_LIVE_BUNDLE, "Name": "InfinityLichBoss",
+                                      "Filename": "npcs/78661_infinitylichboss.unity3d",
+                                      "VersionStage": 2, "VersionLive": 2},
+                                     separators=(",", ":")), ABOMILICH_MON_IDS[0]))
+    return n
+
+
 _BOSS_CLASSES = [
     (9236, "Rock Elemental", (236,), [
         (0, 92360, "Stone Spikes", "Rock spikes erupt in a ring — step off the red.", [
@@ -740,6 +873,7 @@ def seed_monster_skills(conn):
                         RAGNAFLUFF_MON_IDS, refresh)
     for class_id, class_name, mon_ids, skills in _BOSS_CLASSES:
         n += _seed_mon_class(conn, forge, class_id, class_name, skills, mon_ids, refresh)
+    n += seed_abomilich(conn)               # InfinityLichBoss (429/430) tile fight
     # The greendragon boss must stay Hostile (attackable). greendragon.json has reactionType:1,
     # but the monster row predated that and the seed is INSERT-IF-ABSENT, so reaction_type was
     # NULL -> the authored/compiled monBranch served it as a neutral click-to-talk NPC. Backfill
@@ -777,7 +911,11 @@ PALADIN_CLASS_ID = 69420
 # v6: uses the actual classInfinityHero_S1_P4 composite for Meteor's victim-side finisher.
 #     That prefab owns InfinitySword-Animation plus the giant sword, three lightning strikes,
 #     gold pillars, runes, smoke, and explosion; a 6s lifetime lets its full sequence finish.
-PALADIN_GRAPH_VERSION = 6
+# v7: writes the combat-engine RULE CONFIG (PALADIN_RULES) into classes.raw — the Conviction
+#     mechanic expressed as data (combat_engine/rules.py). The graphs are unchanged; the
+#     Python special-cases in combat.py still drive live combat until the cutover
+#     (test_port_parity.py proves the two paths emit identical Attacks).
+PALADIN_GRAPH_VERSION = 7
 
 _PALADIN_RESOURCE = {"model": "conviction", "ResourceColor": 16764498, "MaxRP": 50}
 # The rig carries the ReduxPaladin class-armor item id (69420) — forge.class_for_armor_item
@@ -897,6 +1035,77 @@ _PALADIN_SKILLS = [
 ]
 
 
+# --- Conviction as DATA (combat_engine rule config, stage-4 port) --------------------------
+# The exact mechanics combat.py hardcodes for class 69420, re-expressed in the rule-graph
+# authoring format (combat_engine/rules.py docstring): stacks snapshot BEFORE the gain (a
+# cast scales on the stacks you HAD), builders +3 auto/+2 Vow, Smite consumes all for
+# +5%/stack and a 30% party lifelink, the Meteor aspect branch, guard auras on allies.
+# Stored in classes.raw["rules"]; live combat still runs the Python path until cutover.
+_PALADIN_ASPECT_GROUP = ["warrior", "healer"]
+PALADIN_RULES = {
+    "engine": 1,
+    "resource": {"model": "conviction", "max": 50},
+    "skills": {
+        "90373": [                                          # Auto: +3 Conviction
+            {"Do": "Formula", "Var": "stacks", "Expr": "rp"},
+            {"Do": "ResourceOp", "Op": "gain", "Amount": 3},
+            {"Do": "Graph"},
+        ],
+        "90369": [                                          # Vow: +2, +3%/stack
+            {"Do": "Formula", "Var": "stacks", "Expr": "rp"},
+            {"Do": "ResourceOp", "Op": "gain", "Amount": 2},
+            {"Do": "Graph",
+             "Overlay": {"Damage": {"MultScale": {"$": "1 + 0.03*stacks"}}}},
+        ],
+        "90370": [                                          # Meteor: aspect branch
+            {"Do": "Branch", "On": "aspect",
+             "Cases": {"healer": [
+                 {"Do": "Graph", "Overlay": {"Damage": {"MaxTargets": 4}}},
+                 # uniquenessType pinned to combat.py's legacy 1 (the REAL
+                 # InfinityHero capture uses 0; the registry default follows it)
+                 {"Do": "ApplyAura", "Aura": "Suppression",
+                  "Targets": "@hits", "MaxTargets": 4, "uniquenessType": 1},
+             ]},
+             "Default": [                                   # warrior (the default aspect)
+                 {"Do": "Graph", "Overlay": {"Damage": {"Targets": None,
+                                                        "MaxTargets": 1,
+                                                        "MultScale": 1.5}}},
+                 {"Do": "ApplyAura", "Aura": "Burning Field",
+                  "Targets": "@hits", "MaxTargets": 1},
+             ]},
+        ],
+        "90371": [                                          # Healer Aspect: party guard
+            {"Do": "SetAspect", "Aspect": "healer", "Group": _PALADIN_ASPECT_GROUP},
+            {"Do": "Graph", "Overlay": {"Aura": {"Targets": "@allies"}}},
+        ],
+        "90372": [                                          # Smite: spend all + lifelink
+            {"Do": "SetAspect", "Aspect": "warrior", "Group": _PALADIN_ASPECT_GROUP},
+            {"Do": "ResourceOp", "Op": "spend_all"},
+            {"Do": "Graph",
+             "Overlay": {"Damage": {"MultScale": {"$": "1 + 0.05*spent"}}}},
+            {"Do": "Branch", "If": "dmg_total > 0", "Then": [
+                {"Do": "Heal", "Amount": {"$": "max(1, round(dmg_total*0.30))"},
+                 "Targets": "@allies", "MaxTargets": 6, "Immediate": True}]},
+        ],
+    },
+}
+
+
+def _seed_class_rules(conn, class_id, rules):
+    """Write a class's combat-engine rule config into classes.raw["rules"]
+    (merging over any other raw keys). Caller gates on its refresh flag."""
+    crow = conn.execute("SELECT raw FROM classes WHERE class_id=?", (class_id,)).fetchone()
+    try:
+        raw = json.loads(crow["raw"]) if crow and crow["raw"] else {}
+    except ValueError:
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    raw["rules"] = rules
+    conn.execute("UPDATE classes SET raw=? WHERE class_id=?",
+                 (json.dumps(raw, separators=(",", ":")), class_id))
+
+
 def seed_paladin(conn):
     """Seed the Paladin class row (resource + rig), its five skill graphs and slot links.
     Same rules as the other canonical graphs: INSERT-IF-ABSENT for the class/slots, graphs
@@ -952,6 +1161,8 @@ def seed_paladin(conn):
             "INSERT INTO class_skills(class_id, slot, skill_id) VALUES(?,?,?) "
             "ON CONFLICT(class_id, slot) DO NOTHING",
             (PALADIN_CLASS_ID, slot, skill_id))
+    if refresh:
+        _seed_class_rules(conn, PALADIN_CLASS_ID, PALADIN_RULES)    # v7: Conviction as data
     conn.execute("INSERT INTO kv(k,v) VALUES('paladin_graph_version',?) "
                  "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (str(PALADIN_GRAPH_VERSION),))
     return n
@@ -987,9 +1198,50 @@ def seed_paladin(conn):
 #     monster (bundle 66126, the "IT" red-eyed shadow mass) for 8s of Shadow Form (+25% dmg,
 #     -15% incoming; combat.py aura expiry sends the detransform automatically). The client's
 #     NodeMonTransform replicates the morph to the whole area.
+# v4: writes the combat-engine RULE CONFIG (VOID_RULES) into classes.raw — Hunger as data,
+#     same port pattern as PALADIN_RULES (graphs untouched, Python path still live).
 VOID_CLASS_ID = 2064
 VOID_ARMOR_ITEM = 47465
-VOID_GRAPH_VERSION = 3
+VOID_GRAPH_VERSION = 4
+
+# --- Hunger as DATA (stage-4 port): the same stacking machinery, Void-flavored — builders
+# --- +3 Rend/+2 Siphon/+5 Maw, Siphon drinks back 35%, Manifest consumes all for +5%/stack.
+VOID_RULES = {
+    "engine": 1,
+    "resource": {"model": "conviction", "max": 50},
+    "skills": {
+        "90380": [                                          # Void Rend: +3 Hunger
+            {"Do": "Formula", "Var": "stacks", "Expr": "rp"},
+            {"Do": "ResourceOp", "Op": "gain", "Amount": 3},
+            {"Do": "Graph"},
+        ],
+        "90381": [                                          # Essence Siphon: +2, +2%/stack,
+            {"Do": "Formula", "Var": "stacks", "Expr": "rp"},   # 35% party lifelink
+            {"Do": "ResourceOp", "Op": "gain", "Amount": 2},
+            {"Do": "Graph",
+             "Overlay": {"Damage": {"MultScale": {"$": "1 + 0.02*stacks"}}}},
+            {"Do": "Branch", "If": "dmg_total > 0", "Then": [
+                {"Do": "Heal", "Amount": {"$": "max(1, round(dmg_total*0.35))"},
+                 "Targets": "@allies", "MaxTargets": 6, "Immediate": True}]},
+        ],
+        "90382": [                                          # Hungering Maw: +5, +2%/stack,
+            {"Do": "Formula", "Var": "stacks", "Expr": "rp"},   # Umbral Rot on the victim
+            {"Do": "ResourceOp", "Op": "gain", "Amount": 5},
+            {"Do": "Graph",
+             "Overlay": {"Damage": {"MultScale": {"$": "1 + 0.02*stacks"}},
+                         "Aura": {"Targets": "@target"}}},
+        ],
+        "90383": [                                          # Event Horizon: party guard
+            {"Do": "Graph", "Overlay": {"Aura": {"Targets": "@allies"}}},
+        ],
+        "90384": [                                          # Lethal Abomination: spend all,
+            {"Do": "ResourceOp", "Op": "spend_all"},        # +5%/stack, Shadow Form morph
+            {"Do": "Graph",
+             "Overlay": {"Damage": {"MultScale": {"$": "1 + 0.05*spent"}},
+                         "Aura": {"Targets": "@allies"}}},
+        ],
+    },
+}
 
 _VOID_RESOURCE = {"model": "conviction", "ResourceColor": 10170623, "MaxRP": 50}
 _VOID_RIG = {
@@ -1127,8 +1379,536 @@ def seed_void(conn):
             "INSERT INTO class_skills(class_id, slot, skill_id) VALUES(?,?,?) "
             "ON CONFLICT(class_id, slot) DO NOTHING",
             (VOID_CLASS_ID, slot, skill_id))
+    if refresh:
+        _seed_class_rules(conn, VOID_CLASS_ID, VOID_RULES)          # v4: Hunger as data
     conn.execute("INSERT INTO kv(k,v) VALUES('void_graph_version',?) "
                  "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (str(VOID_GRAPH_VERSION),))
+    return n
+
+
+# --- Infinity Hero (class 2022) — AE's real hero class, rebuilt as PURE DATA ----------------
+# Every mechanic below is decoded from 447 captured AE casts of the actual class (233 in
+# fixtures/infinity_hero_casts.json + the second session inside golden_attack_fixtures.json):
+#
+#   * 4-Aspect combo: each skill APPLIES its own hidden aspect marker (slot1 Warrior,
+#     slot2 Mage, slot3 Healer, slot4 Rogue) and BRANCHES on whichever was active before:
+#         active W -> Meteor +50% + burning ground field | Healing Oath +Holy Guard
+#         active M -> Definitive Strike wide cleave +Armor Melted | Serpent's Kiss empowered
+#         active H -> Meteor +Suppression | Serpent's Kiss +Concealed Blade
+#         active R -> Definitive Strike +Prepared Strike | Healing Oath 2x-speed +Hallowed
+#     (confirmed twice over: the effect auras per prior aspect AND the icon rebinds —
+#     after an aspect lands, exactly its two branch skills swap to that aspect family's
+#     icons, InfinityHero{A,B,C,D}{2,3}, with 15s shared IndexReset rings back to base.)
+#   * Heroic resource 0-50: +1 per Aspect Effect applied (the captured Resource nodes
+#     count 1,2,3... exactly on effect casts, never on autos or effect-less casts).
+#     At 25 the marker aura "Heroic Empowerment" lands, slot 0 swaps to InfinityHeroUlt,
+#     and the NEXT Heroic Strike is the sky-blade AoE: a 2.5s PlayerHitStream (W20 H10,
+#     200ms ticks) that resets the pool to 0.
+#   * The class was never itemized by AE (no catalog item carries MetaString 2022), so the
+#     class armor is OURS: item 200022 in our homebrew band, wearing the "Hero of Infinity"
+#     Kickstarter armor bundle (77678) with the classInfinityHero particle bundle (78541).
+#
+# Damage/heal MULTIPLIERS are ours (AE's server formula is invisible; ratios tuned to the
+# captured bands: skills ~1.3-2x the auto, Meteor ~0.75x, the Mage-branch Serpent's Kiss
+# ~2x its base). Everything else — node sequences, sounds, particles, hitboxes, icons,
+# timings, aura names/flags — is capture-verbatim and replay-tested by test_infinity_hero.py.
+INFINITY_HERO_CLASS_ID = 2022
+INFINITY_HERO_ARMOR_ITEM = 200022
+INFINITY_HERO_GRAPH_VERSION = 1
+CLASS_SHOP_ID = 2468                    # Gravelyn's Infinity — where classes are bought
+
+_IH_RESOURCE = {"model": "heroic", "ResourceColor": 16773977, "MaxRP": 50,
+                "Threshold": 25, "ThresholdColor": 16766720}
+_IH_RIG = {
+    "ID": INFINITY_HERO_ARMOR_ITEM,
+    "Bundle": {"ID": 77678, "Name": "Hero of Infinity",
+               "Filename": "armors/77678_AQ2DKSArmor.unity3d",
+               "VersionStage": 2, "VersionLive": 2},
+    "ClassParticleBundle": {"ID": 78541, "Name": "classInfinityHero_Default",
+                            "Filename": "gameassets/classes/78541_classinfinityhero_default.unity3d",
+                            "VersionStage": 1, "VersionLive": 1},
+    "PrefabName": "ArmorSlots", "EquipSpot": 6, "ItemType": 21,
+}
+_IH_ITEM = {
+    "ID": INFINITY_HERO_ARMOR_ITEM, "Name": "Infinity Hero",
+    "Description": "The Hero of Infinity. Flow between the four Aspects — Warrior, Mage, "
+                   "Healer, Rogue — chaining their arts into Aspect Effects; at 25 Heroic "
+                   "the next Heroic Strike calls down the sky-blade.",
+    "ItemType": 21, "EquipSpot": 6, "Linkage": "", "Icon": "iiclass", "Level": 1,
+    "Quantity": 1, "StackSize": 1, "Element": 1, "Faction": 1, "MetaString": "2022",
+    "DamageRange": 0.1, "Rarity": 50, "Filename": "armors/77678_AQ2DKSArmor.unity3d",
+    "Coins": True, "PrefabName": "ArmorSlots", "MobileCompat": 1, "IsClass": True,
+    "Bundle": _IH_RIG["Bundle"],
+}
+
+_IH_ASPECTS = ["Warrior Aspect", "Mage Aspect", "Healer Aspect", "Rogue Aspect"]
+_ICO = "InfinityHero/InfinityHero"
+
+# The combo rebind broadcast per newly-applied aspect (a StatusCode-3 Attack; capture-
+# verbatim, including which two slots get branch icons + IndexReset revert rings and the
+# Index quirks — A2/B2 carry Index 1, C2/D2 carry 0, exactly as AE sent them).
+def _ih_ssi(slot, index, icon):
+    return {"Name": "SetSkillIndex", "Slot": slot, "Index": index,
+            "Icon": _ICO + icon, "hide": False}
+
+
+def _ih_ir(slot, icon):
+    return {"Name": "IndexReset", "Slot": slot, "Index": 0, "Time": 15000,
+            "Icon": _ICO + icon, "CD": 0, "Shared": True, "Stay": False}
+
+
+_IH_REBINDS = {
+    "Warrior Aspect": [_ih_ssi(1, 0, "A1"), _ih_ssi(2, 1, "A2"), _ih_ir(2, "B1"),
+                       _ih_ssi(3, 0, "A3"), _ih_ir(3, "C1"), _ih_ssi(4, 0, "D1")],
+    "Mage Aspect":    [_ih_ssi(1, 1, "B2"), _ih_ir(1, "A1"), _ih_ssi(2, 0, "B1"),
+                       _ih_ssi(3, 0, "C1"), _ih_ssi(4, 0, "B3"), _ih_ir(4, "D1")],
+    "Healer Aspect":  [_ih_ssi(1, 0, "A1"), _ih_ssi(2, 0, "C2"), _ih_ir(2, "B1"),
+                       _ih_ssi(3, 0, "C1"), _ih_ssi(4, 0, "C3"), _ih_ir(4, "D1")],
+    "Rogue Aspect":   [_ih_ssi(1, 0, "D2"), _ih_ir(1, "A1"), _ih_ssi(2, 0, "B1"),
+                       _ih_ssi(3, 0, "D3"), _ih_ir(3, "C1"), _ih_ssi(4, 0, "D1")],
+}
+
+
+# node builders (capture-verbatim prop shapes)
+def _ih_restrict(anim, t, slots="2,3,4,5"):
+    return [{"Name": "Restrict", "Direction": True, "Movement": True, "Skills": True,
+             "Slot": slots, "Animation": anim, "ReleaseMode": "AtTime", "Time": t},
+            {"Name": "Interruptable", "Animation": anim, "Time": t}]
+
+
+def _ih_sfx(anim, sound, t=0.0):
+    return {"Name": "SoundFX", "Animation": anim, "Sound": sound, "Time": t,
+            "MinPitch": 0.0, "MaxPitch": 0.0}
+
+
+def _ih_particle(anim, p, t, x, y, speed=None, follow="No Follow", life=None,
+                 targets=None):
+    node = {"Name": "Particle", "Follow": follow, "X": x, "Y": y, "Particle": p,
+            "Time": t}
+    if targets is not None:       # default (omitted) = on the caster
+        node["Targets"] = targets
+    if anim is not None:              # uncued spawns omit Animation entirely
+        node["Animation"] = anim
+    if speed is not None:
+        node["AnimSpeed"] = speed
+    if life is not None:
+        node["Lifetime"] = life
+    return node
+
+
+# --- skill 169, Definitive Strike (slot 1, applies Warrior Aspect) --------------------------
+def _ih_s1(sound, particle, hitbox, effect):
+    """One Definitive Strike branch: lead-in + cleave + optional effect block."""
+    seq = [{"Name": "Range", "HRange": 5.0, "VRange": 1.0, "Charge": True,
+            "HoldAtRange": False},
+           {"Name": "Cooldown", "Slot": 1, "CD": 3959, "Animation": ""}]
+    seq += _ih_restrict("DS Skill1C", 0.45)
+    seq += [sound, particle, hitbox,
+            {"Name": "Damage", "DamageType": "Physical", "Multiplier": 1.3},
+            {"Name": "DispenseDamage"}]
+    seq += effect
+    seq += [{"Do": "ApplyAura", "Aura": "Warrior Aspect"},
+            {"Name": "UpdateAnimation", "Tag": "combatIdle", "Value": "2H_Fight"}]
+    return seq
+
+
+_IH_S1_HITBOX = {"Name": "AnimationHitbox", "X": 6.5, "Y": 0.0, "Width": 11, "Height": 2,
+                 "Animation": "DS Skill1C", "Speed": 1.5, "Time": 0.35}
+_IH_SKILL_169 = [
+    {"Do": "Branch", "On": "aspect", "Cases": {
+        # Mage active: fire-infused WIDE cleave, victims' armor melts
+        "Mage Aspect": _ih_s1(
+            _ih_sfx("DS Skill1C", "SFX_Impact_Fire_C", 0.3),
+            _ih_particle("DS Skill1C", "classInfinityHero_S2_P4", "0.4", 0.0, 1.0),
+            {"Name": "AnimationHitbox", "X": 0.0, "Y": 0.0, "Width": 19, "Height": 5,
+             "Animation": "DS Skill1C", "Speed": 1.5, "Time": 0.35},
+            [{"Do": "ResourceOp", "Op": "gain", "Amount": 1},
+             {"Do": "ApplyAura", "Aura": "Armor Melted", "Targets": "@hits"},
+             {"Name": "Resource"}]),
+        # Rogue active: a poised strike, the next blow prepared
+        "Rogue Aspect": _ih_s1(
+            _ih_sfx("DS Skill1C", "sfx_rogue_viperskiss", 0.3),
+            _ih_particle("DS Skill1C", "classInfinityHero_S2_P3", "0.35", 0.0, 3.0),
+            _IH_S1_HITBOX,
+            [{"Do": "ResourceOp", "Op": "gain", "Amount": 1},
+             {"Do": "ApplyAura", "Aura": "Prepared Strike"},
+             {"Name": "Resource"}]),
+    },
+     "Default": _ih_s1(
+        _ih_sfx("DS Skill1C", "sfx_warrior_decisivestrike"),
+        _ih_particle("DS Skill1C", "classInfinityHero_S2_P1", "0.4", 5.0, 3.0, speed=1.0),
+        _IH_S1_HITBOX, [])},
+]
+
+
+# --- skill 170, Meteor (slot 2, applies Mage Aspect) ----------------------------------------
+def _ih_s2(mid, tail):
+    seq = [{"Name": "Range", "HRange": 31.0, "VRange": 31.0, "Charge": True,
+            "HoldAtRange": False},
+           {"Name": "Cooldown", "Slot": 2, "CD": 3959, "Animation": "Mage_CastOffensive3"}]
+    seq += _ih_restrict("Mage_CastOffensive3", 0.5)
+    seq += [{"Name": "Damage", "DamageType": "Magical", "Multiplier": 0.75}]
+    seq += mid
+    seq += tail
+    seq += [{"Do": "ApplyAura", "Aura": "Mage Aspect"}]
+    return seq
+
+
+def _ih_meteor_spell(attach, graphic, impact, ease=True, impact_id=None):
+    node = {"Name": "SpellAnimation", "FX": "Meteor", "Animation": "Mage_CastOffensive3",
+            "SpellGraphic": graphic, "SpellImpact": impact, "AttachInit": "Origin",
+            "Attach": attach, "AttachImpact": "Origin", "Follow": True,
+            "X": 10.0, "Y": 15.0}
+    if ease:
+        node["Ease"] = "linear"
+    if impact_id is not None:
+        node["impactId"] = impact_id
+    return node
+
+
+_IH_SKILL_170 = [
+    {"Do": "Branch", "On": "aspect", "Cases": {
+        # Warrior active: +50%, and the impact leaves a burning field for 5s
+        "Warrior Aspect": _ih_s2(
+            [_ih_meteor_spell("Cast", "classInfinityHero_S3_P2",
+                              "classInfinityHero_S3_P4", impact_id=1),
+             {"Name": "ImpactSoundFX", "Animation": "classInfinityHero_S3_P4",
+              "Sound": "SFX_Fire", "MinPitch": 0.0, "MaxPitch": 0.0},
+             _ih_sfx("Mage_CastOffensive3", "sfx_mage_explosion")],
+            [{"Do": "ResourceOp", "Op": "gain", "Amount": 1},
+             {"Name": "Resource"},
+             # the burning ground: an ASYNC packet that lands ~1s after the
+             # cast, so its targets resolve against the world AT LANDING —
+             # there is nothing left to set alight if the meteor's victim has
+             # already died, and only the (empty) particle goes out, exactly
+             # as the captured field packets show
+             {"Do": "Packet", "Status": 4, "Delay": 1000, "Nodes": [
+                 _ih_particle(None, "classInfinityHero_S3_P3", "0", 0.0, 0.0,
+                              speed=1.0, life=7000.0, targets="@hits"),
+                 {"Do": "Branch", "If": "hits > 0", "Then": [
+                     {"Name": "PlayerHitStream", "X": 0.0, "Y": 0.0, "Width": 5.0,
+                      "Height": 5.0, "Duration": 5000, "Interval": 500,
+                      "Origin": "Target", "Slot": 2}]}]}]),
+        # Healer active: the holy meteor, suppressing what it strikes
+        "Healer Aspect": _ih_s2(
+            [{"Name": "ImpactSoundFX", "Animation": "classInfinityHero_S3_P6",
+              "Sound": "sfx_holy_meteor_impact", "MinPitch": 0.0, "MaxPitch": 0.0},
+             _ih_sfx("Mage_CastOffensive3", "sfx_holy_meteor_cast"),
+             _ih_particle("Mage_CastOffensive3", "classInfinityHero_S3_P5", "0.2",
+                          0.0, 0.0, speed=1.0, targets="@target"),
+             _ih_meteor_spell("Cast", "classInfinityHero_S3_P1",
+                              "classInfinityHero_S3_P6", ease=False)],
+            [{"Do": "ResourceOp", "Op": "gain", "Amount": 1},
+             {"Do": "ApplyAura", "Aura": "Suppression", "Targets": "@hits"},
+             {"Name": "Resource"}]),
+    },
+     "Default": _ih_s2(
+        [{"Name": "ImpactSoundFX", "Animation": "classInfinityHero_S3_P4",
+          "Sound": "SFX_Fire", "MinPitch": 0.0, "MaxPitch": 0.0},
+         _ih_sfx("Mage_CastOffensive3", "sfx_mage_explosion"),
+         _ih_meteor_spell("Origin", "classInfinityHero_S3_P1",
+                          "classInfinityHero_S3_P4")], [])},
+]
+
+
+# --- skill 171, Healing Oath (slot 3, applies Healer Aspect) --------------------------------
+def _ih_s3(mid):
+    seq = [{"Name": "RangeMulti", "HRange": 31.0, "VRange": 31.0, "Target": "Self",
+            "Targets": "@allies"},
+           {"Name": "Cooldown", "Slot": 3, "CD": 7918, "Animation": ""}]
+    seq += _ih_restrict("Healer_Cast2", 0.45)
+    seq += [{"Name": "Damage", "Heal": True, "Multiplier": 10.0, "MaxTargets": 4,
+             "Targets": "@allies"}]
+    seq += mid
+    seq += [{"Name": "PlayerAnimation", "Animation": "Healer_Cast2",
+             "Priority": "Interrupt All", "Targets": "@allies"},
+            {"Do": "ApplyAura", "Aura": "Healer Aspect"}]
+    return seq
+
+
+_IH_SKILL_171 = [
+    {"Do": "Branch", "On": "aspect", "Cases": {
+        # Warrior active: the oath becomes a guard
+        "Warrior Aspect": _ih_s3(
+            [_ih_particle("Healer_Cast2", "classInfinityHero_S4_P1", "0", 0.0, 8.0,
+                          speed=1.0, follow="Follow", targets="@allies"),
+             {"Do": "ResourceOp", "Op": "gain", "Amount": 1},
+             {"Do": "ApplyAura", "Aura": "Holy Guard"},
+             _ih_particle("Healer_Cast2", "classInfinityHero_S4_P2", "0", 0.0, 4.0,
+                          speed=1.0, follow="Follow", life=5000.0),
+             {"Name": "Resource"}]),
+        # Rogue active: a swift oath (2x cast), footsteps hallowed behind you
+        "Rogue Aspect": _ih_s3(
+            [{"Do": "ResourceOp", "Op": "gain", "Amount": 1},
+             {"Do": "ApplyAura", "Aura": "Hallowed Footsteps"},
+             _ih_particle("Healer_Cast2", "classInfinityHero_S4_P3", "0", 0.0, 5.0,
+                          speed=2.0, follow="Follow", targets="@allies"),
+             {"Name": "Resource"}]),
+    },
+     "Default": _ih_s3(
+        [_ih_particle("Healer_Cast2", "classInfinityHero_S4_P1", "0", 0.0, 8.0,
+                      speed=1.0, follow="Follow", targets="@allies")])},
+]
+
+
+# --- skill 172, Serpent's Kiss (slot 4, applies Rogue Aspect) -------------------------------
+def _ih_s4(sound, particle_args, effect, mult_scale=None):
+    """One Serpent's Kiss branch. The mid-section swaps between the in-range
+    strike and the gap-closing Dash lead-in (positional, per capture — the
+    dash presses also skip Restrict AND the Heroic gain, an AE quirk we keep)."""
+    p, px, py = particle_args
+    dmg = {"Name": "Damage", "DamageType": "Physical", "Multiplier": 2.0}
+    if mult_scale is not None:
+        dmg["MultScale"] = mult_scale
+    strike = (_ih_restrict("Rogue_Skill2", 0.4)
+              + [_ih_sfx("Rogue_Skill2", sound),
+                 _ih_particle("Rogue_Skill2", p, "0.25", px, py, speed=2.0)]
+              + effect
+              + [{"Name": "AnimationHitbox", "X": 5.7, "Y": 0.0, "Width": 10,
+                  "Height": 2, "Animation": "Rogue_Skill2", "Speed": 2.0,
+                  "Time": 0.25}])
+    dash = [{"Name": "DashToTarget", "Face": True, "OffsetX": 1.5, "Duration": 300,
+             "Async": True, "Animation": "Dash", "ForceMovement": False},
+            _ih_sfx("Dash", sound),
+            _ih_particle("Dash", p, "0", 0.0 if px == 5.0 else px, py,
+                         follow="Follow Until Move"),
+            {"Name": "AnimationHitbox", "X": 5.7, "Y": 0.0, "Width": 10, "Height": 2,
+             "Animation": "Dash", "Speed": 1.0, "Time": 0.65}]
+    aura = ([{"Do": "ApplyAura", "Aura": "Concealed Blade"}]
+            if sound == "sfx_holy_thrust_cast" else [])
+    return ([{"Name": "Range", "HRange": 31.0, "VRange": 31.0, "Charge": False,
+              "HoldAtRange": False},
+             {"Name": "Cooldown", "Slot": 4, "CD": 3959, "Animation": ""},
+             {"Do": "Branch", "If": "dash", "Then": dash, "Else": strike},
+             {"Name": "Damage2_MARKER"}]
+            + [dmg, {"Name": "DispenseDamage"}]
+            + aura
+            + [{"Do": "ApplyAura", "Aura": "Rogue Aspect"},
+               {"Name": "UpdateAnimation", "Tag": "combatIdle", "Value": "2H_Fight"}])
+
+
+_IH_SKILL_172 = [
+    {"Do": "Branch", "On": "aspect", "Cases": {
+        # Healer active: the blessed thrust conceals a blade
+        "Healer Aspect": _ih_s4("sfx_holy_thrust_cast",
+                                ("classInfinityHero_S5_P3", 5.0, 1.0),
+                                [{"Do": "ResourceOp", "Op": "gain", "Amount": 1},
+                                 {"Name": "Resource"}]),
+        # Mage active: spell-infused blades, roughly doubled
+        "Mage Aspect": _ih_s4("SFX_Impact_Fire_C",
+                              ("classInfinityHero_S5_P2", 5.0, 1.0),
+                              [{"Do": "ResourceOp", "Op": "gain", "Amount": 1},
+                               {"Name": "Resource"}],
+                              mult_scale=2.0),
+    },
+     "Default": _ih_s4("sfx_rogue_viperskiss",
+                       ("classInfinityHero_S5_P1", 8.0, 3.0), [])},
+]
+
+# drop the structural marker (the builder needs a stable split point between the
+# positional Branch and the shared damage tail; the marker itself never ships)
+def _ih_strip_markers(seq):
+    out = []
+    for e in seq:
+        if isinstance(e, dict) and e.get("Name") == "Damage2_MARKER":
+            continue
+        if isinstance(e, dict):
+            e = {k: (_ih_strip_markers(v) if isinstance(v, list) else v)
+                 for k, v in e.items()}
+        out.append(e)
+    return out
+
+
+_IH_SKILL_172 = _ih_strip_markers(_IH_SKILL_172)
+
+
+# --- skill 168, Heroic Strike (slot 0 auto; at 25 Heroic -> the sky-blade) ------------------
+_IH_AUTO_MELEE = [
+    {"Name": "Range", "HRange": 31.0, "VRange": 31.0, "Charge": False,
+     "HoldAtRange": False},
+    {"Name": "Damage", "DamageType": "Physical", "Multiplier": 1.0},
+    _ih_sfx("Attack1_Auto,Attack2,Attack3", "sfx_warrior_aa"),
+    _ih_sfx("Attack1_Auto", "sfx_warrior_aa"),
+    _ih_particle("Attack1_Auto", "classInfinityHero_S1_P1", "0", -2.0, 3.0),
+    {"Name": "PlayerAnimation", "Animation": "Attack1_Auto", "Priority": "Low",
+     "Speed": 1.0, "Targets": 1},
+    {"Name": "UpdateAnimation", "Tag": "combatIdle", "Value": "2H_Fight"},
+    {"Name": "Cooldown", "Slot": 0, "CD": 1979, "Animation": ""},
+]
+_IH_AUTO_RANGED = [
+    {"Name": "Range", "HRange": 31.0, "VRange": 31.0, "Charge": False,
+     "HoldAtRange": False},
+    {"Name": "Damage", "DamageType": "Physical", "Multiplier": 1.0},
+    _ih_sfx("Attack1_Auto", "sfx_ranged_swing_cast"),
+    {"Name": "ImpactSoundFX", "Animation": "classInfinityHero_S1_P6",
+     "Sound": "sfx_ranged_swing_impact", "MinPitch": 0.0, "MaxPitch": 0.0},
+    {"Name": "SpellAnimation", "FX": "Projectile", "Animation": "Attack1_Auto",
+     "SpellGraphic": "classInfinityHero_S1_P5", "SpellImpact": "classInfinityHero_S1_P6",
+     "AttachInit": "Origin", "Attach": "Cast", "AttachImpact": "Cast",
+     "Ease": "linear", "ProjSpeed": 60.0, "Follow": True},
+    {"Name": "UpdateAnimation", "Tag": "combatIdle", "Value": "2H_Fight"},
+    {"Name": "Cooldown", "Slot": 0, "CD": 1979, "Animation": ""},
+]
+_IH_ULT = [
+    {"Name": "Range", "HRange": 31.0, "VRange": 31.0, "Charge": True,
+     "HoldAtRange": False},
+    {"Do": "SetVar", "Var": "armed", "Expr": "0"},
+    {"Do": "ResourceOp", "Op": "set", "Amount": 0},
+    {"Name": "Resource"},
+    {"Name": "Cooldown", "Slot": 0, "CD": 1979, "Animation": ""},
+] + _ih_restrict("Attack1_Auto", 0.4, slots="1,2,3,4,5") + [
+    _ih_sfx("Attack1_Auto", "sfx_hero_ultimate_cast"),
+    _ih_particle("Attack1_Auto", "classInfinityHero_S1_P4", "0", -0.5, 10.0,
+                 speed=1.0, life=4000.0),
+    {"Name": "PlayerHitStream", "X": 0.0, "Y": 0.0, "Width": 20.0, "Height": 10.0,
+     "Duration": 2500, "Interval": 200, "Origin": "Self", "Slot": 0},
+    {"Name": "PlayerAnimation", "Animation": "Attack1_Auto",
+     "Priority": "Interrupt All", "Speed": 1.0, "Targets": 1},
+    {"Name": "SetSkillIndex", "Slot": 0, "Index": 0, "Icon": _ICO + "AA1"},
+    {"Name": "UpdateAnimation", "Tag": "combatIdle", "Value": "2H_Fight"},
+]
+_IH_SKILL_168 = [
+    {"Do": "Branch", "If": "armed", "Then": _IH_ULT,
+     "Else": [{"Do": "Branch", "If": "ranged",
+               "Then": _IH_AUTO_RANGED, "Else": _IH_AUTO_MELEE}]},
+]
+
+# runs after every skill press (slots 1-4): arm the ultimate on crossing 25
+# Heroic, refresh the armed marker, broadcast the combo rebind for the new aspect
+_IH_POST = [
+    {"Do": "Formula", "Var": "was_armed", "Expr": "armed"},
+    {"Do": "Branch", "If": "rp >= 25 and not was_armed", "Then": [
+        {"Do": "SetVar", "Var": "armed", "Expr": "1"},
+        {"Do": "ApplyAura", "Aura": "Heroic Empowerment"},
+        {"Do": "Emit", "Node": {"Name": "UpdateAnimation", "Tag": "combatIdle",
+                                "Value": "2H_Fight"}},
+    ]},
+    {"Do": "Branch", "If": "was_armed and armed", "Then": [
+        {"Do": "Emit", "Node": {"Name": "Aura", "AuraName": "Heroic Empowerment",
+                                "Hide": True, "Targets": []}},
+        {"Do": "Emit", "Node": {"Name": "UpdateAnimation", "Tag": "combatIdle",
+                                "Value": "2H_Fight"}},
+    ]},
+    {"Do": "Branch", "On": "aspect",
+     "Cases": {a: [{"Do": "Packet", "Status": 3, "Nodes": _IH_REBINDS[a]}]
+               for a in _IH_ASPECTS}},
+    {"Do": "Branch", "If": "rp >= 25 and not was_armed and armed", "Then": [
+        {"Do": "Packet", "Status": 3, "Nodes": [
+            {"Name": "SetSkillIndex", "Slot": 0, "Index": 1, "Icon": _ICO + "Ult"},
+            _ih_ir(0, "AA1")]},
+    ]},
+]
+
+INFINITY_HERO_RULES = {
+    "engine": 1,
+    "resource": {"model": "heroic", "max": 50, "arm_at": 25},
+    "vars": {"armed": 0, "ranged": 0, "dash": 0},
+    "post_slots": [1, 2, 3, 4],
+    "post": _IH_POST,
+    "skills": {"168": _IH_SKILL_168, "169": _IH_SKILL_169, "170": _IH_SKILL_170,
+               "171": _IH_SKILL_171, "172": _IH_SKILL_172},
+}
+
+# slot -> (skill_id, name, icon, description, SkillForge display graph). The RULE CONFIG
+# above is what the engine executes (the branches can't be drawn as a linear chain); these
+# graphs are the base branch, so the Forge shows each skill's real node anatomy.
+_IH_SKILLS = [
+    (0, 168, "Heroic Strike", _ICO + "AA1",
+     "Strike with the might of the Infinity Hero. At 25 Heroic, your next Heroic Strike "
+     "becomes Heroic Empowerment: a rain of sky-blades over 2.5 seconds.",
+     [(str(i), n) for i, n in enumerate([{"Name": "OnRequest"}] + [
+         n for n in _IH_AUTO_MELEE if "Name" in n])]),
+    (1, 169, "Definitive Strike", _ICO + "A1",
+     "A decisive cleave that assumes the Warrior Aspect. Mage Aspect: a wide flame arc "
+     "that melts armor (+1 Heroic). Rogue Aspect: prepares your next strike (+1 Heroic).",
+     [(str(i), n) for i, n in enumerate([{"Name": "OnRequest"}] + [
+         n for n in _ih_s1(_ih_sfx("DS Skill1C", "sfx_warrior_decisivestrike"),
+                           _ih_particle("DS Skill1C", "classInfinityHero_S2_P1", "0.4",
+                                        5.0, 3.0, speed=1.0),
+                           _IH_S1_HITBOX, []) if "Name" in n])]),
+    (2, 170, "Meteor", _ICO + "B1",
+     "Call down a meteor and assume the Mage Aspect. Warrior Aspect: +50% damage and a "
+     "burning field for 5 seconds (+1 Heroic). Healer Aspect: applies Suppression "
+     "(+1 Heroic).",
+     [(str(i), n) for i, n in enumerate([{"Name": "OnRequest"}] + [
+         n for n in _ih_s2([{"Name": "ImpactSoundFX",
+                             "Animation": "classInfinityHero_S3_P4", "Sound": "SFX_Fire",
+                             "MinPitch": 0.0, "MaxPitch": 0.0},
+                            _ih_sfx("Mage_CastOffensive3", "sfx_mage_explosion"),
+                            _ih_meteor_spell("Origin", "classInfinityHero_S3_P1",
+                                             "classInfinityHero_S3_P4")], [])
+         if "Name" in n])]),
+    (3, 171, "Healing Oath", _ICO + "C1",
+     "Heal yourself and nearby allies, assuming the Healer Aspect. Warrior Aspect: also "
+     "grants Holy Guard (+1 Heroic). Rogue Aspect: cast at double speed, leaving Hallowed "
+     "Footsteps (+1 Heroic).",
+     [(str(i), n) for i, n in enumerate([{"Name": "OnRequest"}] + [
+         n for n in _ih_s3([_ih_particle("Healer_Cast2", "classInfinityHero_S4_P1",
+                                         "0", 0.0, 8.0, speed=1.0, follow="Follow")])
+         if "Name" in n])]),
+    (4, 172, "Serpent's Kiss", _ICO + "D1",
+     "A lightning-fast twin strike that assumes the Rogue Aspect. Healer Aspect: "
+     "conceals a blade for your next strike (+1 Heroic). Mage Aspect: spell-infused "
+     "blades deal doubled damage (+1 Heroic).",
+     [(str(i), n) for i, n in enumerate([{"Name": "OnRequest"}] + [
+         n for n in _ih_strip_markers(
+             _ih_s4("sfx_rogue_viperskiss", ("classInfinityHero_S5_P1", 8.0, 3.0), []))
+         if isinstance(n, dict) and "Name" in n])]),
+]
+
+
+def seed_infinity_hero(conn):
+    """Seed the Infinity Hero class 2022: class row (rig + heroic resource), the rule
+    config into classes.raw, the five skill rows + slot links, and the class-granting
+    armor item 200022. Same non-clobbering rules as seed_paladin. Returns # skills."""
+    import forge
+    import db as _db
+    row = conn.execute("SELECT v FROM kv WHERE k='infinity_hero_graph_version'").fetchone()
+    stored = int(row["v"]) if row and str(row["v"]).isdigit() else 0
+    refresh = stored < INFINITY_HERO_GRAPH_VERSION
+
+    rig_json = json.dumps(_IH_RIG, separators=(",", ":"))
+    conn.execute(
+        "INSERT INTO classes(class_id, name, bundle, rig, resource) VALUES(?,?,?,?,?) "
+        "ON CONFLICT(class_id) DO NOTHING",
+        (INFINITY_HERO_CLASS_ID, "Infinity Hero", "", rig_json,
+         json.dumps(_IH_RESOURCE, separators=(",", ":"))))
+    conn.execute("UPDATE classes SET rig=? WHERE class_id=? AND (rig IS NULL OR rig='')",
+                 (rig_json, INFINITY_HERO_CLASS_ID))
+    if refresh:
+        _seed_class_rules(conn, INFINITY_HERO_CLASS_ID, INFINITY_HERO_RULES)
+    _db.store_item(conn, _IH_ITEM)                     # the class armor (insert-if-absent)
+    # Sell it where every other class is sold (Gravelyn's Infinity, the class shop) on the
+    # same free/coin-flagged terms as the base classes — otherwise the class exists but no
+    # player can reach it. Insert-if-absent, so a later price edit sticks.
+    conn.execute(
+        "INSERT INTO shop_items(shop_id, shop_item_id, item_id, cost, coins, quantity_remain) "
+        "VALUES(?,?,?,?,?,?) ON CONFLICT(shop_id, shop_item_id) DO NOTHING",
+        (CLASS_SHOP_ID, INFINITY_HERO_ARMOR_ITEM, INFINITY_HERO_ARMOR_ITEM, 0, 1, -1))
+
+    n = 0
+    for slot, skill_id, name, icon, desc, node_list in _IH_SKILLS:
+        data, forge_data = forge.linear_graph(node_list)
+        srow = conn.execute("SELECT data FROM skills WHERE skill_id=?", (skill_id,)).fetchone()
+        cur = (srow["data"] or "").replace(" ", "") if srow else ""
+        empty = (srow is None) or (not cur) or cur in ("[{},{}]", "[]", "null")
+        if empty or refresh:
+            conn.execute(
+                "INSERT INTO skills(skill_id, action, name, description, icon, slot, data, forge_data) "
+                "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(skill_id) DO UPDATE SET "
+                "name=excluded.name, description=excluded.description, icon=excluded.icon, "
+                "data=excluded.data, forge_data=excluded.forge_data",
+                (skill_id, 1 if slot == 0 else 0, name, desc, icon, slot,
+                 json.dumps(data, separators=(",", ":")),
+                 json.dumps(forge_data, separators=(",", ":"))))
+            n += 1
+        conn.execute(
+            "INSERT INTO class_skills(class_id, slot, skill_id) VALUES(?,?,?) "
+            "ON CONFLICT(class_id, slot) DO NOTHING",
+            (INFINITY_HERO_CLASS_ID, slot, skill_id))
+    conn.execute("INSERT INTO kv(k,v) VALUES('infinity_hero_graph_version',?) "
+                 "ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                 (str(INFINITY_HERO_GRAPH_VERSION),))
     return n
 
 
@@ -1428,6 +2208,7 @@ def run():
         graphs = seed_skill_graphs(conn)
         pala = seed_paladin(conn)               # Reduxidain Paladin (Conviction class)
         void = seed_void(conn)                  # Voidwalker (Hunger class, hidden Void anims)
+        ihero = seed_infinity_hero(conn)        # Infinity Hero (class 2022, pure-data mechanics)
         class_grants = grant_class_items(conn)
         cutscenes = seed_cutscenes(conn)
         dclasses = seed_defaultclasses(conn)
@@ -1439,6 +2220,7 @@ def run():
     print(f"[seed] items={items} hairs={hairs} shops={shops} shop_items={links} dev_shop_items={dev_shop} monsters={mons} maps={maps} "
           f"quests={quests} apops={apops} classes={cls} skills={sk} skill_graphs={graphs} "
           f"monster_skills_linked={mon_skills} paladin_skills={pala} void_skills={void} "
+          f"infinity_hero_skills={ihero} "
           f"class_items_granted={class_grants} cutscenes={cutscenes} defaultclasses={dclasses} "
           f"monster_drops={mdrops} global_drops={gdrops} quest_obj_refs={qrefs} item_sponsors={isponsors}")
 

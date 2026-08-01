@@ -60,6 +60,12 @@ def _item_definition(conn):
             "ID": 78659,
             "Name": "Player KS Statue",
             "Filename": "items/flooritems/78659_playerksstatue.unity3d",
+            # AssetBundleData.version picks VersionContent/VersionStage/VersionLive by the
+            # client's BuildEnvironment. The shipped Playtest client runs CONTENT (its BaseURL
+            # is contentinf.aq.com, the CONTENT host) -> VersionContent is the one that actually
+            # gets requested. Confirmed live: .../assetbundles/windows/items/flooritems/
+            # 78659_playerksstatue/0/78659_playerksstatue.unity3d -> HTTP 200, valid UnityFS.
+            "VersionContent": 0,
             "VersionStage": 1,
             "VersionLive": 1,
         },
@@ -95,14 +101,17 @@ def _snapshot(conn, char):
 
 
 def generate(conn, char, now=None):
-    """Create or refresh one non-stacking statue and return (response, houseItem)."""
+    """Create or refresh one non-stacking statue and return (response, houseItem, version).
+
+    `version` is the ms-since-epoch stamp to push as a statueVersion s2c on success (None on
+    any failure/no-op path, since nothing actually changed for bystanders to refresh)."""
     now = float(time.time() if now is None else now)
     if not eligible(char):
         return ({
             "Cmd": "generateStatue", "Success": False, "ItemID": 0,
             "Message": "You are not eligible to generate a statue.",
             "CooldownRemainingMs": 0,
-        }, None)
+        }, None, None)
 
     previous = conn.execute(
         "SELECT generated_at FROM statues WHERE char_id=?", (char["id"],)).fetchone()
@@ -113,12 +122,16 @@ def generate(conn, char, now=None):
                 "Cmd": "generateStatue", "Success": False, "ItemID": STATUE_ITEM_ID,
                 "Message": f"You can generate another statue in {math.ceil(remaining / 60)}m.",
                 "CooldownRemainingMs": int(math.ceil(remaining * 1000)),
-            }, None)
+            }, None, None)
 
     item = _item_definition(conn)
     # replace=True also migrates the early implementation which accidentally
     # copied the Day 1 reward's bundle/prefab into this custom item definition.
     db.store_item(conn, item, replace=True)
+    # ms-since-epoch, matching ResponseGenerateStatue's own client-side bootstrap
+    # (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) so DynamicStatue.SetVersion's
+    # "only accept a strictly newer version" check behaves the same either way.
+    version = int(now * 1000)
     meta = f"custom:1,cid:{int(char['id'])},rev:{int(now)}"
     ci = conn.execute(
         "SELECT * FROM char_items WHERE char_id=? AND item_id=? ORDER BY char_item_id LIMIT 1",
@@ -151,7 +164,14 @@ def generate(conn, char, now=None):
         "Cmd": "generateStatue", "Success": True, "ItemID": STATUE_ITEM_ID,
         "Message": "Your character statue is rendering for your house-item inventory.",
         "CooldownRemainingMs": 0 if bypass_cooldown(char) else STATUE_COOLDOWN_SECONDS * 1000,
-    }, house_item)
+    }, house_item, version)
+
+
+def version_push(char_id, version):
+    """The {Cmd:'statueVersion', cid, version} s2c to broadcast after a successful generate(),
+    mirroring AE's real ResponseStatueVersion -> DynamicStatue.SetVersion live-refresh. cid is an
+    int on the wire (ResponseStatueVersion.cid is int, not string, per the decompiled client)."""
+    return {"Cmd": "statueVersion", "cid": int(char_id), "version": int(version)}
 
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"

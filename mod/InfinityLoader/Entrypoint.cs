@@ -42,7 +42,6 @@ public static class InfinityLoaderMod
     private static MethodInfo _serialize;    // AEC.Serialize (private) for faithful c2s logging
     private static bool _npcLoaderPatched;
     private const int CUSTOM_STATUE_ITEM_ID = 978659;   // AE's real Player KS Statue (bundle 78659), live 2026-07-31
-    private static GameObject _customStatuePrefab;
 
     // Overhead guild tag: lowercase player name -> (guild name, colour hex). Fed from the
     // guildName/guildTagColor fields our server adds to every user object (initPlayer.user,
@@ -135,6 +134,16 @@ public static class InfinityLoaderMod
         TryPatch(h, "private-server dynamic statues",
             AccessTools.Method(typeof(DynamicStatue), "Start"),
             prefix: nameof(DynamicStatue_Start_Prefix));
+        // ResponseStatueVersion.Execute() (real AE class, ships in the base client) already calls
+        // DynamicStatue.SetVersion(cid, version) whenever the server pushes a statueVersion s2c.
+        // But DynamicStatue_Start_Prefix below fully replaces Start() and returns false, so our
+        // redirected instances are NEVER added to DynamicStatue's own private `live` list  AE's
+        // SetVersion would find nothing to refresh. This postfix re-triggers OUR redirect load for
+        // any of our own live-tracked instances instead, so the bystander live-refresh actually reaches
+        // the private-server art (not just AE's always-404 CDN path).
+        TryPatch(h, "private-server dynamic statue live refresh",
+            AccessTools.Method(typeof(DynamicStatue), "SetVersion"),
+            postfix: nameof(DynamicStatue_SetVersion_Postfix));
         TryPatch(h, "private-server statue capture",
             AccessTools.Method(typeof(ResponseGenerateStatue), "Execute"),
             postfix: nameof(ResponseGenerateStatue_Execute_Postfix));
@@ -142,13 +151,9 @@ public static class InfinityLoaderMod
             AccessTools.Method(typeof(ApopButton), "ClickAction"),
             prefix: nameof(ApopButton_ClickAction_Prefix));
 
-        TryPatch(h, "private-server custom statue prefab",
+        TryPatch(h, "private-server custom statue activation",
             AccessTools.Method(typeof(HouseItemManager), "SpawnItem"),
-            prefix: nameof(HouseItemManager_SpawnItem_Prefix),
             postfix: nameof(HouseItemManager_SpawnItem_Postfix));
-        TryPatch(h, "private-server custom statue inventory prefab",
-            AccessTools.Method(typeof(HouseItemManager), "LoadItemPrefab"),
-            prefix: nameof(HouseItemManager_LoadItemPrefab_Prefix));
 
 
         // 5c) Custom-frame layer fit-up: the shipped Image rects are sized for the vanilla art, so
@@ -435,6 +440,14 @@ public static class InfinityLoaderMod
         return false;
     }
 
+    // Our own equivalent of DynamicStatue's private static `live` list (which our redirected
+    // instances never join, since DynamicStatue_Start_Prefix returns false and skips the
+    // original Start() entirely). Keyed by cid so DynamicStatue_SetVersion_Postfix can find and
+    // reload every currently-spawned instance for that character when the server pushes
+    // statueVersion. A dead/destroyed DynamicStatue is pruned lazily on next lookup.
+    private static readonly Dictionary<string, List<DynamicStatue>> _liveCustomStatues =
+        new Dictionary<string, List<DynamicStatue>>();
+
     // in our DB, so load the cid render from our WebApiURL instead.
     public static bool DynamicStatue_Start_Prefix(DynamicStatue __instance)
     {
@@ -450,6 +463,44 @@ public static class InfinityLoaderMod
         if (string.IsNullOrEmpty(cid))
             return true;
         string rev = ReadStatueMeta(inst.Meta, "rev");
+        List<DynamicStatue> bucket;
+        if (!_liveCustomStatues.TryGetValue(cid, out bucket))
+            _liveCustomStatues[cid] = bucket = new List<DynamicStatue>();
+        bucket.Add(__instance);
+        LoadCustomStatuePng(__instance, inst, cid, api, rev);
+        return false;                            // keep the prefab art on a local load failure
+    }
+
+    // The server pushes {Cmd:"statueVersion", cid, version} whenever a statue is (re)generated
+    // (see statues.version_push server-side); the shipped ResponseStatueVersion.Execute() already
+    // calls this method for us. AE's own body would just re-hit its always-404 CDN for our
+    // character ids, so we intercept here and redirect any of OUR live instances for that cid to
+    // our webapi instead, cache-busted with the pushed version  the visible statue refreshes
+    // without the viewer needing to leave and re-enter the area.
+    public static void DynamicStatue_SetVersion_Postfix(string cid, long version)
+    {
+        try
+        {
+            string api = ReadWebApiUrl();
+            List<DynamicStatue> bucket;
+            if (string.IsNullOrEmpty(api) || string.IsNullOrEmpty(cid)
+                || !_liveCustomStatues.TryGetValue(cid, out bucket))
+                return;
+            bucket.RemoveAll(ds => ds == null);
+            foreach (DynamicStatue ds in bucket)
+            {
+                HouseItemInstance inst = ds.GetComponent<HouseItemInstance>();
+                if (inst == null) continue;
+                LoadCustomStatuePng(ds, inst, cid, api, version.ToString());
+            }
+            if (bucket.Count == 0) _liveCustomStatues.Remove(cid);
+        }
+        catch (Exception ex) { SafeLog("[statue] live refresh failed cid=" + cid + ": " + ex.Message); }
+    }
+
+    private static void LoadCustomStatuePng(DynamicStatue instance, HouseItemInstance inst,
+                                            string cid, string api, string rev)
+    {
         string url = api + "statue/" + cid + ".png"
             + (string.IsNullOrEmpty(rev) ? "" : "?v=" + rev);
         Texture2D texture = null;
@@ -460,12 +511,12 @@ public static class InfinityLoaderMod
             using (var wc = new InfinityWebClient())
                 png = wc.DownloadData(url);
             if (png == null || png.Length == 0)
-                return false;
+                return;
             texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
             if (!texture.LoadImage(png, false))
             {
                 UnityEngine.Object.Destroy(texture);
-                return false;
+                return;
             }
             float nativeH = inst.CurrentSpriteNativeHeight;
             Vector2 pivot = inst.CurrentSpritePivotNormalized;
@@ -473,10 +524,18 @@ public static class InfinityLoaderMod
             sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height),
                                    pivot, ppu);
             inst.ApplyLoadedSprite(sprite);
-            var lifetime = __instance.gameObject.AddComponent<InfinityStatueLifetime>();
+            var lifetime = instance.GetComponent<InfinityStatueLifetime>();
+            if (lifetime == null) lifetime = instance.gameObject.AddComponent<InfinityStatueLifetime>();
+            else
+            {
+                // replacing a previously-applied render: the old texture/sprite are no longer
+                // referenced by anything once ApplyLoadedSprite swaps to the new one above.
+                if (lifetime.Sprite != null) UnityEngine.Object.Destroy(lifetime.Sprite);
+                if (lifetime.Texture != null) UnityEngine.Object.Destroy(lifetime.Texture);
+            }
             lifetime.Texture = texture;
             lifetime.Sprite = sprite;
-            SafeLog("[statue] loaded private snapshot cid=" + cid);
+            SafeLog("[statue] loaded private snapshot cid=" + cid + " v=" + rev);
         }
         catch (Exception ex)
         {
@@ -484,30 +543,16 @@ public static class InfinityLoaderMod
             if (texture != null) UnityEngine.Object.Destroy(texture);
             SafeLog("[statue] load failed " + url + ": " + ex.Message);
         }
-        return false;                            // keep the prefab art on a local load failure
     }
 
-    public static bool HouseItemManager_LoadItemPrefab_Prefix(houseItem item,
-                                                              Action<GameObject> callback,
-                                                              ref IEnumerator __result)
-    {
-        if (item == null || item.ItemID != CUSTOM_STATUE_ITEM_ID) return true;
-        item.MobileCompatibility = 1;
-        callback?.Invoke(GetCustomStatuePrefab());
-        __result = EmptyEnumerator();
-        return false;
-    }
-
-    private static IEnumerator EmptyEnumerator()
-    {
-        yield break;
-    }
-    public static void HouseItemManager_SpawnItem_Prefix(PlacedHouseItem phi,
-                                                          ref GameObject prefab)
-    {
-        if (phi == null || phi.ItemID != CUSTOM_STATUE_ITEM_ID) return;
-        prefab = GetCustomStatuePrefab();
-    }
+    // 978659's Bundle (78659, items/flooritems/78659_playerksstatue.unity3d) is a genuine live
+    // AE asset now (confirmed: HTTP 200 + valid UnityFS header from contentinf.aq.com), so
+    // HouseItemManager's stock LoadItemPrefab/SpawnItem download and use the REAL geometry/prefab
+    // on their own  no override needed here anymore. This mod only redirects the character
+    // PORTRAIT (DynamicStatue's PNG source, below), which is the one piece that structurally can't
+    // come from AE (our character ids aren't on AE's Statues CDN). Kept as documentation: this
+    // used to force a local Resources fallback / synthetic quad back when the item shipped with
+    // Bundle:None (our old fabricated 200002).
 
     public static void HouseItemManager_SpawnItem_Postfix(PlacedHouseItem phi,
                                                            HouseItemInstance __result)
@@ -517,36 +562,6 @@ public static class InfinityLoaderMod
         // after HouseItemInstance.Meta has been assigned by the original method.
         __result.gameObject.hideFlags = HideFlags.None;
         __result.gameObject.SetActive(true);
-    }
-
-    private static GameObject GetCustomStatuePrefab()
-    {
-        if (_customStatuePrefab != null) return _customStatuePrefab;
-
-        // This is the dedicated prefab shipped in the July client for generated
-        // character statues. It is unrelated to the Day 1 backer statue bundle.
-        var shipped = Resources.Load<GameObject>("testhouseitems/playerksstatue");
-        if (shipped != null)
-        {
-            _customStatuePrefab = shipped;
-            return shipped;
-        }
-
-        var go = new GameObject("InfinityCustomStatue_runtime");
-        go.hideFlags = HideFlags.HideAndDontSave;
-        var renderer = go.AddComponent<SpriteRenderer>();
-        var texture = new Texture2D(8, 12, TextureFormat.RGBA32, false);
-        var pixels = new Color32[8 * 12];
-        for (int i = 0; i < pixels.Length; i++)
-            pixels[i] = new Color32(145, 151, 160, 255);
-        texture.SetPixels32(pixels);
-        texture.Apply(false, true);
-        renderer.sprite = Sprite.Create(texture, new Rect(0, 0, 8, 12),
-                                        new Vector2(0.5f, 0f), 8f);
-        go.AddComponent<DynamicStatue>();
-        go.SetActive(false);
-        _customStatuePrefab = go;
-        return go;
     }
 
     private static string ReadStatueMeta(string meta, string wanted)
