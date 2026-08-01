@@ -60,6 +60,12 @@ def _item_definition(conn):
             "ID": 78659,
             "Name": "Player KS Statue",
             "Filename": "items/flooritems/78659_playerksstatue.unity3d",
+            # AssetBundleData.version picks VersionContent/VersionStage/VersionLive by the
+            # client's BuildEnvironment. The shipped Playtest client runs CONTENT (its BaseURL
+            # is contentinf.aq.com, the CONTENT host) -> VersionContent is the one that actually
+            # gets requested. Confirmed live: .../assetbundles/windows/items/flooritems/
+            # 78659_playerksstatue/0/78659_playerksstatue.unity3d -> HTTP 200, valid UnityFS.
+            "VersionContent": 0,
             "VersionStage": 1,
             "VersionLive": 1,
         },

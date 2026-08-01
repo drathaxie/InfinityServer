@@ -42,7 +42,6 @@ public static class InfinityLoaderMod
     private static MethodInfo _serialize;    // AEC.Serialize (private) for faithful c2s logging
     private static bool _npcLoaderPatched;
     private const int CUSTOM_STATUE_ITEM_ID = 978659;   // AE's real Player KS Statue (bundle 78659), live 2026-07-31
-    private static GameObject _customStatuePrefab;
 
     // Overhead guild tag: lowercase player name -> (guild name, colour hex). Fed from the
     // guildName/guildTagColor fields our server adds to every user object (initPlayer.user,
@@ -152,13 +151,9 @@ public static class InfinityLoaderMod
             AccessTools.Method(typeof(ApopButton), "ClickAction"),
             prefix: nameof(ApopButton_ClickAction_Prefix));
 
-        TryPatch(h, "private-server custom statue prefab",
+        TryPatch(h, "private-server custom statue activation",
             AccessTools.Method(typeof(HouseItemManager), "SpawnItem"),
-            prefix: nameof(HouseItemManager_SpawnItem_Prefix),
             postfix: nameof(HouseItemManager_SpawnItem_Postfix));
-        TryPatch(h, "private-server custom statue inventory prefab",
-            AccessTools.Method(typeof(HouseItemManager), "LoadItemPrefab"),
-            prefix: nameof(HouseItemManager_LoadItemPrefab_Prefix));
 
 
         // 5c) Custom-frame layer fit-up: the shipped Image rects are sized for the vanilla art, so
@@ -550,27 +545,14 @@ public static class InfinityLoaderMod
         }
     }
 
-    public static bool HouseItemManager_LoadItemPrefab_Prefix(houseItem item,
-                                                              Action<GameObject> callback,
-                                                              ref IEnumerator __result)
-    {
-        if (item == null || item.ItemID != CUSTOM_STATUE_ITEM_ID) return true;
-        item.MobileCompatibility = 1;
-        callback?.Invoke(GetCustomStatuePrefab());
-        __result = EmptyEnumerator();
-        return false;
-    }
-
-    private static IEnumerator EmptyEnumerator()
-    {
-        yield break;
-    }
-    public static void HouseItemManager_SpawnItem_Prefix(PlacedHouseItem phi,
-                                                          ref GameObject prefab)
-    {
-        if (phi == null || phi.ItemID != CUSTOM_STATUE_ITEM_ID) return;
-        prefab = GetCustomStatuePrefab();
-    }
+    // 978659's Bundle (78659, items/flooritems/78659_playerksstatue.unity3d) is a genuine live
+    // AE asset now (confirmed: HTTP 200 + valid UnityFS header from contentinf.aq.com), so
+    // HouseItemManager's stock LoadItemPrefab/SpawnItem download and use the REAL geometry/prefab
+    // on their own  no override needed here anymore. This mod only redirects the character
+    // PORTRAIT (DynamicStatue's PNG source, below), which is the one piece that structurally can't
+    // come from AE (our character ids aren't on AE's Statues CDN). Kept as documentation: this
+    // used to force a local Resources fallback / synthetic quad back when the item shipped with
+    // Bundle:None (our old fabricated 200002).
 
     public static void HouseItemManager_SpawnItem_Postfix(PlacedHouseItem phi,
                                                            HouseItemInstance __result)
@@ -580,36 +562,6 @@ public static class InfinityLoaderMod
         // after HouseItemInstance.Meta has been assigned by the original method.
         __result.gameObject.hideFlags = HideFlags.None;
         __result.gameObject.SetActive(true);
-    }
-
-    private static GameObject GetCustomStatuePrefab()
-    {
-        if (_customStatuePrefab != null) return _customStatuePrefab;
-
-        // This is the dedicated prefab shipped in the July client for generated
-        // character statues. It is unrelated to the Day 1 backer statue bundle.
-        var shipped = Resources.Load<GameObject>("testhouseitems/playerksstatue");
-        if (shipped != null)
-        {
-            _customStatuePrefab = shipped;
-            return shipped;
-        }
-
-        var go = new GameObject("InfinityCustomStatue_runtime");
-        go.hideFlags = HideFlags.HideAndDontSave;
-        var renderer = go.AddComponent<SpriteRenderer>();
-        var texture = new Texture2D(8, 12, TextureFormat.RGBA32, false);
-        var pixels = new Color32[8 * 12];
-        for (int i = 0; i < pixels.Length; i++)
-            pixels[i] = new Color32(145, 151, 160, 255);
-        texture.SetPixels32(pixels);
-        texture.Apply(false, true);
-        renderer.sprite = Sprite.Create(texture, new Rect(0, 0, 8, 12),
-                                        new Vector2(0.5f, 0f), 8f);
-        go.AddComponent<DynamicStatue>();
-        go.SetActive(false);
-        _customStatuePrefab = go;
-        return go;
     }
 
     private static string ReadStatueMeta(string meta, string wanted)
