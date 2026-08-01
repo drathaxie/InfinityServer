@@ -6,7 +6,7 @@ import time
 
 import db
 
-STATUE_ITEM_ID = 200002
+STATUE_ITEM_ID = 978659   # AE's real "Player KS Statue" (bundle 78659), live since 2026-07-31
 STATUE_COOLDOWN_SECONDS = 300
 _ELIGIBLE_BITS = tuple(range(6, 11))
 
@@ -31,12 +31,15 @@ def bypass_cooldown(char):
 
 
 def _item_definition(conn):
-    # This is deliberately NOT item 99514 / bundle 78177, the existing Day 1
-    # reward. The July client ships the separate Player KS Statue resource and
-    # DynamicStatue component specifically for generated character artwork.
+    # AE's real Player KS Statue (item 978659 / bundle 78659), which went live on
+    # 2026-07-31. Was previously our fabricated item 200002 with Bundle:None + the
+    # shipped-Resources prefab; now the genuine catalog item + real bundle. The
+    # per-character art is still OUR rendered PNG (served by render_png / the mod's
+    # DynamicStatue redirect) — AE's Statues CDN only has AE characters, not ours.
+    # House flags are added on top of the imported catalog row so it's placeable.
     return {
         "ID": STATUE_ITEM_ID,
-        "Name": "Custom Hero Statue",
+        "Name": "Player KS Statue",
         "Description": "A generated likeness of your hero that can be placed and decorated in your house.",
         "Cost": 0,
         "Quantity": 1,
@@ -46,12 +49,20 @@ def _item_definition(conn):
         "Level": 1,
         "Element": 1,
         "Faction": 1,
+        "Icon": "ihfloor",
         "Coins": True,
         "House": True,
         "HouseInventory": True,
         "MobileCompatibility": 1,
-        "PrefabName": "PlayerKSStatue",
-        "Bundle": None,
+        "PrefabName": "playerksstatue_houseItemGO",
+        "Filename": "items/flooritems/78659_playerksstatue.unity3d",
+        "Bundle": {
+            "ID": 78659,
+            "Name": "Player KS Statue",
+            "Filename": "items/flooritems/78659_playerksstatue.unity3d",
+            "VersionStage": 1,
+            "VersionLive": 1,
+        },
     }
 
 
@@ -173,6 +184,23 @@ def store_render(conn, char_id, image):
     if exists is None:
         return False
     conn.execute("UPDATE statues SET image=? WHERE char_id=?", (bytes(image), char_id))
+    return True
+
+
+def store_render_force(conn, char_id, image):
+    """Staff/batch path: store a render for ANY character, creating the statue row if it doesn't
+    exist yet. Used by /genstatues (the FounderTower roster), which renders characters that never
+    ran generateStatue themselves. Only the render (statues.image) is needed for the tower; the
+    house char_item is left to the normal generate() flow."""
+    char_id = int(char_id)
+    if not validate_render_png(image):
+        return False
+    snapshot = json.dumps({"version": 1, "char_id": char_id, "source": "genstatues"},
+                          separators=(",", ":"))
+    conn.execute(
+        "INSERT INTO statues(char_id,item_id,generated_at,snapshot,image) VALUES(?,?,?,?,?) "
+        "ON CONFLICT(char_id) DO UPDATE SET image=excluded.image, generated_at=excluded.generated_at",
+        (char_id, STATUE_ITEM_ID, float(time.time()), snapshot, bytes(image)))
     return True
 
 

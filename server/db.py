@@ -103,6 +103,52 @@ CREATE TABLE IF NOT EXISTS char_items (
 );
 CREATE INDEX IF NOT EXISTS idx_char_items_char ON char_items(char_id);
 
+-- Player sponsorships of a catalog item (the AE Kickstarter "Benevolent Founder" credit:
+-- a founder spends a Sponsorship token to have their name added to an item's credits). The
+-- client's item-info panel (ItemPreviewNew) requests these via getItemSponsors and shows a
+-- Sponsors button/list when non-empty. Many players may sponsor one item; ordered by seq.
+-- has_house = whether that sponsor has a visitable house on THIS server (drives the client's
+-- "visit home" button); 0 for off-server credits (e.g. the original AE sponsor).
+CREATE TABLE IF NOT EXISTS item_sponsors (
+    item_id      INTEGER NOT NULL,
+    player_name  TEXT NOT NULL,
+    has_house    INTEGER NOT NULL DEFAULT 1,
+    seq          INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (item_id, player_name),
+    FOREIGN KEY (item_id) REFERENCES items(item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_item_sponsors_item ON item_sponsors(item_id);
+
+-- Redeem codes (client RedeemCodeModal: redeem_code / redeem_history). A code grants one or
+-- more rewards atomically to an account, once per account, capped by max_uses. Each reward is
+-- an item grant or an achievement-bitfield bit (reward_field/reward_value); redeem_code_uses is
+-- the per-account ledger that enforces single-use. Schema was live on prod before it was ever
+-- in git — added here so a fresh seed is self-contained (CREATE IF NOT EXISTS = no-op on prod).
+CREATE TABLE IF NOT EXISTS redeem_codes (
+    code         TEXT NOT NULL PRIMARY KEY,
+    description  TEXT NOT NULL DEFAULT '',
+    max_uses     INTEGER NOT NULL DEFAULT 0,
+    active       INTEGER NOT NULL DEFAULT 1,
+    created      REAL
+);
+CREATE TABLE IF NOT EXISTS redeem_code_rewards (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    code         TEXT NOT NULL,
+    reward_type  TEXT NOT NULL,
+    reward_value INTEGER NOT NULL,
+    reward_qty   INTEGER NOT NULL DEFAULT 1,
+    reward_field TEXT NOT NULL DEFAULT 'ip25'
+);
+CREATE TABLE IF NOT EXISTS redeem_code_uses (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   INTEGER NOT NULL,
+    code         TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    redeemed_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_redeem_rewards_code ON redeem_code_rewards(code);
+CREATE INDEX IF NOT EXISTS idx_redeem_uses_account ON redeem_code_uses(account_id);
+
 -- Generated hero statues are ordinary floor items whose rendered appearance is a
 -- server-side snapshot. DynamicStatue carries cid:<char_id> in houseItem.Meta;
 -- the image endpoint resolves that stable id through this table.
@@ -795,6 +841,18 @@ def item(conn, item_id):
     if the item isn't in the catalog. Replaces `json.loads(SELECT raw FROM items ...)`."""
     row = conn.execute(f"SELECT {_ITEMCOLS} FROM items WHERE item_id=?", (int(item_id),)).fetchone()
     return itemrecord.to_item(itemrecord.row_to_cols(row)) if row else None
+
+
+def item_sponsors(conn, item_id):
+    """The sponsor credits for an item as the wire strings the client's ItemPreviewNew expects
+    (getItemSponsors -> {Sponsors:[...]}). Each entry is the sponsor's name, with a ":false"
+    suffix when they have no house on this server (the client splits on the last ':', reads a
+    trailing bool as has_house, and hides the "visit home" button when false). Empty list if
+    the item has no sponsors. Ordered by seq then name for a stable display."""
+    rows = conn.execute(
+        "SELECT player_name, has_house FROM item_sponsors WHERE item_id=? ORDER BY seq, player_name",
+        (int(item_id),)).fetchall()
+    return [r["player_name"] if r["has_house"] else f"{r['player_name']}:false" for r in rows]
 
 
 def store_item(conn, it, replace=False):

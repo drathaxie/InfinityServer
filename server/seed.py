@@ -1345,6 +1345,34 @@ def seed_global_drops(conn):
     return n
 
 
+def seed_item_sponsors(conn):
+    """Item sponsorship credits from data/item_sponsors.json — {"<ItemID>": [{name, has_house}]}.
+    Feeds the item_sponsors table the client's ItemPreviewNew panel reads via getItemSponsors
+    (AE's Benevolent Founder credit). Idempotent (insert-if-absent); rows whose item isn't in the
+    catalog are skipped (FK). Returns the number of sponsor rows seeded."""
+    f = DATA / "item_sponsors.json"
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    n = 0
+    for iid, sponsors in (data or {}).items():
+        if not str(iid).lstrip("-").isdigit() or not isinstance(sponsors, list):
+            continue                                   # skip "_comment"/doc keys
+        if not conn.execute("SELECT 1 FROM items WHERE item_id=?", (int(iid),)).fetchone():
+            continue                                   # item not in catalog -> skip (FK)
+        for seq, s in enumerate(sponsors):
+            name = (s or {}).get("name")
+            if not name:
+                continue
+            conn.execute(
+                "INSERT INTO item_sponsors(item_id, player_name, has_house, seq) VALUES(?,?,?,?) "
+                "ON CONFLICT(item_id, player_name) DO NOTHING",
+                (int(iid), str(name), 1 if (s or {}).get("has_house", True) else 0, seq))
+            n += 1
+    return n
+
+
 def seed_quest_objective_refs(conn):
     """Authored, self-describing kill-credit mappings (+ probabilistic drop params) from
     data/quest_objective_refs.json, keyed by quest then objective:
@@ -1406,12 +1434,13 @@ def run():
         mdrops = seed_monster_drops(conn)
         gdrops = seed_global_drops(conn)
         qrefs = seed_quest_objective_refs(conn)
+        isponsors = seed_item_sponsors(conn)
         conn.commit()
     print(f"[seed] items={items} hairs={hairs} shops={shops} shop_items={links} dev_shop_items={dev_shop} monsters={mons} maps={maps} "
           f"quests={quests} apops={apops} classes={cls} skills={sk} skill_graphs={graphs} "
           f"monster_skills_linked={mon_skills} paladin_skills={pala} void_skills={void} "
           f"class_items_granted={class_grants} cutscenes={cutscenes} defaultclasses={dclasses} "
-          f"monster_drops={mdrops} global_drops={gdrops} quest_obj_refs={qrefs}")
+          f"monster_drops={mdrops} global_drops={gdrops} quest_obj_refs={qrefs} item_sponsors={isponsors}")
 
 
 if __name__ == "__main__":

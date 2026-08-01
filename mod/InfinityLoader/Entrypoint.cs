@@ -41,7 +41,7 @@ public static class InfinityLoaderMod
     private static string _loaderLog;        // ...\UserData\Beyond\infinity_loader.log
     private static MethodInfo _serialize;    // AEC.Serialize (private) for faithful c2s logging
     private static bool _npcLoaderPatched;
-    private const int CUSTOM_STATUE_ITEM_ID = 200002;
+    private const int CUSTOM_STATUE_ITEM_ID = 978659;   // AE's real Player KS Statue (bundle 78659), live 2026-07-31
     private static GameObject _customStatuePrefab;
 
     // Overhead guild tag: lowercase player name -> (guild name, colour hex). Fed from the

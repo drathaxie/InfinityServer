@@ -78,6 +78,106 @@ def set_membership(conn, char_id, days):
                  (days, expires, int(char_id)))
     return days, expires
 
+
+def _apply_redeem_reward(conn, char, achievements, row):
+    """Apply one redeem_code_rewards row to `char`. `achievements` is the char's achievements
+    dict, mutated in place across the whole redemption so several 'achievement' reward rows on
+    the same code accumulate correctly instead of clobbering each other. Returns this reward's
+    display text, or None if the row is misconfigured (item id not in the catalog)."""
+    reward_type = row["reward_type"]
+    value = int(row["reward_value"] or 0)
+    qty = max(1, int(row["reward_qty"] or 1))
+    if reward_type == "gold":
+        conn.execute("UPDATE characters SET gold=gold+? WHERE id=?", (value, char["id"]))
+        return f"{value} Gold"
+    if reward_type == "coins":
+        conn.execute("UPDATE characters SET coins=coins+? WHERE id=?", (value, char["id"]))
+        return f"{value} AC"
+    if reward_type == "item":
+        item = give_item(conn, char, value, qty)
+        return f"{qty}x {item.get('Name') or value}" if item is not None else None
+    if reward_type == "achievement":
+        field = row["reward_field"] or "ip25"
+        achievements[field] = int(achievements.get(field, 0)) | value
+        return "Founder Tier" if field == "ip25" else f"{field} achievement"
+    return None
+
+
+_INVISIBLE_CHARS = re.compile("[​‌‍﻿]")   # ZWSP/ZWNJ/ZWJ/BOM
+
+
+def redeem_code(conn, char, code):
+    """Redeem a Heromart promo code for `char`'s account: applies every reward row for that code
+    (gold/coins/items/achievement bits, all at once) and records the use. Returns {success,
+    message, rewardDesc} shaped exactly like the client's RedeemCodeModal.HeromartRedeemResponse,
+    since that's deserialized as-is with no translation. One redemption per account per code (the
+    UNIQUE constraint on redeem_code_uses); a code with max_uses>0 also has a global cap.
+
+    RedeemCodeModal's TMP_InputField can hand back a code with a trailing zero-width space (seen
+    live: 'welcome\\u200b') — invisible, so it silently fails an exact match. Strip those before
+    comparing; .strip() alone doesn't catch them since they're category Cf, not whitespace."""
+    code = _INVISIBLE_CHARS.sub("", (code or "")).strip()
+    if not code:
+        return {"success": False, "message": "Please enter a code to redeem.", "rewardDesc": ""}
+    crow = conn.execute(
+        "SELECT * FROM redeem_codes WHERE LOWER(code)=LOWER(?) AND active=1", (code,)).fetchone()
+    if crow is None:
+        return {"success": False, "message": "That code is not valid.", "rewardDesc": ""}
+    rewards = conn.execute(
+        "SELECT * FROM redeem_code_rewards WHERE LOWER(code)=LOWER(?) ORDER BY id",
+        (code,)).fetchall()
+    if not rewards:
+        return {"success": False, "message": "That code's reward is misconfigured.",
+                "rewardDesc": ""}
+    account_id = char["account_id"]
+    dup = conn.execute(
+        "SELECT 1 FROM redeem_code_uses WHERE account_id=? AND LOWER(code)=LOWER(?)",
+        (account_id, code)).fetchone()
+    if dup is not None:
+        return {"success": False, "message": "You've already redeemed this code.", "rewardDesc": ""}
+    max_uses = int(crow["max_uses"] or 0)
+    if max_uses > 0:
+        used = conn.execute(
+            "SELECT COUNT(*) AS n FROM redeem_code_uses WHERE LOWER(code)=LOWER(?)",
+            (code,)).fetchone()["n"]
+        if int(used) >= max_uses:
+            return {"success": False, "message": "That code has reached its redemption limit.",
+                    "rewardDesc": ""}
+
+    try:
+        achievements = json.loads(char["achievements"] or "{}")
+    except (TypeError, ValueError):
+        achievements = {}
+    parts = []
+    for row in rewards:
+        text = _apply_redeem_reward(conn, char, achievements, row)
+        if text is None:
+            conn.rollback()      # undo any earlier legs of this bundle (e.g. gold before item)
+            return {"success": False, "message": "That code's reward is misconfigured.",
+                    "rewardDesc": ""}
+        parts.append(text)
+    if any(row["reward_type"] == "achievement" for row in rewards):
+        conn.execute("UPDATE characters SET achievements=? WHERE id=?",
+                     (json.dumps(achievements), char["id"]))
+
+    reward_desc = crow["description"] or ", ".join(parts)
+    conn.execute(
+        "INSERT INTO redeem_code_uses (account_id, code, description, redeemed_at) "
+        "VALUES (?, ?, ?, ?)", (account_id, code, reward_desc, time.time()))
+    conn.commit()
+    return {"success": True, "message": f"You received: {reward_desc}!", "rewardDesc": reward_desc}
+
+
+def redeem_history(conn, account_id):
+    """Recent redemptions for an account, newest first  RedeemCodeModal.getHistory's
+    HeromartRewardViewModel[] ({desc, date}), shown in the Redeem Code modal's history list."""
+    rows = conn.execute(
+        "SELECT description, redeemed_at FROM redeem_code_uses WHERE account_id=? "
+        "ORDER BY redeemed_at DESC LIMIT 25", (int(account_id),)).fetchall()
+    return [{"desc": r["description"],
+             "date": time.strftime("%Y-%m-%d %H:%M", time.gmtime(float(r["redeemed_at"])))}
+            for r in rows]
+
 # user-object display constants the client expects (rage bar + threshold colours). These are
 # fixed client-side presentation values, identical for every player — not account data.
 USER_RP_MAX = 100
@@ -1634,6 +1734,12 @@ def build_init_player(conn, char):
     # Default every relog. [[name-plates]]
     prefs["PortraitPreference"] = portrait_pref
 
+    # Cosmetic title (the selectable subtitle under the nameplate) is persisted in the prefs blob
+    # like PortraitPref; pop it out so it rides the user object as the top-level "Title"
+    # (ComUserData.Title -> Player.Title) and doesn't leak into the emitted userPrefs toggles.
+    # The InfinityLoader mod draws it below the name (the guild tag moved above). [[titles]]
+    title_pref = prefs.pop("Title", "") or ""
+
     # The equipped class drives the visual rig (skin + ClassParticleBundle) AND the skill bar.
     # A real ClassID is REQUIRED for the client to activate the class; a fresh character has the
     # starter Warrior, so fall back to it only for a class-less edge case.
@@ -1693,6 +1799,7 @@ def build_init_player(conn, char):
         "showHelm": bool(prefs.get("ShowHelm", True)),
         "showCloak": bool(prefs.get("ShowCloak", True)),
         "portraitPref": portrait_pref,                # name-plate style (savePortrait/portraitChange)
+        "Title": title_pref,                          # cosmetic title -> Player.Title (nameplate subtitle) [[titles]]
         "strFrame": "Enter",
         "strPad": "Spawn",
         "particleList": seact.get("particleList", []),
