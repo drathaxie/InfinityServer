@@ -627,21 +627,22 @@ def _wire_item(conn, ci):
     return item
 
 
-def inventory(conn, char_id):
+def _merge_owned(conn, char_id, want_class):
+    """Shared merge pass over char_items: dedupe multiple rows of the same item ID into one
+    wire item (sum quantities; equipped wins), the client's inventory dict being keyed by ID.
+    `want_class` selects which side of the isClass split to return — houses/furniture
+    (EquipSpot 8/9) are excluded from both; they're the separate initPlayer.houseItems list."""
     rows = conn.execute(
         "SELECT * FROM char_items WHERE char_id=? AND banked=0 ORDER BY char_item_id",
         (char_id,)).fetchall()
-    # The client keys its inventory dict by item ID (ResponseInitPlayer.Execute), so two rows
-    # with the same item id crash login with "same key has already been added". Merge duplicate
-    # rows into one wire item (sum quantities; equipped wins) — a safety net over _grant_item's
-    # stacking that also heals any duplicates already in the DB.
-    # Houses + furniture (EquipSpot 8/9) are NOT regular inventory — they're served as the
-    # separate initPlayer.houseItems list (house_items) in the houseItem shape.
     merged, order = {}, []
     for r in rows:
         _idef = db.item(conn, r["item_id"])
         if _idef is not None and int(_idef.get("EquipSpot", 0) or 0) in (
                 EQUIP_SPOT_HOUSE, EQUIP_SPOT_HOUSE_ITEM):
+            continue
+        is_class = bool(_item_is_class(_idef)) if _idef is not None else False
+        if is_class != want_class:
             continue
         iid = r["item_id"]
         if iid in merged:
@@ -652,6 +653,32 @@ def inventory(conn, char_id):
             merged[iid] = _wire_item(conn, r)
             order.append(iid)
     return [merged[i] for i in order]
+
+
+def inventory(conn, char_id):
+    """Regular bag items — class armor moved out to classItems (initPlayer.items no longer
+    carries isClass entries, matching AE's dedicated Classes menu button/panel)."""
+    return _merge_owned(conn, char_id, want_class=False)
+
+
+def class_items(conn, char_id):
+    """Owned class-armor items (isClass / EquipSpot==6) as wire InventoryItems —
+    initPlayer.classItems, the data source for the new Classes menu panel."""
+    return _merge_owned(conn, char_id, want_class=True)
+
+
+def class_skills(conn, char_id):
+    """initPlayer.classSkills: {catalog item ID (str): {slot: skillEntry}} for every class-armor
+    item this character owns — one skill-bar preview per owned class, keyed the same way AE's
+    live capture keys it (by the class-armor item's ID, not CharItemID). A class item with no
+    mapped class_id (unmatched armor) gets an empty skill dict, same as AE (e.g. capture item
+    9398 -> {})."""
+    out = {}
+    for item in class_items(conn, char_id):
+        item_id = int(item.get("ID", 0))
+        cls_id = forge.class_for_armor_item(conn, item_id)
+        out[str(item_id)] = forge.build_seact(conn, cls_id)["skillList"] if cls_id is not None else {}
+    return out
 
 
 def bank(conn, char_id):
@@ -1866,6 +1893,8 @@ def build_init_player(conn, char):
         "userPrefs": prefs,
         "playerInfo": pinfo,
         "items": inventory(conn, char["id"]),
+        "classItems": class_items(conn, char["id"]),  # owned class armor -> the Classes menu panel
+        "classSkills": class_skills(conn, char["id"]),  # per-owned-class skill-bar preview
         "loot": [],                                   # pending loot is per-uid (loot.py); none at login
         "patterns": patterns.loose_gems(conn, char["id"]),   # the enhancement gem bag (equipPattern)
         "houseItems": house_items(conn, char["id"]),  # owned houses + furniture (houseItem shape)

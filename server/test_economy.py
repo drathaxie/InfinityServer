@@ -27,11 +27,16 @@ def main():
     assert char["level"] == 1, f"fresh char starts at level 1, got {char['level']}"
     assert char["gold"] == 0, f"fresh char starts with no gold, got {char['gold']}"
     assert char["class_id"] == game.STARTER_CLASS_ID, "fresh char is the base Warrior class"
+    # class armor lives in classItems now (the dedicated Classes menu panel), not the regular
+    # bag list — inventory() is weapon/gear only.
     _fresh_inv = {i["ID"]: i for i in game.inventory(conn, char["id"])}
-    assert set(_fresh_inv) == {game.STARTER_CLASS_ITEM, game.STARTER_WEAPON_ITEM}, \
-        f"fresh inventory is only class + weapon, got {list(_fresh_inv)}"
+    assert set(_fresh_inv) == {game.STARTER_WEAPON_ITEM}, \
+        f"fresh inventory is only the weapon, got {list(_fresh_inv)}"
     assert _fresh_inv[game.STARTER_WEAPON_ITEM].get("ItemPattern", {}).get("Base") == 31, \
         "the Default Sword is pre-gemmed (Common gem, 27-34) so it's equippable + hits"
+    _fresh_cls = {i["ID"]: i for i in game.class_items(conn, char["id"])}
+    assert set(_fresh_cls) == {game.STARTER_CLASS_ITEM}, \
+        f"fresh classItems is only the starter Warrior, got {list(_fresh_cls)}"
     print(f"fresh-start OK: lvl1, 0 gold, Warrior + pre-gemmed Default Sword")
 
     # the initPlayer must NOT leak the captured maxed account's gem inventory / pending loot /
@@ -39,8 +44,12 @@ def main():
     _init = game.build_init_player(conn, char)
     for _k in ("loot", "patterns", "houseItems", "friends"):
         assert _init.get(_k) == [], f"initPlayer.{_k} must be empty for a fresh char, got {len(_init.get(_k) or [])}"
-    assert all(i["ID"] in (game.STARTER_CLASS_ITEM, game.STARTER_WEAPON_ITEM) for i in _init["items"]), \
+    assert all(i["ID"] == game.STARTER_WEAPON_ITEM for i in _init["items"]), \
         "initPlayer.items is the char's own loadout, not the template's 255"
+    assert all(i["ID"] == game.STARTER_CLASS_ITEM for i in _init["classItems"]), \
+        "initPlayer.classItems is the char's own class armor"
+    assert set(_init["classSkills"]) == {str(game.STARTER_CLASS_ITEM)}, \
+        "initPlayer.classSkills has one skill-bar preview per owned class item"
     print("initPlayer OK: no leaked gems/loot/house/friends from the captured template")
 
     # credit gold so the buy/sell economy below has something to spend (fresh chars have none)
