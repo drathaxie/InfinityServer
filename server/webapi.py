@@ -50,6 +50,7 @@ import placements
 import questdb
 import editor_enums
 import account_manager
+import support_manager
 
 HOST = "0.0.0.0"
 PORT = 8182                                   # mod ApiPatch rewrites WebApiURL -> here
@@ -85,7 +86,8 @@ ACCOUNT_COOKIE = "infinity_account"
 
 def _sign_session(username, access):
     """A signed, expiring session token: base64(payload).hmac. Stateless — no session table."""
-    payload = {"u": username, "a": int(access), "exp": int(time.time()) + EDIT_SESSION_SECS}
+    payload = {"u": username, "a": int(access), "csrf": secrets.token_urlsafe(24),
+               "exp": int(time.time()) + EDIT_SESSION_SECS}
     body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
     sig = hmac.new(EDIT_SECRET, body.encode(), hashlib.sha256).hexdigest()[:32]
     return f"{body}.{sig}"
@@ -922,8 +924,9 @@ EDITOR_PAGES = {"apop/edit.aspx": "apop_editor.html", "apop/edit": "apop_editor.
                 "item/edit.aspx": "item_editor.html", "item/edit": "item_editor.html",
                 "monster/edit.aspx": "monster_editor.html", "monster/edit": "monster_editor.html",
                 "shop/edit.aspx": "shop_editor.html", "shop/edit": "shop_editor.html",
-                "map/edit.aspx": "map_editor.html", "map/edit": "map_editor.html"}
-EDITOR_PREFIXES = ("apop/", "quest/", "item/", "monster/", "shop/", "map/")
+                "map/edit.aspx": "map_editor.html", "map/edit": "map_editor.html",
+                "support/edit.aspx": "support_editor.html", "support/edit": "support_editor.html"}
+EDITOR_PREFIXES = ("apop/", "quest/", "item/", "monster/", "shop/", "map/", "support/")
 
 # The DB-manager menu (the hamburger nav shared by every editor page via /editor/nav.js). Add a
 # new editor here and it appears in the menu everywhere. soon=True renders it greyed/disabled.
@@ -934,6 +937,7 @@ EDITOR_MENU = [
     {"label": "Monsters & Drops", "url": "/monster/Edit.aspx"},
     {"label": "Shops", "url": "/shop/Edit.aspx"},
     {"label": "Maps & NPCs", "url": "/map/Edit.aspx"},
+    {"label": "Player Support", "url": "/support/Edit.aspx"},
 ]
 
 def _login_html(nxt, error):
@@ -1235,7 +1239,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "guild": account_manager.guild_manager(conn, account),
                     "houses": account_manager.house_manager(conn, account["char_id"]),
                     "tokenBalance": account_manager.token_balance(conn, account["char_id"]),
-                    "redemptions": account_manager.redemption_history(conn, session["id"])})
+                    "redemptions": account_manager.redemption_history(conn, session["id"]),
+                    "activity": support_manager.history(conn, session["id"], 50)})
             if key == "account/api/catalog" and method == "GET":
                 args = urllib.parse.parse_qs(qs)
                 return self._send_json({"ok": True, "items": account_manager.catalog(
@@ -1251,6 +1256,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 ok, message = account_manager.change_password(
                     conn, session["id"], data.get("currentPassword"), data.get("password"))
                 return self._send_json({"ok": ok, "message": message}, 200 if ok else 400)
+            if key == "account/api/sessions/revoke" and method == "POST":
+                conn.execute("UPDATE accounts SET session_token=NULL WHERE id=?", (session["id"],))
+                support_manager.audit(conn, session["id"], account["char_id"], "player", "self",
+                                      "sessions_revoked", detail="Player revoked game sessions")
+                conn.commit()
+                return self._send_json({"ok": True, "message": "All game sessions were signed out."})
             if key == "account/api/redeem" and method == "POST":
                 ok, message, item = account_manager.redeem(conn, session["id"], data.get("itemId"))
                 return self._send_json({"ok": ok, "message": message,
@@ -1279,6 +1290,48 @@ class Handler(http.server.BaseHTTPRequestHandler):
             conn.close()
         return self._send_json({"ok": False, "message": "Not found."}, 404)
 
+    def _support_api(self, method, key, qs, body):
+        staff = _verify_session(self._cookie(EDIT_COOKIE))
+        if not staff:
+            return self._send_json({"ok": False, "message": "Not authorized."}, 401)
+        if method == "POST" and not hmac.compare_digest(
+                str(self.headers.get("X-Staff-CSRF", "")), str(staff.get("csrf", ""))):
+            return self._send_json({"ok": False, "message": "Staff session expired; sign in again."}, 403)
+        conn = db.connect()
+        try:
+            args = urllib.parse.parse_qs(qs)
+            if key == "support/session" and method == "GET":
+                return self._send_json({"ok": True, "csrf": staff.get("csrf", ""),
+                                        "staff": staff.get("u", "")})
+            if key == "support/search" and method == "GET":
+                return self._send_json({"ok": True, "players": support_manager.search_players(
+                    conn, args.get("q", [""])[0])})
+            if key == "support/player" and method == "GET":
+                try:
+                    obj = support_manager.player(conn, args.get("charId", [""])[0])
+                except (TypeError, ValueError):
+                    obj = None
+                return self._send_json({"ok": bool(obj), "player": obj}, 200 if obj else 404)
+            if key == "support/codes" and method == "GET":
+                return self._send_json({"ok": True, "codes": support_manager.codes(conn)})
+            data = self._account_payload(body)
+            if data is None:
+                return self._send_json({"ok": False, "message": "Invalid request."}, 400)
+            if key == "support/grant" and method == "POST":
+                ok, message = support_manager.grant(conn, staff.get("u", "staff"),
+                    data.get("charId"), data.get("type"), data.get("value"),
+                    data.get("quantity", 1), data.get("reason"))
+                return self._send_json({"ok": ok, "message": message}, 200 if ok else 400)
+            if key == "support/code/save" and method == "POST":
+                try:
+                    ok, message = support_manager.save_code(conn, staff.get("u", "staff"), data)
+                except (TypeError, ValueError):
+                    ok, message = False, "Invalid reward value."
+                return self._send_json({"ok": ok, "message": message}, 200 if ok else 400)
+            return self._send_json({"ok": False, "message": "Not found."}, 404)
+        finally:
+            conn.close()
+
     def do_GET(self):
         self._handle("GET")
 
@@ -1306,6 +1359,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._heromart_api(method, key, qs)
         if key.startswith("account/api/"):
             return self._account_api(method, key, qs, body)
+        if key.startswith("support/") and key not in EDITOR_PAGES:
+            if not self._require_edit_auth():
+                return
+            return self._support_api(method, key, qs, body)
 
 
         # DynamicStatue's cid metadata resolves here. This is public game art, not

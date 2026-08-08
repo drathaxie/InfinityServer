@@ -179,6 +179,25 @@ CREATE TABLE IF NOT EXISTS redeem_code_uses (
 CREATE INDEX IF NOT EXISTS idx_redeem_rewards_code ON redeem_code_rewards(code);
 CREATE INDEX IF NOT EXISTS idx_redeem_uses_account ON redeem_code_uses(account_id);
 
+-- Privacy-preserving economy/support ledger. Internal ids and game usernames are enough for
+-- support investigations; deliberately do not store IP addresses, email, hardware or device ids.
+CREATE TABLE IF NOT EXISTS account_audit (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER NOT NULL,
+    char_id     INTEGER,
+    actor_type  TEXT NOT NULL,
+    actor_name  TEXT NOT NULL DEFAULT '',
+    action      TEXT NOT NULL,
+    item_id     BIGINT,
+    quantity    INTEGER,
+    currency    TEXT,
+    amount      INTEGER,
+    detail      TEXT NOT NULL DEFAULT '',
+    created     REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_account_audit_account ON account_audit(account_id, created);
+CREATE INDEX IF NOT EXISTS idx_account_audit_action ON account_audit(action, created);
+
 -- Generated hero statues are ordinary floor items whose rendered appearance is a
 -- server-side snapshot. DynamicStatue carries cid:<char_id> in houseItem.Meta;
 -- the image endpoint resolves that stable id through this table.

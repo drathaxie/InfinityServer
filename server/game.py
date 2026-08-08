@@ -164,6 +164,9 @@ def redeem_code(conn, char, code):
     conn.execute(
         "INSERT INTO redeem_code_uses (account_id, code, description, redeemed_at) "
         "VALUES (?, ?, ?, ?)", (account_id, code, reward_desc, time.time()))
+    import support_manager
+    support_manager.audit(conn, account_id, char["id"], "player", "self", "redeem_code",
+                          detail=f"{code}: {reward_desc}")
     conn.commit()
     return {"success": True, "message": f"You received: {reward_desc}!", "rewardDesc": reward_desc}
 
@@ -2273,6 +2276,9 @@ def sell(conn, char, params):
 
     field = "coins" if use_coins else "gold"
     conn.execute(f"UPDATE characters SET {field}={field}+? WHERE id=?", (amount, char["id"]))
+    import support_manager
+    support_manager.audit(conn, char["account_id"], char["id"], "player", "self", "item_sale",
+                          item_id=item_id, quantity=qty, currency=field, amount=amount)
     conn.commit()
     return {"Cmd": "sellItem", "Success": True, "Coins": use_coins,
             "Amount": amount, "CharItemID": char_item_id}

@@ -7,6 +7,7 @@ import db
 import game
 import friends
 import guilds
+import support_manager
 
 
 USERNAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9 _-]{2,23}$")
@@ -154,6 +155,9 @@ def buy_back(conn, account_id, buyback_id, quantity=1):
             game._grant_item(conn, int(account["char_id"]), item)
         conn.execute("UPDATE ac_item_buybacks SET remaining_quantity=remaining_quantity-? WHERE id=?",
                      (quantity, buyback_id))
+        support_manager.audit(conn, account_id, account["char_id"], "player", "self", "buyback",
+                              item_id=int(row["item_id"]), quantity=quantity,
+                              currency="coins", amount=-cost)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -269,6 +273,9 @@ def redeem(conn, account_id, item_id):
             "INSERT INTO token_redemptions(account_id,char_id,token_item_id,item_id,redeemed) "
             "VALUES(?,?,?,?,?)", (int(account_id), int(account["char_id"]), int(token["item_id"]),
                                   int(item_id), time.time()))
+        support_manager.audit(conn, account_id, account["char_id"], "player", "self",
+                              "token_redeem", item_id=int(item_id), quantity=1,
+                              detail=f"Consumed token item {int(token['item_id'])}")
         conn.commit()
     except Exception:
         conn.rollback()
