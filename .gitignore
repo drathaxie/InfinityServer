@@ -45,6 +45,10 @@ mod/doorstop_extract/
 
 # ─── Build / dist ─────────────────────────────────────────────────────────
 dist/
+tmp/
+outputs/
+.claude/
+.career-profile-worktree/
 
 # ─── OS cruft ─────────────────────────────────────────────────────────────
 .DS_Store

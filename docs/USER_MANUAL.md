@@ -20,7 +20,7 @@ client talks to our server; the DB is the authoritative, live store.
 your first login creates the account; the same password is required afterward. There's
 no email/recovery, so don't reuse a real password.
 
-**The server:** API `https://130-162-189-229.sslip.io/` (HTTPS, via Caddy), game socket
+**The server:** API `https://divinityarts.mooo.com/` (HTTPS, via Caddy), game socket
 `130.162.189.229:5588` (raw TCP). The client learns the game address from the API at
 login, so you only configure the API marker.
 

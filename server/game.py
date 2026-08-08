@@ -1780,7 +1780,7 @@ def build_init_player(conn, char):
                 class_rig = json.loads(crow["rig"])
             except (TypeError, ValueError):
                 class_rig = None
-    seact = forge.build_seact(conn, eff_class)        # {Cmd:sEAct, skillList, particleList}
+    seact = forge.build_seact(conn, eff_class, char["id"])  # includes equipped stone at slot 5
 
     # Equipped rig: the class skin (anti-naked fallback + the ClassParticleBundle skills/auras
     # need) plus ONLY the spots this character actually has equipped; unequipped spots fall back
@@ -2257,6 +2257,12 @@ def sell(conn, char, params):
     use_coins = bool(item.get("Coins"))
     qty = max(1, min(qty, int(row["quantity"])))
     amount = sell_price * qty
+
+    if use_coins:
+        conn.execute(
+            "INSERT INTO ac_item_buybacks(account_id,char_id,item_id,remaining_quantity,"
+            "unit_price,sold_at) VALUES(?,?,?,?,?,?)",
+            (int(char["account_id"]), int(char["id"]), item_id, qty, sell_price, time.time()))
 
     remaining = int(row["quantity"]) - qty
     if remaining > 0:

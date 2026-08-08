@@ -127,7 +127,11 @@ async def begin_cast(session, writer, cmd, params, msg):
     if slot_i == 0 and not target:
         return                          # auto-attack needs a target; self-buffs don't
     uid = session.member.uid
-    sk = forge.skill_for_slot(session.conn, session.equipped_class, slot_i)
+    # Slots 0-4 belong to the class. Slot 5 is the client's shipped sixth/potion slot and
+    # resolves through the character's equipped ItemType 44 Spellstone instead.
+    sk = (forge.equipped_spellstone(session.conn, session.char["id"])
+          if slot_i == 5 and session.char is not None else
+          forge.skill_for_slot(session.conn, session.equipped_class, slot_i))
     data = sk["data"] if sk else None
     forge_data = sk["forge"] if sk else None
     has_graph = sk is not None and combat.has_graph(data, forge_data)

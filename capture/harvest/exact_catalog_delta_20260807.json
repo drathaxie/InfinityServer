@@ -1,0 +1,406 @@
+{
+  "items": {
+    "84832": {
+      "$type": "AQ2D_Server.Game_Engine.Shop.MergeShopItem, AQ2D_Server",
+      "Quantity": 1,
+      "turnins": [
+        {
+          "ItemID": 87479,
+          "quantity": 50,
+          "Name": "Red Dragon Scales"
+        }
+      ],
+      "ID": 84832,
+      "Bundle": {
+        "ID": 49276,
+        "Name": "Dragonslayer (Infinity Tech Demo)",
+        "Filename": "armors/49276_DragonSlayer2024.unity3d",
+        "VersionStage": 4,
+        "VersionLive": 4
+      },
+      "PrefabName": "ArmorSlots",
+      "EquipSpot": 7,
+      "ItemType": 22,
+      "Name": "DragonSlayer Armor (Infinity)",
+      "Description": "",
+      "DamageRange": 0.1,
+      "Filename": "armors/49276_DragonSlayer2024.unity3d",
+      "Linkage": "",
+      "Icon": "iwarmor",
+      "gameFlag": 1,
+      "Level": 1,
+      "StackSize": 1,
+      "Rarity": 100,
+      "Element": 1,
+      "Faction": 1,
+      "ReqQuests": [],
+      "strReqQuests": "",
+      "MetaString": "",
+      "boostValues": {},
+      "MobileCompatibility": 1
+    },
+    "84834": {
+      "$type": "AQ2D_Server.Game_Engine.Shop.MergeShopItem, AQ2D_Server",
+      "Quantity": 1,
+      "turnins": [
+        {
+          "ItemID": 87479,
+          "quantity": 30,
+          "Name": "Red Dragon Scales"
+        }
+      ],
+      "ID": 84834,
+      "Bundle": {
+        "ID": 46663,
+        "Name": "infinitydsblade",
+        "Filename": "items/swords/46663_infinitydsblade.unity3d",
+        "VersionStage": 2,
+        "VersionLive": 2
+      },
+      "PrefabName": "infinitydsblade_weaponSlots",
+      "EquipSpot": 2,
+      "ItemType": 6,
+      "Name": "DragonSlayer Blade (Infinity)",
+      "Description": "",
+      "DamageRange": 0.1,
+      "Filename": "items/swords/46663_infinitydsblade.unity3d",
+      "Linkage": "",
+      "Icon": "iwsword",
+      "Level": 1,
+      "StackSize": 1,
+      "Rarity": 100,
+      "Element": 1,
+      "Faction": 1,
+      "ReqQuests": [],
+      "strReqQuests": "",
+      "Coins": true,
+      "MetaString": "",
+      "boostValues": {},
+      "MobileCompatibility": 1
+    },
+    "96385": {
+      "$type": "AQ2D_Server.Game_Engine.Shop.MergeShopItem, AQ2D_Server",
+      "Quantity": 1,
+      "turnins": [
+        {
+          "ItemID": 87479,
+          "quantity": 60,
+          "Name": "Red Dragon Scales"
+        }
+      ],
+      "ID": 96385,
+      "Bundle": {
+        "ID": 66425,
+        "Name": "SteamPunkDragonBlade",
+        "Filename": "items/swords/66425_SteamPunkDragonBlade.unity3d",
+        "VersionStage": 1,
+        "VersionLive": 1
+      },
+      "PrefabName": "SteamPunkDragonBlade_weaponGO",
+      "EquipSpot": 2,
+      "ItemType": 6,
+      "Name": "SteamPunk DragonBlade (Infinity)",
+      "Description": "",
+      "DamageRange": 0.1,
+      "Filename": "items/swords/66425_SteamPunkDragonBlade.unity3d",
+      "Linkage": "",
+      "Icon": "iwsword",
+      "Level": 1,
+      "StackSize": 1,
+      "Rarity": 100,
+      "Element": 1,
+      "Faction": 1,
+      "ReqQuests": [],
+      "strReqQuests": "",
+      "MetaString": "",
+      "boostValues": {},
+      "MobileCompatibility": 2
+    },
+    "101331": {
+      "Quantity": 1,
+      "ID": 101331,
+      "Bundle": {
+        "ID": 78456,
+        "Name": "Platinum and Sapphire Paladin Spear",
+        "Filename": "items/polearms/78456_InfinityAlphaPaladinSpear1Plat.unity3d",
+        "VersionStage": 1,
+        "VersionLive": 1
+      },
+      "PrefabName": "InfinityAlphaPaladinSpear1Plat_weaponGO",
+      "EquipSpot": 2,
+      "ItemType": 20,
+      "Name": "Platinum Ancient Sapphire Palladion",
+      "Description": "An old Paladin's weapon of choice to face the Undead in the Graveyard. This Paladin met their faithful end at the hands of the Lich. \r\n\r\nThese weapons were then buried and locked away in chests to hide such a powerful instrument that could end the Undead horde.",
+      "DamageRange": 0.1,
+      "Filename": "items/polearms/78456_InfinityAlphaPaladinSpear1Plat.unity3d",
+      "Linkage": "",
+      "Icon": "iwpolearm",
+      "Level": 1,
+      "StackSize": 1,
+      "Rarity": 67,
+      "Element": 1,
+      "Faction": 1,
+      "ReqQuests": [],
+      "strReqQuests": "",
+      "Coins": true,
+      "MetaString": "",
+      "boostValues": {},
+      "MobileCompatibility": 1
+    },
+    "101332": {
+      "Quantity": 1,
+      "ID": 101332,
+      "Bundle": {
+        "ID": 78457,
+        "Name": "Platinum and Ruby Paladin Spear",
+        "Filename": "items/polearms/78457_InfinityAlphaPaladinSpear2Plat.unity3d",
+        "VersionStage": 1,
+        "VersionLive": 1
+      },
+      "PrefabName": "InfinityAlphaPaladinSpear2Plat_weaponGO",
+      "EquipSpot": 2,
+      "ItemType": 20,
+      "Name": "Platinum Ancient Ruby Palladion Spear",
+      "Description": "An old Paladin's weapon of choice to face the Undead in the Graveyard. This Paladin met their faithful end at the hands of the Lich. \r\n\r\nThese weapons were then buried and locked away in chests to hide such a powerful instrument that could end the Undead horde.\r\nPlatinum and Ruby coatings were added to this trusty Paladin weapon. \r\n\r\nYou wonder if the Lich was afraid of the weapon's power, or the Paladin's fashion style.",
+      "DamageRange": 0.1,
+      "Filename": "items/polearms/78457_InfinityAlphaPaladinSpear2Plat.unity3d",
+      "Linkage": "",
+      "Icon": "iwpolearm",
+      "Level": 1,
+      "StackSize": 1,
+      "Rarity": 67,
+      "Element": 1,
+      "Faction": 1,
+      "ReqQuests": [],
+      "strReqQuests": "",
+      "Coins": true,
+      "MetaString": "",
+      "boostValues": {},
+      "MobileCompatibility": 1
+    },
+    "101502": {
+      "Quantity": 1,
+      "ID": 101502,
+      "Bundle": {
+        "ID": 78449,
+        "Name": "Blade Of Zards",
+        "Filename": "items/swords/78449_BladeOfZards.unity3d",
+        "VersionStage": 1,
+        "VersionLive": 1
+      },
+      "PrefabName": "BladeOfZards_weaponGO",
+      "EquipSpot": 2,
+      "ItemType": 6,
+      "Name": "Common Blade of Zards",
+      "Description": "Why are the Zardmen not using these broadswords to defend their lands? They seem to pay great respect to the craftsmanship employed in these.  Although common, still a formidable, and sharp blade.\r\n\r\nMaybe these creatures are not as \"thick-headed\" as the ZardHunter suggests...",
+      "DamageRange": 0.13,
+      "Filename": "items/swords/78449_BladeOfZards.unity3d",
+      "Linkage": "",
+      "Icon": "iwsword",
+      "Level": 1,
+      "StackSize": 1,
+      "Rarity": 67,
+      "Element": 1,
+      "Faction": 1,
+      "ReqQuests": [],
+      "strReqQuests": "",
+      "Coins": true,
+      "MetaString": "",
+      "boostValues": {},
+      "MobileCompatibility": 1
+    },
+    "101504": {
+      "Quantity": 1,
+      "ID": 101504,
+      "Bundle": {
+        "ID": 78447,
+        "Name": "Spear Of Zards",
+        "Filename": "items/polearms/78447_SpearOfZards.unity3d",
+        "VersionStage": 1,
+        "VersionLive": 1
+      },
+      "PrefabName": "SpearOfZards_weaponGO",
+      "EquipSpot": 2,
+      "ItemType": 20,
+      "Name": "Spear Of Zards",
+      "Description": "This weapon seems to be too exquisite for regular Zards to use. You can tell it was of ceremonial use. Although no nature magic seems to course through it.",
+      "DamageRange": 0.1,
+      "Filename": "items/polearms/78447_SpearOfZards.unity3d",
+      "Linkage": "",
+      "Icon": "iwpolearm",
+      "Level": 1,
+      "StackSize": 1,
+      "Rarity": 67,
+      "Element": 1,
+      "Faction": 1,
+      "ReqQuests": [],
+      "strReqQuests": "",
+      "Coins": true,
+      "MetaString": "",
+      "boostValues": {},
+      "MobileCompatibility": 1
+    },
+    "102467": {
+      "Quantity": 1,
+      "ID": 102467,
+      "EquipSpot": 1,
+      "ItemType": 2,
+      "Name": "Infinity Founder Class Note",
+      "Description": "Backers of AQWorlds: Infinity at the Founder tier ($25) and above got the Infinity Hero Class as one of their many rewards. If you would like to obtain it too, you can upgrade your reward tier at https://account.aq.com/",
+      "DamageRange": 0.1,
+      "Linkage": "",
+      "Icon": "iibag",
+      "Level": 1,
+      "StackSize": 1,
+      "Rarity": 96,
+      "Element": 1,
+      "Faction": 1,
+      "ReqQuests": [],
+      "strReqQuests": "",
+      "Coins": true,
+      "MetaString": "",
+      "boostValues": {}
+    }
+  },
+  "shops": {
+    "2469": {
+      "meta": {
+        "Cmd": "loadShop",
+        "shop": {
+          "$type": "AQ2D_Server.Game_Engine.Shop.MergeShop, AQ2D_Server",
+          "shopID": 2469,
+          "Name": "Infinity DragonSlayer Crafting",
+          "gameFlag": 2,
+          "mergeShop": true,
+          "items": []
+        }
+      },
+      "items": [
+        {
+          "shop_item_id": 1,
+          "item_id": 84832,
+          "cost": 0,
+          "coins": 0,
+          "quantity_remain": -1
+        },
+        {
+          "shop_item_id": 2,
+          "item_id": 84833,
+          "cost": 0,
+          "coins": 0,
+          "quantity_remain": -1
+        },
+        {
+          "shop_item_id": 3,
+          "item_id": 84834,
+          "cost": 0,
+          "coins": 1,
+          "quantity_remain": -1
+        },
+        {
+          "shop_item_id": 4,
+          "item_id": 96385,
+          "cost": 0,
+          "coins": 0,
+          "quantity_remain": -1
+        }
+      ]
+    },
+    "2508": {
+      "meta": {
+        "Cmd": "loadShop",
+        "shop": {
+          "$type": "AQ2D_Server.Game_Engine.Shop.ItemShop, AQ2D_Server",
+          "shopID": 2508,
+          "Name": "Grimskull's Infinity",
+          "gameFlag": 2,
+          "items": []
+        }
+      },
+      "items": [
+        {
+          "shop_item_id": 1,
+          "item_id": 67385,
+          "cost": 0,
+          "coins": 1,
+          "quantity_remain": -1
+        }
+      ]
+    },
+    "2727": {
+      "meta": {
+        "Cmd": "loadShop",
+        "shop": {
+          "$type": "AQ2D_Server.Game_Engine.Shop.ItemShop, AQ2D_Server",
+          "shopID": 2727,
+          "Name": "Infinity Houses",
+          "gameFlag": 2,
+          "items": []
+        }
+      },
+      "items": [
+        {
+          "shop_item_id": 1,
+          "item_id": 1286,
+          "cost": 1000,
+          "coins": 0,
+          "quantity_remain": -1
+        }
+      ]
+    },
+    "2730": {
+      "meta": {
+        "Cmd": "loadShop",
+        "shop": {
+          "$type": "AQ2D_Server.Game_Engine.Shop.ItemShop, AQ2D_Server",
+          "shopID": 2730,
+          "Name": "Forest Infinity Chest East",
+          "items": []
+        }
+      },
+      "items": [
+        {
+          "shop_item_id": 1,
+          "item_id": 101502,
+          "cost": 0,
+          "coins": 1,
+          "quantity_remain": -1
+        },
+        {
+          "shop_item_id": 2,
+          "item_id": 101504,
+          "cost": 0,
+          "coins": 1,
+          "quantity_remain": -1
+        }
+      ]
+    },
+    "2741": {
+      "meta": {
+        "Cmd": "loadShop",
+        "shop": {
+          "$type": "AQ2D_Server.Game_Engine.Shop.ItemShop, AQ2D_Server",
+          "shopID": 2741,
+          "Name": "Lich's Chest - Platinium Spears",
+          "items": []
+        }
+      },
+      "items": [
+        {
+          "shop_item_id": 1,
+          "item_id": 101331,
+          "cost": 0,
+          "coins": 1,
+          "quantity_remain": -1
+        },
+        {
+          "shop_item_id": 2,
+          "item_id": 101332,
+          "cost": 0,
+          "coins": 1,
+          "quantity_remain": -1
+        }
+      ]
+    }
+  }
+}

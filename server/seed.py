@@ -26,6 +26,7 @@ CUTSCENES_FILE = DATA / "cutscenes.json"
 DEFAULTCLASSES_FILE = DATA / "defaultclasses.json"
 MONSTER_DROPS_FILE = DATA / "monster_drops.json"
 ITEMS_FILE = DATA / "items.json"
+REDEEM_CODES_FILE = DATA / "redeem_codes.json"
 SHOPS_FILE = DATA / "shops.json"
 BASECLASSES_FILE = DATA.parent / "capture" / "harvest" / "baseclasses_live.json"
 
@@ -41,6 +42,34 @@ def seed_hairs(conn):
         if isinstance(hair, dict) and hair.get("ID") is not None:
             db.store_hair(conn, hair)
             count += 1
+    return count
+
+
+def seed_redeem_codes(conn):
+    """Install versioned promo-code definitions and their exact reward bundles."""
+    try:
+        definitions = json.loads(REDEEM_CODES_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    count = 0
+    for code, definition in definitions.items():
+        code = str(code).strip().upper()
+        if not code:
+            continue
+        conn.execute(
+            "INSERT INTO redeem_codes(code,description,max_uses,active,created) VALUES(?,?,?,?,0) "
+            "ON CONFLICT(code) DO UPDATE SET description=excluded.description,"
+            "max_uses=excluded.max_uses,active=excluded.active",
+            (code, definition.get("description", ""), int(definition.get("maxUses", 0) or 0),
+             1 if definition.get("active", True) else 0))
+        conn.execute("DELETE FROM redeem_code_rewards WHERE LOWER(code)=LOWER(?)", (code,))
+        for reward in definition.get("rewards", []):
+            conn.execute(
+                "INSERT INTO redeem_code_rewards(code,reward_type,reward_value,reward_qty,reward_field) "
+                "VALUES(?,?,?,?,?)", (code, reward.get("type"), int(reward.get("value", 0)),
+                                      int(reward.get("quantity", 1) or 1),
+                                      reward.get("field", "ip25")))
+        count += 1
     return count
 
 
@@ -2040,6 +2069,52 @@ def seed_items(conn):
     return len(items)
 
 
+# --- Practice Spellstone ---------------------------------------------------------------
+# A minimal real ItemType 44 implementation for the client RequestUseSpellstone path. The
+# item links to its standalone Skill Forge graph through MetaString, just like a class armor
+# links to a class through MetaString without embedding behavior in the item itself.
+PRACTICE_SPELLSTONE_ITEM_ID = 200023
+PRACTICE_SPELLSTONE_SKILL_ID = 90390
+PRACTICE_SPELLSTONE_ITEM = {
+    "ID": PRACTICE_SPELLSTONE_ITEM_ID,
+    "Name": "Practice Frogzard Spellstone",
+    "Description": "A beginner Spellstone forged to transform its user into a Frogzard for "
+                   "30 seconds. Equip it to spell slot 6, then press 6 to cast. Reusable.",
+    "ItemType": 44, "EquipSpot": 1, "Linkage": "", "Icon": "iibag", "Level": 1,
+    "Quantity": 1, "StackSize": 1, "Element": 1, "Faction": 1, "strReqQuests": "",
+    "MetaString": str(PRACTICE_SPELLSTONE_SKILL_ID), "DamageRange": 0.1, "Rarity": 1,
+    "MobileCompatibility": 1, "Cost": 0, "Coins": True, "ReqQuests": [], "boostValues": {},
+}
+PRACTICE_SPELLSTONE_NODES = [
+    ("0", {"Name": "OnRequest"}),
+    ("1", {"Name": "Cooldown", "CD": 30000}),
+    ("2", {"Name": "MonTransform", "Linkage": "Frogzard", "Scale": 1.0,
+           "Bundle": {"ID": 46555, "Name": "frogzard",
+                      "Filename": "npcs/46555_frogzard.unity3d",
+                      "VersionStage": 8, "VersionLive": 8}}),
+    ("3", {"Name": "Aura", "AuraName": "Practice Frogzard Form",
+           "Duration": 30, "MaxTargets": 1}),
+]
+
+
+def seed_practice_spellstone(conn):
+    """Seed the reusable stone plus its standalone Skill Forge graph. Refresh our reserved
+    IDs on every seed so code, item metadata, and graph cannot drift apart."""
+    import forge
+    db.store_item(conn, PRACTICE_SPELLSTONE_ITEM, replace=True)
+    data, forge_data = forge.linear_graph(PRACTICE_SPELLSTONE_NODES)
+    conn.execute(
+        "INSERT INTO skills(skill_id, action, name, description, icon, slot, data, forge_data) "
+        "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(skill_id) DO UPDATE SET "
+        "name=excluded.name, description=excluded.description, icon=excluded.icon, "
+        "slot=excluded.slot, data=excluded.data, forge_data=excluded.forge_data",
+        (PRACTICE_SPELLSTONE_SKILL_ID, 0, "Practice Frogzard Form",
+         "Transform into a Frogzard for 30 seconds.", "iibag", -1,
+         json.dumps(data, separators=(",", ":")),
+         json.dumps(forge_data, separators=(",", ":"))))
+    return 1
+
+
 def seed_shops(conn):
     """Shops from data/shops.json: shop meta + shop_item links (items come from
     seed_items). Reproduces every captured/imported shop, not just the one sample."""
@@ -2196,6 +2271,8 @@ def run():
         hairs = seed_hairs(conn)
         # shop_items/links resolve.
         items = seed_items(conn)
+        redeem_codes = seed_redeem_codes(conn)
+        spellstones = seed_practice_spellstone(conn)
         shops, links = seed_shops(conn)
         dev_shop = fill_dev_shop.fill(conn)
         mons = montemplates.seed_db(conn)
@@ -2217,12 +2294,13 @@ def run():
         qrefs = seed_quest_objective_refs(conn)
         isponsors = seed_item_sponsors(conn)
         conn.commit()
-    print(f"[seed] items={items} hairs={hairs} shops={shops} shop_items={links} dev_shop_items={dev_shop} monsters={mons} maps={maps} "
+    print(f"[seed] items={items} spellstones={spellstones} hairs={hairs} shops={shops} shop_items={links} dev_shop_items={dev_shop} monsters={mons} maps={maps} "
           f"quests={quests} apops={apops} classes={cls} skills={sk} skill_graphs={graphs} "
           f"monster_skills_linked={mon_skills} paladin_skills={pala} void_skills={void} "
           f"infinity_hero_skills={ihero} "
           f"class_items_granted={class_grants} cutscenes={cutscenes} defaultclasses={dclasses} "
-          f"monster_drops={mdrops} global_drops={gdrops} quest_obj_refs={qrefs} item_sponsors={isponsors}")
+          f"monster_drops={mdrops} global_drops={gdrops} quest_obj_refs={qrefs} item_sponsors={isponsors} "
+          f"redeem_codes={redeem_codes}")
 
 
 if __name__ == "__main__":

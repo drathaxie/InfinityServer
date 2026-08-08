@@ -16,6 +16,8 @@ Endpoints the client calls (from decomp; grep "WebApiURL + "):
   GET  data/Servers?flavor=2            -> server list
   GET  Data/GetBaseClasses              -> base class defs
   GET  Data/InfinityVars                -> client config vars
+  GET  loginscreen/background.png       -> private-server login-screen art
+  GET  mod/InfinityLoader.dll(.sha256)  -> verified client-mod self-update payload
   POST tweak/CreateNewApop {staff,s_key,npcID} -> {"ID": n}     (apops table)
   POST tweak/DialoggerSave / DialoggerLoad     -> dialog editor I/O
   + Login/*, steam/, Mobile/ValidateReceipt    (auth — bypassed via TCP login)
@@ -35,6 +37,7 @@ import os
 import pathlib
 import random
 import re
+import secrets
 import time
 import urllib.parse
 import urllib.request
@@ -46,6 +49,7 @@ import montemplates
 import placements
 import questdb
 import editor_enums
+import account_manager
 
 HOST = "0.0.0.0"
 PORT = 8182                                   # mod ApiPatch rewrites WebApiURL -> here
@@ -69,6 +73,14 @@ EDIT_SECRET = (os.environ.get("INFINITY_EDIT_SECRET")
 EDIT_MIN_ACCESS = int(os.environ.get("INFINITY_EDIT_MIN_ACCESS", "40"))   # staff tier (dev=100)
 EDIT_SESSION_SECS = 12 * 3600
 EDIT_COOKIE = "infinity_edit"
+
+# Player account-manager sessions are separate from staff editor sessions. Reuse the same
+# deployment secret by default, or isolate them with INFINITY_ACCOUNT_SECRET.
+ACCOUNT_SECRET = (os.environ.get("INFINITY_ACCOUNT_SECRET") or
+                  os.environ.get("INFINITY_EDIT_SECRET") or
+                  os.environ.get("INFINITY_EDIT_PASS") or "").encode("utf-8")
+ACCOUNT_SESSION_SECS = 2 * 3600
+ACCOUNT_COOKIE = "infinity_account"
 
 
 def _sign_session(username, access):
@@ -95,9 +107,36 @@ def _verify_session(token):
         return None
     return payload
 
+
+def _sign_account_session(account_id, username):
+    payload = {"id": int(account_id), "u": username, "csrf": secrets.token_urlsafe(24),
+               "exp": int(time.time()) + ACCOUNT_SESSION_SECS}
+    body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
+    sig = hmac.new(ACCOUNT_SECRET, body.encode(), hashlib.sha256).hexdigest()
+    return f"{body}.{sig}"
+
+
+def _verify_account_session(token):
+    if not token or not ACCOUNT_SECRET or "." not in token:
+        return None
+    body, sig = token.rsplit(".", 1)
+    expect = hmac.new(ACCOUNT_SECRET, body.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expect):
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+    except Exception:
+        return None
+    return payload if int(payload.get("exp", 0)) >= time.time() else None
+
 LOG_DIR = pathlib.Path(__file__).resolve().parent
 CAPTURE_LOG = LOG_DIR / "webapi_capture.jsonl"
 UNHANDLED_LOG = LOG_DIR / "webapi_unhandled.jsonl"
+LOGINSCREEN_BG_PATH = LOG_DIR.parent / "data" / "loginscreen_background.png"
+MOD_DIR = LOG_DIR.parent / "data" / "mod"
+MOD_DLL_PATH = MOD_DIR / "InfinityLoader.dll"
+MOD_DLL_HASH_PATH = MOD_DIR / "InfinityLoader.dll.sha256"
+CLIENT_PACK_PATH = MOD_DIR / "InfinityServer-Client.zip"
 
 # The "Characters" asset bundle the CharSelect screen preloads. Static client/asset config,
 # identical for every player (not account data) — so it's a constant, not loaded from a capture.
@@ -329,8 +368,15 @@ def login_nowinfinity(conn, form):
 def infinity_vars(conn, qs):
     """Data/InfinityVars -> List<GameVar>. The client deserializes into a LIST, so this MUST be a
     JSON array — returning {} throws a JsonSerializationException (Player.log) and can stall flows
-    that wait on it (e.g. cutscene loading). Empty list = no server game-vars defined yet."""
-    return []
+    that wait on it (e.g. cutscene loading). The stock infinityMessage controls the login MOTD;
+    InfinityLoader reads infinityGameNewsHeading from the same response."""
+    return [
+        {"sInfo": "infinityMessage",
+         "live": "Welcome to Infinity, our own private server build!",
+         "test": "Welcome to Infinity, our own private server build!"},
+        {"sInfo": "infinityGameNewsHeading",
+         "live": "Infinity Server News", "test": "Infinity Server News"},
+    ]
 
 
 def get_soundtracks(conn, qs):
@@ -972,10 +1018,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def _send_json(self, obj, code=200):
+    def _send_json(self, obj, code=200, headers=None):
         body = json.dumps(obj).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -1075,6 +1124,161 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _account_payload(self, body):
+        try:
+            return json.loads(body.decode("utf-8")) if body else {}
+        except (ValueError, UnicodeDecodeError):
+            return None
+
+    def _heromart_auth(self, conn):
+        """Resolve the stock client's Authorization: Bearer <charid>:<session-token>."""
+        raw = (self.headers.get("Authorization", "") or "").strip()
+        if not raw.lower().startswith("bearer "):
+            return None
+        identity = raw[7:].strip()
+        cid, sep, token = identity.partition(":")
+        if not sep or not cid.isdigit() or not token:
+            return None
+        account = conn.execute(
+            "SELECT a.username FROM characters c JOIN accounts a ON a.id=c.account_id "
+            "WHERE c.id=?", (int(cid),)).fetchone()
+        char = game.resolve_session(conn, account["username"], token) if account else None
+        return char if char is not None and int(char["id"]) == int(cid) else None
+
+    def _heromart_api(self, method, key, qs):
+        conn = db.connect()
+        try:
+            char = self._heromart_auth(conn)
+            if char is None:
+                return self._send_json({"success": False, "message": "Not authorized.",
+                                        "rewardDesc": ""}, 401)
+            if key == "webapi/heromart/recent" and method == "GET":
+                return self._send_json(game.redeem_history(conn, char["account_id"]))
+            if key == "webapi/heromart/redeemnow" and method == "POST":
+                code = urllib.parse.parse_qs(qs).get("code", [""])[0]
+                return self._send_json(game.redeem_code(conn, char, code))
+            return self._send_json({"success": False, "message": "Not found.",
+                                    "rewardDesc": ""}, 404)
+        finally:
+            conn.close()
+
+    def _account_auth(self, require_csrf=False):
+        session = _verify_account_session(self._cookie(ACCOUNT_COOKIE))
+        if not session:
+            self._send_json({"ok": False, "message": "Please sign in."}, 401)
+            return None
+        if require_csrf and not hmac.compare_digest(
+                str(self.headers.get("X-CSRF-Token", "")), str(session.get("csrf", ""))):
+            self._send_json({"ok": False, "message": "Your session could not be verified."}, 403)
+            return None
+        return session
+
+    def _account_api(self, method, key, qs, body):
+        if key == "account/api/login" and method == "POST":
+            if not ACCOUNT_SECRET:
+                return self._send_json({"ok": False, "message": "Account manager is not configured."}, 503)
+            data = self._account_payload(body)
+            if data is None:
+                return self._send_json({"ok": False, "message": "Invalid request."}, 400)
+            conn = db.connect()
+            try:
+                auth = game.authenticate(conn, (data.get("username") or "").strip(),
+                                         data.get("password") or "")
+                acc = (conn.execute("SELECT id,username FROM accounts WHERE LOWER(username)=LOWER(?)",
+                                    ((data.get("username") or "").strip(),)).fetchone()
+                       if auth else None)
+            finally:
+                conn.close()
+            if not acc:
+                return self._send_json({"ok": False, "message": "Invalid username or password."}, 401)
+            conn = db.connect()
+            try:
+                conn.execute("UPDATE accounts SET last_accessed=? WHERE id=?", (time.time(), acc["id"]))
+                conn.commit()
+            finally:
+                conn.close()
+            token = _sign_account_session(acc["id"], acc["username"])
+            setting = os.environ.get("INFINITY_COOKIE_SECURE")
+            secure_on = (PUBLIC_HOST not in ("127.0.0.1", "localhost") if setting is None
+                         else setting.lower() in ("1", "true", "yes"))
+            secure = "; Secure" if secure_on else ""
+            cookie = (f"{ACCOUNT_COOKIE}={token}; Path=/account; HttpOnly; SameSite=Strict; "
+                      f"Max-Age={ACCOUNT_SESSION_SECS}{secure}")
+            return self._send_json({"ok": True}, headers={"Set-Cookie": cookie})
+        if key == "account/api/logout" and method == "POST":
+            if not self._account_auth(require_csrf=True):
+                return
+            return self._send_json({"ok": True}, headers={"Set-Cookie":
+                f"{ACCOUNT_COOKIE}=; Path=/account; HttpOnly; SameSite=Strict; Max-Age=0"})
+
+        session = self._account_auth(require_csrf=method == "POST")
+        if not session:
+            return
+        conn = db.connect()
+        try:
+            account = account_manager.account_for_session(conn, session["id"])
+            if account is None:
+                return self._send_json({"ok": False, "message": "Account no longer exists."}, 401)
+            if key == "account/api/me" and method == "GET":
+                return self._send_json({"ok": True, "csrf": session["csrf"],
+                    "account": {"username": account["username"], "name": account["name"],
+                                "level": int(account["level"]), "gold": int(account["gold"]),
+                                "coins": int(account["coins"]),
+                                "created": float(account["created"] or 0),
+                                "lastAccessed": float(account["last_accessed"] or 0),
+                                "upgradeDays": int(account["upgrade_days"] or 0),
+                                "upgradeExpires": account["upgrade_expires"]},
+                    "tokens": account_manager.token_inventory(conn, account["char_id"]),
+                    "inventory": account_manager.inventory(conn, account["char_id"]),
+                    "buybacks": account_manager.buyback_history(conn, session["id"]),
+                    "friends": account_manager.friend_manager(conn, account["char_id"]),
+                    "guild": account_manager.guild_manager(conn, account),
+                    "houses": account_manager.house_manager(conn, account["char_id"]),
+                    "tokenBalance": account_manager.token_balance(conn, account["char_id"]),
+                    "redemptions": account_manager.redemption_history(conn, session["id"])})
+            if key == "account/api/catalog" and method == "GET":
+                args = urllib.parse.parse_qs(qs)
+                return self._send_json({"ok": True, "items": account_manager.catalog(
+                    conn, args.get("q", [""])[0], args.get("limit", ["5000"])[0])})
+            data = self._account_payload(body)
+            if data is None:
+                return self._send_json({"ok": False, "message": "Invalid request."}, 400)
+            if key == "account/api/username" and method == "POST":
+                ok, message = account_manager.change_username(
+                    conn, session["id"], data.get("currentPassword"), data.get("username"))
+                return self._send_json({"ok": ok, "message": message}, 200 if ok else 400)
+            if key == "account/api/password" and method == "POST":
+                ok, message = account_manager.change_password(
+                    conn, session["id"], data.get("currentPassword"), data.get("password"))
+                return self._send_json({"ok": ok, "message": message}, 200 if ok else 400)
+            if key == "account/api/redeem" and method == "POST":
+                ok, message, item = account_manager.redeem(conn, session["id"], data.get("itemId"))
+                return self._send_json({"ok": ok, "message": message,
+                    "item": {"id": item.get("ID"), "name": item.get("Name")} if item else None,
+                    "balance": account_manager.token_balance(conn, account["char_id"])},
+                    200 if ok else 400)
+            if key == "account/api/buyback" and method == "POST":
+                ok, message, cost = account_manager.buy_back(
+                    conn, session["id"], data.get("buybackId"), data.get("quantity", 1))
+                return self._send_json({"ok": ok, "message": message, "cost": cost},
+                                       200 if ok else 400)
+            if key == "account/api/friend/remove" and method == "POST":
+                ok, message = account_manager.remove_friend(
+                    conn, account["char_id"], data.get("friendId"))
+                return self._send_json({"ok": ok, "message": message}, 200 if ok else 400)
+            if key == "account/api/guild/motd" and method == "POST":
+                ok, message = account_manager.set_guild_motd(conn, account, data.get("motd"))
+                return self._send_json({"ok": ok, "message": message}, 200 if ok else 400)
+            if key == "account/api/guild/leave" and method == "POST":
+                ok, message = account_manager.leave_guild(conn, account)
+                return self._send_json({"ok": ok, "message": message}, 200 if ok else 400)
+            if key == "account/api/house/equip" and method == "POST":
+                ok, message = account_manager.equip_house(conn, account, data.get("itemId"))
+                return self._send_json({"ok": ok, "message": message}, 200 if ok else 400)
+        finally:
+            conn.close()
+        return self._send_json({"ok": False, "message": "Not found."}, 404)
+
     def do_GET(self):
         self._handle("GET")
 
@@ -1093,6 +1297,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if length > statues.MAX_RENDER_BYTES:
                 return self._send_json({"error": "statue render is too large"}, 413)
             body = self.rfile.read(length) if length else b""
+
+        if method == "GET" and key in ("account", "account/"):
+            return self._send_html(_editor_html("account_manager.html"))
+        if method == "GET" and key in ("account/prize", "account/prize/"):
+            return self._send_html(_editor_html("prize_manager.html"))
+        if key in ("webapi/heromart/recent", "webapi/heromart/redeemnow"):
+            return self._heromart_api(method, key, qs)
+        if key.startswith("account/api/"):
+            return self._account_api(method, key, qs, body)
 
 
         # DynamicStatue's cid metadata resolves here. This is public game art, not
@@ -1146,6 +1359,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
             disposition = (f'attachment; filename="infinity-statue-{int(cid)}.png"'
                            if download and image else None)
             return self._send_bytes(image, 200 if image else 404, "image/png", disposition)
+
+        if method == "GET" and key == "loginscreen/background.png":
+            try:
+                data = LOGINSCREEN_BG_PATH.read_bytes()
+            except FileNotFoundError:
+                data = None
+            return self._send_bytes(data, 200 if data else 404, "image/png")
+
+        if method == "GET" and key == "mod/infinityloader.dll.sha256":
+            try:
+                text = MOD_DLL_HASH_PATH.read_text(encoding="utf-8").strip()
+            except FileNotFoundError:
+                text = ""
+            return self._send_text(text, 200 if text else 404)
+
+        if method == "GET" and key == "mod/infinityloader.dll":
+            try:
+                data = MOD_DLL_PATH.read_bytes()
+            except FileNotFoundError:
+                data = None
+            return self._send_bytes(data, 200 if data else 404, "application/octet-stream")
+
+        if method == "GET" and key == "client/infinityserver-client.zip":
+            try:
+                data = CLIENT_PACK_PATH.read_bytes()
+            except FileNotFoundError:
+                data = None
+            return self._send_bytes(data, 200 if data else 404, "application/zip",
+                                    'attachment; filename="InfinityServer-Client.zip"')
 
         # public auth endpoints (the login flow itself — NOT gated, else redirect loop)
         if key == "editor/login":

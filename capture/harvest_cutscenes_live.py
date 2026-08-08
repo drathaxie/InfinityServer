@@ -33,7 +33,7 @@ import urllib.request
 
 CLIENT_KEY = "N7B5W8W1Y5B1R5VWVZ"
 LOGIN_URL = "https://infinity.aq.com/game/api/login/nowinfinity"
-INFINITY_VERSION = "0.0.244"
+INFINITY_VERSION = "0.0.252"
 DEFAULT_HOST, DEFAULT_PORT = "sockett4.aq.com", 6150
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -112,13 +112,23 @@ async def harvest(host, port, user, password, ids, delay, merge):
             dlg_fut["fut"] = fut
             await _send(writer, "getDialog", [str(did)])
             try:
-                resp = await asyncio.wait_for(fut, timeout=8)
+                # Holes on AE's socket often produce no response at all. Valid scenes answer
+                # immediately; a short timeout keeps comprehensive sparse-ID sweeps practical.
+                resp = await asyncio.wait_for(fut, timeout=1.0)
             except asyncio.TimeoutError:
                 resp = None
             data = ((resp or {}).get("pkt") or resp or {}).get("data") or {}
             jt = data.get("JsonText") if isinstance(data, dict) else None
-            # AE returns "" (or a stub with empty cutsceneName + no frames) for ids with no scene
-            has_scene = bool(jt) and '"frames"' in jt and '"cutsceneName":""' not in jt.replace(" ", "")
+            # AE returns "" or an empty/stub object for holes. Some REAL early cutscenes are
+            # unnamed (71 is one), so name is not a valid presence test; require substantive
+            # frame commands instead.
+            try:
+                parsed = json.loads(jt) if jt else {}
+                frames = parsed.get("frames") if isinstance(parsed, dict) else None
+                command_count = sum(len(f) for f in frames if isinstance(f, list)) if frames else 0
+                has_scene = command_count > 1
+            except Exception:
+                has_scene = False
             if has_scene:
                 scenes[str(did)] = jt
                 out.write(json.dumps({"id": did, "JsonText": jt}, separators=(",", ":")) + "\n")

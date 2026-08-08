@@ -88,6 +88,10 @@
       <HintPath>$(AqwiManaged)\UnityEngine.UI.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.UnityWebRequestModule">
+      <HintPath>$(AqwiManaged)\UnityEngine.UnityWebRequestModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.Physics2DModule">
       <!-- Collider2D cleanup for NPC baker preview/capture objects. -->
       <HintPath>$(AqwiManaged)\UnityEngine.Physics2DModule.dll</HintPath>

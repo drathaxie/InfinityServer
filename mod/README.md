@@ -28,6 +28,8 @@ version conflict. This is fully self-contained here; we don't depend on the exte
   `doorstop_config.ini` (`target_assembly=InfinityLoader.dll`).
 - `deploy.sh` — build + deploy into the game install (removes MelonLoader, copies Doorstop + the
   built loader, writes the `infinity_api.txt` redirect marker).
+- `package_client.ps1` — builds and publishes the verified self-update payload and creates
+  `dist/InfinityServer-Client.zip`, the one-time bootstrap pack for regular players.
 
 ## Setup (after a fresh game install)
 
@@ -48,3 +50,10 @@ Toggle: the redirect is **opt-in** — it only fires while `UserData/infinity_ap
 On launch, the loader writes `UserData/Beyond/infinity_loader.log` (which patches bound). If
 `get_WebApiURL`/`AEC.*` are ever renamed by a game update, each patch is applied independently —
 a failed logger patch never takes down the essential redirect.
+
+## Releasing client features
+
+Run `powershell -ExecutionPolicy Bypass -File mod/package_client.ps1`, then deploy
+`data/mod/InfinityLoader.dll` and its `.sha256` beside the web API's production data directory.
+Updater-capable clients download and stage the verified DLL automatically. Players on builds
+from before the updater was introduced must install the newly generated client ZIP once.

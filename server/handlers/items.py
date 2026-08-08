@@ -1,6 +1,7 @@
 """Inventory item actions: equip (armor/class/house-deed routing), unequip,
 removeItem, and /charedit's changeColor."""
 import combat
+import db
 import forge
 import game
 import world
@@ -17,6 +18,53 @@ async def remove_item(session, writer, cmd, params, msg):
             "SELECT * FROM characters WHERE id=?", (session.char["id"],)).fetchone()
         cid = game.remove_item(session.conn, session.char, params)
         print(f"  [removeItem] {params} -> char_item {cid}")
+    return
+
+
+@register("useSpellstone")
+async def use_spellstone(session, writer, cmd, params, msg):
+    """Equip/unequip an owned ItemType 44 item in the shipped sixth combat slot."""
+    if session.char is None or session.member is None or not params:
+        return
+    try:
+        item_id = int(params[0])
+    except (TypeError, ValueError):
+        return
+    owned = session.conn.execute(
+        "SELECT 1 FROM char_items WHERE char_id=? AND item_id=? AND banked=0 LIMIT 1",
+        (session.char["id"], item_id)).fetchone()
+    item = db.item(session.conn, item_id) if owned else None
+    if not item or int(item.get("ItemType", 0) or 0) != 44:
+        return
+    sk = forge.skill_by_id(session.conn, item.get("MetaString"))
+    if sk is None or not combat.has_graph(sk["data"], sk["forge"]):
+        return
+    state = session.conn.execute(
+        "SELECT equipped FROM char_items WHERE char_id=? AND item_id=? AND banked=0 LIMIT 1",
+        (session.char["id"], item_id)).fetchone()
+    was_equipped = bool(state["equipped"])
+    if was_equipped:
+        session.conn.execute("UPDATE char_items SET equipped=0 WHERE char_id=? AND item_id=?",
+                             (session.char["id"], item_id))
+        await send_obj(writer, {"Cmd": "unequipItem", "uid": session.member.uid,
+                                "ItemID": item_id, "ES": 1})
+    else:
+        session.conn.execute(
+            "UPDATE char_items SET equipped=0 WHERE char_id=? AND item_id IN "
+            "(SELECT item_id FROM items WHERE item_type=44)", (session.char["id"],))
+        session.conn.execute(
+            "UPDATE char_items SET equipped=1 WHERE char_id=? AND item_id=? AND banked=0",
+            (session.char["id"], item_id))
+        eq = {"ID": item_id, "Bundle": item.get("Bundle"),
+              "PrefabName": item.get("PrefabName"), "EquipSpot": 1, "ItemType": 44}
+        await send_obj(writer, {"Cmd": "equipItem", "equippedItem": eq,
+                                "player": f"p:{session.member.uid}", "equipSpot": 1,
+                                "sClass": ""})
+    session.conn.commit()
+    await send_obj(writer, forge.build_seact(session.conn, session.equipped_class,
+                                              session.char["id"]))
+    print(f"  [spellstone] item {item_id} -> {'unequipped' if was_equipped else 'slot 5'} "
+          f"({sk['name']})")
     return
 
 
@@ -63,7 +111,8 @@ async def equip_item(session, writer, cmd, params, msg):
                 # player equips a class that still runs on the Python path
                 combat.set_class_rules(uid, forge.rules_for_class(session.conn, new_class))
                 await send_obj(writer, forge.build_updateclass(session.conn, new_class, uid))
-            await send_obj(writer, forge.build_seact(session.conn, new_class))
+            await send_obj(writer, forge.build_seact(session.conn, new_class,
+                                                      session.char["id"]))
             name = session.conn.execute("SELECT name FROM classes WHERE class_id=?",
                                         (new_class,)).fetchone()
             print(f"  [equip] class armor {item_id} -> {name['name'] if name else new_class} "

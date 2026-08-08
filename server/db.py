@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     username      TEXT UNIQUE NOT NULL,
     password      TEXT,                  -- PBKDF2 hash (pbkdf2_sha256$iter$salt$hash); legacy plaintext upgrades on login
     created       REAL,
+    last_accessed REAL,
     session_token TEXT                    -- random API-issued token the game-server Login must present
 );
 
@@ -102,6 +103,35 @@ CREATE TABLE IF NOT EXISTS char_items (
     FOREIGN KEY (item_id) REFERENCES items(item_id)
 );
 CREATE INDEX IF NOT EXISTS idx_char_items_char ON char_items(char_id);
+
+CREATE TABLE IF NOT EXISTS ac_item_buybacks (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id         INTEGER NOT NULL,
+    char_id            INTEGER NOT NULL,
+    item_id            BIGINT NOT NULL,
+    remaining_quantity INTEGER NOT NULL DEFAULT 1,
+    unit_price         INTEGER NOT NULL,
+    sold_at            REAL NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES accounts(id),
+    FOREIGN KEY (char_id) REFERENCES characters(id),
+    FOREIGN KEY (item_id) REFERENCES items(item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ac_buybacks_account ON ac_item_buybacks(account_id, sold_at);
+
+-- Audit each account-manager exchange. The token is itself an owned char_items
+-- row; redemption consumes one token quantity and grants one selected item.
+CREATE TABLE IF NOT EXISTS token_redemptions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER NOT NULL,
+    char_id       INTEGER NOT NULL,
+    token_item_id BIGINT NOT NULL,
+    item_id       BIGINT NOT NULL,
+    redeemed      REAL NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES accounts(id),
+    FOREIGN KEY (char_id) REFERENCES characters(id),
+    FOREIGN KEY (token_item_id) REFERENCES items(item_id),
+    FOREIGN KEY (item_id) REFERENCES items(item_id)
+);
 
 -- Player sponsorships of a catalog item (the AE Kickstarter "Benevolent Founder" credit:
 -- a founder spends a Sponsorship token to have their name added to an item's credits). The
@@ -656,6 +686,9 @@ class _PgConnection:
     def commit(self):
         self._raw.commit()
 
+    def rollback(self):
+        self._raw.rollback()
+
     def close(self):
         self._raw.close()
 
@@ -1025,6 +1058,8 @@ def _migrate(c):
     # accounts.session_token: API-issued token the game-server Login must present (auth)
     if _table_exists(c, "accounts") and "session_token" not in _columns(c, "accounts"):
         c.execute("ALTER TABLE accounts ADD COLUMN session_token TEXT")
+    if _table_exists(c, "accounts") and "last_accessed" not in _columns(c, "accounts"):
+        c.execute("ALTER TABLE accounts ADD COLUMN last_accessed REAL")
     # guilds.hall_map / hall_data: the guild hall's map + the leader's saved furniture layout
     # (guildhall system — the guild's decoratable shared house). Additive for pre-existing DBs.
     if _table_exists(c, "guilds"):
@@ -1272,4 +1307,3 @@ def kv_set(conn, key, value):
         "ON CONFLICT(k) DO UPDATE SET v=excluded.v",
         (key, str(value)),
     )
-

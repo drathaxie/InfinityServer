@@ -114,7 +114,7 @@ def _graph_particles(data_json):
     return out
 
 
-def build_seact(conn, class_id):
+def build_seact(conn, class_id, char_id=None):
     """The s2c sEAct (ResponseEquipActions) for a class, from the DB — so the HUD
     skill bar shows our authored skill names/icons/descriptions. Mirrors the
     captured shape: skillList{slot:{id,act,nam,icon,desc,autoHRange,autoVRange[,regMana]}}
@@ -136,7 +136,10 @@ def build_seact(conn, class_id):
         for p in _graph_particles(r["data"]):
             if p not in particles:
                 particles.append(p)
-    return {"Cmd": "sEAct", "skillList": skill_list, "particleList": particles}
+    out = {"Cmd": "sEAct", "skillList": skill_list, "particleList": particles}
+    if char_id is not None:
+        apply_spellstone_slot(conn, char_id, out)
+    return out
 
 
 def _armor_item_map(conn):
@@ -233,6 +236,52 @@ def skill_for_slot(conn, class_id, slot):
     return {"skill_id": r["skill_id"], "name": r["name"],
             "data": _parse(r["data"], [{}, {}]),
             "forge": _parse(r["forge_data"], [{}, {}])}
+
+
+def skill_by_id(conn, skill_id):
+    """One standalone authored skill by ID. Spellstones use the same Skill Forge graph
+    library as classes, but are linked from their item's MetaString instead of a class slot."""
+    try:
+        r = conn.execute("SELECT * FROM skills WHERE skill_id=?", (int(skill_id),)).fetchone()
+    except (TypeError, ValueError):
+        return None
+    if r is None:
+        return None
+    return {"skill_id": r["skill_id"], "name": r["name"],
+            "data": _parse(r["data"], [{}, {}]),
+            "forge": _parse(r["forge_data"], [{}, {}])}
+
+
+def equipped_spellstone(conn, char_id):
+    """The character's equipped ItemType 44 stone and its standalone graph, or None."""
+    r = conn.execute(
+        "SELECT i.*, ci.item_id AS equipped_item_id FROM char_items ci "
+        "JOIN items i ON i.item_id=ci.item_id WHERE ci.char_id=? AND ci.banked=0 "
+        "AND ci.equipped=1 AND i.item_type=44 ORDER BY ci.char_item_id LIMIT 1",
+        (int(char_id),)).fetchone()
+    if r is None:
+        return None
+    sk = skill_by_id(conn, r["meta_string"])
+    if sk is None:
+        return None
+    sk["item_id"] = int(r["equipped_item_id"])
+    return sk
+
+
+def apply_spellstone_slot(conn, char_id, seact):
+    """Overlay an equipped Spellstone onto combat slot 5 (the shipped sixth/potion slot)."""
+    sk = equipped_spellstone(conn, char_id)
+    if sk is None:
+        (seact.get("skillList") or {}).pop("5", None)
+        return seact
+    row = conn.execute("SELECT * FROM skills WHERE skill_id=?", (sk["skill_id"],)).fetchone()
+    seact.setdefault("skillList", {})["5"] = {
+        "id": row["skill_id"], "act": row["action"], "nam": row["name"] or "",
+        "icon": row["icon"] or "", "desc": row["description"] or "",
+        "autoHRange": row["auto_h_range"], "autoVRange": row["auto_v_range"],
+        "autoHoldAtRange": bool(row["auto_hold_at_range"]),
+    }
+    return seact
 
 
 def linear_graph(nodes):

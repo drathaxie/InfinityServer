@@ -1247,6 +1247,11 @@ AURA_FX = {
     # stack would always read 0 — the payoff for stacks is the nuke, the form is flat.)
     "Shadow Form":   {"kind": "guard", "secs": 8, "dr": 0.15,
                       "dmg_base": 0.25, "dmg_per_stack": 0.0, "transform": True},
+    # Practice Spellstone: the aura exists only to own the transformation lifetime. It has no
+    # combat bonuses, but uses the same transform-expiry path as Shadow Form to restore avatar.
+    "Practice Frogzard Form": {"kind": "guard", "secs": 30, "dr": 0.0,
+                                "dmg_base": 0.0, "dmg_per_stack": 0.0,
+                                "transform": True},
 }
 _auras = {}                 # (area, ts) -> {name: {ends, next, amt, caster, kind}}
 

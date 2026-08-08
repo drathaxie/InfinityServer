@@ -39,7 +39,7 @@ import urllib.request
 # The fixed client key the real client sends as Login Params[0] (UILoginActions.cs).
 CLIENT_KEY = "N7B5W8W1Y5B1R5VWVZ"
 LOGIN_URL = "https://infinity.aq.com/game/api/login/nowinfinity"
-INFINITY_VERSION = "0.0.244"          # live infinityClientVersion (Data/InfinityVars)
+INFINITY_VERSION = "0.0.252"          # live infinityClientVersion (Data/InfinityVars)
 DEFAULT_HOST, DEFAULT_PORT = "sockett4.aq.com", 6150
 
 HERE = pathlib.Path(__file__).resolve().parent

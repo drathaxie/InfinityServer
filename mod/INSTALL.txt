@@ -1,0 +1,26 @@
+InfinityServer Client Pack
+==========================
+
+ONE-TIME INSTALL
+1. Install AdventureQuest Worlds Infinity / Unity Playtest through Steam.
+2. Fully close the game.
+3. In Steam, use Manage > Browse local files.
+4. Extract this ZIP directly into that game folder and replace older files.
+5. Launch the game through Steam and sign in with your InfinityServer account.
+
+AUTOMATIC UPDATES
+InfinityLoader checks InfinityServer for a cryptographically verified loader build at the
+login screen. When a new build is available, it is staged during that session and swapped
+in after the game closes. The updated loader is active the next time the game starts.
+
+Players whose InfinityLoader.dll predates the updater must install this pack once. After
+that bootstrap installation, normal feature releases require no manual file replacement.
+
+VERIFY
+UserData\Beyond\infinity_loader.log should contain:
+  patched: login screen + self-update
+  patched: Heromart redeem URL redirect
+  WebApiURL -> https://divinityarts.mooo.com/
+
+RETURN TO OFFICIAL AE
+Delete UserData\infinity_api.txt, or set enabled=false in doorstop_config.ini.

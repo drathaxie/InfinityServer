@@ -10,6 +10,7 @@ using HarmonyLib;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.Networking;
 
 // Doorstop invokes Doorstop.Entrypoint.Start() at process startup (before the game's first
 // scene). We apply our Harmony patches there using AE's OWN HarmonyLib.
@@ -71,6 +72,9 @@ public static class InfinityLoaderMod
         _packetLog = Path.Combine(_beyondDir, "packets.jsonl");
         _loaderLog = Path.Combine(_beyondDir, "infinity_loader.log");
 
+        try { System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12; }
+        catch (Exception ex) { SafeLog("[InfinityLoader] TLS1.2 enable failed: " + ex.Message); }
+
         var h = new Harmony("infinity.local.loader");
 
         // 1) ESSENTIAL: route the entire web API (login/nowinfinity, server list, monster data,
@@ -78,6 +82,12 @@ public static class InfinityLoaderMod
         TryPatch(h, "WebApiURL redirect",
             AccessTools.PropertyGetter(typeof(Main), "WebApiURL"),
             postfix: nameof(WebApiPostfix));
+
+        // RedeemCodeModal bypasses Main.WebApiURL and hardcodes account.aq.com. Rewrite only
+        // those two Heromart requests to our selected private-server API before Unity sends them.
+        TryPatch(h, "Heromart redeem URL redirect",
+            AccessTools.Method(typeof(UnityWebRequest), "SendWebRequest", Type.EmptyTypes),
+            prefix: nameof(UnityWebRequest_SendWebRequest_Prefix));
 
         // 1b) Route asset bundles (Game.BaseURL + "assetbundles/...") at our content mirror
         //     (content.py), so map/cutscene/item art loads via us (and is cacheable). Opt-in via
@@ -203,6 +213,12 @@ public static class InfinityLoaderMod
             AccessTools.Method(typeof(UICharacterCanvas), "Tab_ShowReputation"),
             prefix: nameof(UICharacterCanvas_OtherTab_Prefix));
 
+        // Login-screen art/text is server-pushed, and this late lifecycle point is also where
+        // the self-updater can safely use HTTPS on the game's Mono runtime.
+        TryPatch(h, "login screen + self-update",
+            AccessTools.Method(typeof(UILogin), "GetLoginData"),
+            postfix: nameof(UILogin_GetLoginData_Postfix));
+
         // 6) In-client cutscene editor (Phase 1): drives the shipped Dialogger_Manager to render
         //    saved cutscenes under our control. IMGUI panel, F8 to toggle.
         //    IMPORTANT: do NOT spawn it here. Boot() runs at the Doorstop entrypoint, BEFORE Unity's
@@ -216,6 +232,87 @@ public static class InfinityLoaderMod
         SafeLog("[InfinityLoader] booted; WebApiURL -> " + (ReadWebApiUrl() ?? "(live AE, no marker)")
             + "; BaseURL -> " + (ReadContentUrl() ?? "(live AE, no marker)")
             + "; UserData=" + _beyondDir);
+    }
+
+    // ---- self-update --------------------------------------------------------
+    // Compare this DLL's hash with the server-published build. A running assembly cannot replace
+    // itself, so a verified download is staged and a detached batch file swaps it after game exit.
+    private static void CheckForSelfUpdate()
+    {
+        try
+        {
+            string api = ReadWebApiUrl();
+            if (string.IsNullOrEmpty(api)) return;
+            string selfPath = Assembly.GetExecutingAssembly().Location;
+            if (string.IsNullOrEmpty(selfPath) || !File.Exists(selfPath)) return;
+            string localHash = Sha256Hex(File.ReadAllBytes(selfPath));
+            string remoteHash;
+            using (var wc = new InfinityWebClient())
+                remoteHash = (wc.DownloadString(api + "mod/InfinityLoader.dll.sha256") ?? "").Trim();
+            if (!Regex.IsMatch(remoteHash, "^[0-9a-fA-F]{64}$"))
+            {
+                SafeLog("[self-update] server has no valid published build, skipping");
+                return;
+            }
+            if (string.Equals(remoteHash, localHash, StringComparison.OrdinalIgnoreCase))
+            {
+                SafeLog("[self-update] up to date (" + localHash.Substring(0, 8) + ")");
+                return;
+            }
+            byte[] newDll;
+            using (var wc = new InfinityWebClient())
+                newDll = wc.DownloadData(api + "mod/InfinityLoader.dll");
+            if (newDll == null || newDll.Length == 0 ||
+                !string.Equals(Sha256Hex(newDll), remoteHash, StringComparison.OrdinalIgnoreCase))
+            {
+                SafeLog("[self-update] downloaded build hash mismatch, aborting");
+                return;
+            }
+            string updatePath = selfPath + ".update";
+            File.WriteAllBytes(updatePath, newDll);
+            ScheduleSelfUpdate(updatePath, selfPath);
+            SafeLog("[self-update] staged " + localHash.Substring(0, 8) + " -> "
+                + remoteHash.Substring(0, 8) + "; applies after this session closes");
+        }
+        catch (Exception ex) { SafeLog("[self-update] check failed: " + ex.Message); }
+    }
+
+    private static string Sha256Hex(byte[] data)
+    {
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+        {
+            byte[] hash = sha.ComputeHash(data);
+            var sb = new StringBuilder(hash.Length * 2);
+            foreach (byte b in hash) sb.Append(b.ToString("x2"));
+            return sb.ToString();
+        }
+    }
+
+    private static void ScheduleSelfUpdate(string updatePath, string targetPath)
+    {
+        try
+        {
+            string bat = Path.Combine(Path.GetTempPath(),
+                "infinity_loader_update_" + Guid.NewGuid().ToString("N") + ".bat");
+            string script =
+                "@echo off\r\n" +
+                "for /L %%i in (1,1,30) do (\r\n" +
+                "  move /Y \"" + updatePath + "\" \"" + targetPath + "\" >nul 2>&1\r\n" +
+                "  if not exist \"" + updatePath + "\" goto :done\r\n" +
+                "  timeout /T 1 /NOBREAK >nul\r\n" +
+                ")\r\n:done\r\ndel \"%~f0\"\r\n";
+            File.WriteAllText(bat, script);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = "/C \"" + bat + "\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
+            });
+            SafeLog("[self-update] swap scheduled via " + bat);
+        }
+        catch (Exception ex) { SafeLog("[self-update] schedule failed: " + ex.Message); }
     }
 
     private static void TryPatch(Harmony h, string name, MethodBase target,
@@ -403,6 +500,24 @@ public static class InfinityLoaderMod
     public static void WebApiPostfix(ref string __result)
     {
         ApplyWebApiRedirect(ref __result);
+    }
+
+    public static void UnityWebRequest_SendWebRequest_Prefix(UnityWebRequest __instance)
+    {
+        try
+        {
+            if (__instance == null) return;
+            string api = ReadWebApiUrl();
+            if (string.IsNullOrEmpty(api)) return;
+            const string ae = "https://account.aq.com/webapi/Heromart/";
+            string url = __instance.url;
+            if (!string.IsNullOrEmpty(url) && url.StartsWith(ae, StringComparison.OrdinalIgnoreCase))
+            {
+                __instance.url = api + "webapi/Heromart/" + url.Substring(ae.Length);
+                SafeLog("[heromart] redirect -> " + __instance.url);
+            }
+        }
+        catch (Exception ex) { SafeLog("[heromart] redirect failed: " + ex.Message); }
     }
 
     // A successful private-server response starts the real assembled-avatar capture.
@@ -889,6 +1004,95 @@ public static class InfinityLoaderMod
                                  new Vector2(0.5f, 0.5f), ppu, 0, SpriteMeshType.FullRect, border);
         }
         catch (Exception ex) { SafeLog("[portrait] sprite load fail " + Path.GetFileName(path) + ": " + ex.Message); return null; }
+    }
+
+    // ---- login screen + deferred self-update -------------------------------
+    private static Sprite _loginBgSprite;
+    private static bool _loginBgFetchTried;
+    private static bool _selfUpdateTried;
+
+    public static void UILogin_GetLoginData_Postfix(UILogin __instance, WebCom wcom)
+    {
+        if (!_selfUpdateTried) { _selfUpdateTried = true; CheckForSelfUpdate(); }
+        if (__instance == null) return;
+        try
+        {
+            Transform root = __instance.transform;
+            ApplyLoginBackground(root);
+            ApplyGameNewsHeading(root, wcom);
+        }
+        catch (Exception ex) { SafeLog("[login-screen] override failed: " + ex.Message); }
+    }
+
+    private static void ApplyGameNewsHeading(Transform root, WebCom wcom)
+    {
+        Transform tf = root.Find("_/Login2023/Main/Header/NewReleaseText");
+        TMP_Text heading = tf != null ? tf.GetComponent<TMP_Text>() : null;
+        if (heading == null) return;
+        string text = null;
+        if (wcom != null && !string.IsNullOrEmpty(wcom.receivedText))
+        {
+            try
+            {
+                var vars = Newtonsoft.Json.JsonConvert.DeserializeObject<List<GameVar>>(wcom.receivedText);
+                if (vars != null)
+                    foreach (var item in vars)
+                        if (item != null && item.sInfo == "infinityGameNewsHeading")
+                        {
+                            text = Game.IsLiveClient() ? item.live : item.test;
+                            break;
+                        }
+            }
+            catch (Exception ex) { SafeLog("[login-screen] heading parse failed: " + ex.Message); }
+        }
+        if (string.IsNullOrEmpty(text))
+        {
+            string local = Path.Combine(_beyondDir, "loginscreen", "game_news_heading.txt");
+            if (File.Exists(local)) text = File.ReadAllText(local).Trim();
+        }
+        if (!string.IsNullOrEmpty(text))
+        {
+            heading.text = text;
+            SafeLog("[login-screen] Game News heading set: " + text);
+        }
+    }
+
+    private static void ApplyLoginBackground(Transform root)
+    {
+        Transform tf = root.Find("_/BG");
+        Image bg = tf != null ? tf.GetComponent<Image>() : null;
+        if (bg == null) return;
+        if (!_loginBgFetchTried)
+        {
+            _loginBgFetchTried = true;
+            string api = ReadWebApiUrl();
+            if (!string.IsNullOrEmpty(api))
+            {
+                try
+                {
+                    using (var wc = new InfinityWebClient())
+                    {
+                        byte[] png = wc.DownloadData(api + "loginscreen/background.png");
+                        if (png != null && png.Length > 0)
+                        {
+                            var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                            if (tex.LoadImage(png, false))
+                                _loginBgSprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height),
+                                    new Vector2(0.5f, 0.5f), 100f);
+                            else UnityEngine.Object.Destroy(tex);
+                        }
+                    }
+                }
+                catch (Exception ex) { SafeLog("[login-screen] background fetch failed: " + ex.Message); }
+            }
+            if (_loginBgSprite == null)
+                _loginBgSprite = LoadSpritePng(Path.Combine(_beyondDir, "loginscreen", "background.png"));
+        }
+        if (_loginBgSprite != null)
+        {
+            bg.sprite = _loginBgSprite;
+            SafeLog("[login-screen] custom background applied");
+        }
     }
 
     // ---- packet logger -------------------------------------------------------

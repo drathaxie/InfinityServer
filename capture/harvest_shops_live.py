@@ -32,17 +32,19 @@ import json
 import os
 import pathlib
 import sys
+import time
 import urllib.parse
 import urllib.request
 
 CLIENT_KEY = "N7B5W8W1Y5B1R5VWVZ"
 LOGIN_URL = "https://infinity.aq.com/game/api/login/nowinfinity"
-INFINITY_VERSION = "0.0.244"
+INFINITY_VERSION = "0.0.252"
 DEFAULT_HOST, DEFAULT_PORT = "sockett4.aq.com", 6150
 
 HERE = pathlib.Path(__file__).resolve().parent
 ITEMS_OUT = HERE / "harvest" / "shop_items_live.jsonl"
 SHOPS_OUT = HERE / "harvest" / "shops_seen.json"
+SHOP_DEFS_OUT = HERE / "harvest" / "shops_live.json"
 ITEMS_OUT.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -79,13 +81,13 @@ async def _send(w, cmd, params=None):
     await w.drain()
 
 
-async def sweep(host, port, user, password, start, end, delay):
+async def sweep(host, port, user, password, start, end, delay, window, settle, explicit_ids=None):
     token, unm = web_login(user, password)
     reader, writer = await asyncio.open_connection(host, port)
     print(f"[socket] connected {host}:{port}")
 
     got_login = asyncio.Event()
-    shop_fut = {"fut": None}
+    responses = asyncio.Queue()
 
     async def read_loop():
         buf = bytearray()
@@ -108,9 +110,7 @@ async def sweep(host, port, user, password, start, end, delay):
                 if cmd in ("loginResponse", "initPlayer"):
                     got_login.set()
                 elif cmd.lower() == "loadshop":
-                    fut = shop_fut.get("fut")
-                    if fut and not fut.done():
-                        fut.set_result(o)
+                    responses.put_nowait(o)
 
     rt = asyncio.create_task(read_loop())
     await _send(writer, "Login", [CLIENT_KEY, unm, token])
@@ -123,37 +123,54 @@ async def sweep(host, port, user, password, start, end, delay):
 
     seen = seen_items()
     shops = json.loads(SHOPS_OUT.read_text()) if SHOPS_OUT.exists() else {}
-    print(f"[sweep] shops {start}..{end} delay {delay}s ({len(seen)} items already saved)")
+    shop_defs = json.loads(SHOP_DEFS_OUT.read_text()) if SHOP_DEFS_OUT.exists() else {}
+    probe_ids = explicit_ids or list(range(start, end + 1))
+    print(f"[sweep] shops {probe_ids[0]}..{probe_ids[-1]} ({len(probe_ids)} ids) "
+          f"delay {delay}s window {window} settle {settle}s "
+          f"({len(seen)} items already saved)")
 
     n_shops = n_new = 0
     with ITEMS_OUT.open("a", encoding="utf-8") as out:
-        for sid in range(start, end + 1):
-            fut = asyncio.get_event_loop().create_future()
-            shop_fut["fut"] = fut
-            await _send(writer, "loadShop", [str(sid)])
-            try:
-                resp = await asyncio.wait_for(fut, timeout=8)
-            except asyncio.TimeoutError:
-                resp = None
-            items = ((resp or {}).get("shop") or {}).get("items") or []
-            if items:
-                n_shops += 1
+        for offset in range(0, len(probe_ids), window):
+            batch_ids = probe_ids[offset:offset + window]
+            first, last = batch_ids[0], batch_ids[-1]
+            for sid in batch_ids:
+                await _send(writer, "loadShop", [str(sid)])
+                await asyncio.sleep(delay)
+            deadline = time.monotonic() + settle
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    resp = await asyncio.wait_for(responses.get(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    break
+                shop = (resp or {}).get("shop") or {}
+                sid = int(shop.get("shopID") or shop.get("ShopID") or 0)
+                items = shop.get("items") or []
+                if not sid:
+                    continue
                 shops[str(sid)] = len(items)
-                for it in items:
-                    iid = it.get("ID")
-                    if iid is None or int(iid) in seen:
-                        continue
-                    seen.add(int(iid))
-                    # strip the per-shop instance fields; keep the catalog def
-                    for k in ("ShopItemID", "QuantityRemain"):
-                        it.pop(k, None)
-                    out.write(json.dumps(it, separators=(",", ":")) + "\n")
-                    n_new += 1
-                out.flush()
-                print(f"  shop {sid:>5}: {len(items):>3} items ({n_new} new items total)")
-            await asyncio.sleep(delay)
+                shop_defs[str(sid)] = resp
+                if items:
+                    n_shops += 1
+                    for it in items:
+                        iid = it.get("ID")
+                        if iid is None or int(iid) in seen:
+                            continue
+                        seen.add(int(iid))
+                        for k in ("ShopItemID", "QuantityRemain"):
+                            it.pop(k, None)
+                        out.write(json.dumps(it, separators=(",", ":")) + "\n")
+                        n_new += 1
+                    out.flush()
+                    print(f"  shop {sid:>5}: {len(items):>3} items ({n_new} new items total)")
+            if first == start or last == end or last % 250 == 0:
+                print(f"  probed through shop {last} ({n_shops} responses with items)")
 
     SHOPS_OUT.write_text(json.dumps(shops, indent=1), encoding="utf-8")
+    SHOP_DEFS_OUT.write_text(json.dumps(shop_defs, indent=1), encoding="utf-8")
     writer.close()
     rt.cancel()
     print(f"[sweep] done: {n_shops} non-empty shops, {n_new} new items -> {ITEMS_OUT}")
@@ -164,13 +181,20 @@ def main():
     ap.add_argument("--start", type=int, default=1)
     ap.add_argument("--end", type=int, default=2000)
     ap.add_argument("--delay", type=float, default=0.3)
+    ap.add_argument("--window", type=int, default=25,
+                    help="requests issued before waiting for replies")
+    ap.add_argument("--settle", type=float, default=1.0,
+                    help="seconds to collect replies after each request window")
+    ap.add_argument("--ids", help="comma-separated shop IDs instead of a contiguous range")
     ap.add_argument("--host", default=DEFAULT_HOST)
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = ap.parse_args()
     user, password = os.environ.get("AE_USER"), os.environ.get("AE_PASS")
     if not user or not password:
         sys.exit("set AE_USER and AE_PASS env vars before running.")
-    asyncio.run(sweep(args.host, args.port, user, password, args.start, args.end, args.delay))
+    explicit = [int(x) for x in args.ids.split(",") if x.strip()] if args.ids else None
+    asyncio.run(sweep(args.host, args.port, user, password, args.start, args.end, args.delay,
+                      args.window, args.settle, explicit))
 
 
 if __name__ == "__main__":

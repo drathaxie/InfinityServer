@@ -1,0 +1,13 @@
+{
+  "DSHARK": {
+    "description": "Dshark's Custom Set + 10,000 AdventureCoins",
+    "maxUses": 1000,
+    "active": true,
+    "rewards": [
+      {"type": "item", "value": 978712, "quantity": 1},
+      {"type": "item", "value": 978718, "quantity": 1},
+      {"type": "item", "value": 978719, "quantity": 1},
+      {"type": "coins", "value": 10000, "quantity": 1}
+    ]
+  }
+}
