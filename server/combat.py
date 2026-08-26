@@ -2132,6 +2132,26 @@ def drop_aggro_for(uid):
 _auto = {}                  # uid -> {"area","target","data","forge","cd","skill_id"}
 
 
+def ult_armed(uid):
+    """True when a data-driven class is holding an armed ultimate (the Infinity Hero at
+    25 Heroic, whose next Heroic Strike becomes the sky-blade).
+
+    The SERVER-SUSTAINED auto loop must never fire an armed ultimate. The client only
+    spawns an animation-cued Particle node while that animation is actually playing on
+    the caster (the rule seed.py's Paladin v4 note documents), and a cast the server
+    starts on its own has no client-side cast animation running -- so the sky-blade's
+    damage lands (its PlayerHitStream is spatial, not animation-gated) while its whole
+    visual never spawns. That is exactly the "stacks consumed, no animation" report.
+    Deferring the ultimate to the player's own gar press is also what AE does: AE has
+    no server-sustained auto at all, so there every ult is client-initiated."""
+    try:
+        from combat_engine.state import _states
+    except Exception:                                   # pragma: no cover
+        return False
+    st = _states.get(f"p:{uid}")
+    return bool(st is not None and st.vars.get("armed"))
+
+
 def auto_engage(uid, area, target, data, forge, cd_ms, skill_id=None):
     """Remember an auto with every input needed to repeat the same execution path."""
     if valid_combat_target(area, target):

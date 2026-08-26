@@ -398,6 +398,12 @@ async def ai_loop():
                 if not combat.monster_alive(area, target):   # dead/respawning -> stop
                     combat.auto_disengage(uid)
                     continue
+                if combat.ult_armed(uid):
+                    # An armed ultimate belongs to the PLAYER's own attack press: firing it
+                    # from here spends the pool but spawns no visual, because an
+                    # animation-cued Particle needs the caster's cast animation to actually
+                    # be playing client-side. Hold the sustained auto until they press.
+                    continue
                 if not combat.off_cooldown(uid, 0, cd):
                     continue
                 resource_before = combat.resource_total(uid)
