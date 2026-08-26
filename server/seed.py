@@ -1872,8 +1872,15 @@ _IH_ULT = [
     {"Name": "Cooldown", "Slot": 0, "CD": 1979, "Animation": ""},
 ] + _ih_restrict("Attack1_Auto", 0.4, slots="1,2,3,4,5") + [
     _ih_sfx("Attack1_Auto", "sfx_hero_ultimate_cast"),
+    # AE's own capture gives this particle only 4000ms, but classInfinityHero_S1_P4 is
+    # the composite "InfinitySword-Animation" prefab (giant sword, three lightning
+    # strikes, gold pillars, runes, smoke, explosion) -- the Paladin's use of this same
+    # asset (seed.py's PALADIN_GRAPH_VERSION v6 note) needed the full 6000ms for that
+    # sequence to finish, and 4000ms visibly truncates it into a "flash" with the sword-
+    # drop payoff cut short. Deliberate deviation from the capture; see KNOWN_VARIANCES
+    # in test_infinity_hero.py.
     _ih_particle("Attack1_Auto", "classInfinityHero_S1_P4", "0", -0.5, 10.0,
-                 speed=1.0, life=4000.0),
+                 speed=1.0, life=6000.0),
     {"Name": "PlayerHitStream", "X": 0.0, "Y": 0.0, "Width": 20.0, "Height": 10.0,
      "Duration": 2500, "Interval": 200, "Origin": "Self", "Slot": 0},
     {"Name": "PlayerAnimation", "Animation": "Attack1_Auto",

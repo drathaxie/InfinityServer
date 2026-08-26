@@ -279,6 +279,14 @@ KNOWN_VARIANCES = [
     # reading under which the buff means anything — we follow those.
     ("Concealed Blade applied to nobody",
      lambda d: '"AuraName": "Concealed Blade"' in d and '"Targets": []' in d),
+    # AE's own capture gives the ult's classInfinityHero_S1_P4 particle a 4000ms
+    # Lifetime, but that's the composite "InfinitySword-Animation" prefab (giant
+    # sword, three lightning strikes, gold pillars, runes, smoke, explosion) — the
+    # Paladin's use of this same asset needed a full 6000ms for the sequence to
+    # finish (see PALADIN_GRAPH_VERSION v6 in seed.py); 4000ms visibly truncates it
+    # into a flash. Deliberate deviation, not a replication bug.
+    ("sky-blade particle Lifetime extended past AE's own truncated capture",
+     lambda d: '"Particle": "classInfinityHero_S1_P4"' in d and '"Lifetime": 4000.0' in d),
 ]
 
 
