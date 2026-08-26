@@ -1528,7 +1528,11 @@ def seed_void(conn):
 # timings, aura names/flags — is capture-verbatim and replay-tested by test_infinity_hero.py.
 INFINITY_HERO_CLASS_ID = 2022
 INFINITY_HERO_ARMOR_ITEM = 200022
-INFINITY_HERO_GRAPH_VERSION = 2   # v2: sky-blade particle Lifetime 4000 -> 6000ms (full reveal)
+# v2: sky-blade particle Lifetime 4000 -> 6000ms (full reveal)
+# v3: sky-blade particle rebuilt to match the Paladin's working S1_P4 config --
+#     PlayerAnimation before Particle, ground level (Y 10 -> 0), target-anchored,
+#     no AnimSpeed/Follow overrides. See the comment in _IH_ULT.
+INFINITY_HERO_GRAPH_VERSION = 3
 CLASS_SHOP_ID = 2468                    # Gravelyn's Infinity — where classes are bought
 
 _IH_RESOURCE = {"model": "heroic", "ResourceColor": 16773977, "MaxRP": 50,
@@ -1872,19 +1876,29 @@ _IH_ULT = [
     {"Name": "Cooldown", "Slot": 0, "CD": 1979, "Animation": ""},
 ] + _ih_restrict("Attack1_Auto", 0.4, slots="1,2,3,4,5") + [
     _ih_sfx("Attack1_Auto", "sfx_hero_ultimate_cast"),
-    # AE's own capture gives this particle only 4000ms, but classInfinityHero_S1_P4 is
-    # the composite "InfinitySword-Animation" prefab (giant sword, three lightning
-    # strikes, gold pillars, runes, smoke, explosion) -- the Paladin's use of this same
-    # asset (seed.py's PALADIN_GRAPH_VERSION v6 note) needed the full 6000ms for that
-    # sequence to finish, and 4000ms visibly truncates it into a "flash" with the sword-
-    # drop payoff cut short. Deliberate deviation from the capture; see KNOWN_VARIANCES
-    # in test_infinity_hero.py.
-    _ih_particle("Attack1_Auto", "classInfinityHero_S1_P4", "0", -0.5, 10.0,
-                 speed=1.0, life=6000.0),
-    {"Name": "PlayerHitStream", "X": 0.0, "Y": 0.0, "Width": 20.0, "Height": 10.0,
-     "Duration": 2500, "Interval": 200, "Origin": "Self", "Slot": 0},
+    # --- the sky-blade visual: built to MATCH THE PALADIN'S WORKING CONFIG ------------
+    # Replaying AE's captured node verbatim renders as a ~1-frame flash in our client,
+    # confirmed repeatedly on-device. The Paladin's Meteor finisher drives this SAME
+    # classInfinityHero_S1_P4 prefab and renders correctly, so its node shape is the
+    # known-good reference (seed.py's PALADIN_GRAPH_VERSION v6 note). Four differences
+    # mattered, all corrected here:
+    #   * PlayerAnimation is emitted BEFORE the Particle (the client only spawns an
+    #     animation-cued particle while that cue is actually playing on the caster);
+    #   * Y 10.0 -> 0: AE spawns it ten units above the caster; the Paladin spawns it at
+    #     ground level, where the sword's drop-and-impact sequence is actually framed;
+    #   * anchored to the TARGET rather than the caster, exactly as the Paladin does;
+    #   * no AnimSpeed / Follow overrides -- the Paladin sets neither, and "No Follow"
+    #     detaches the effect from the entity it was spawned against.
+    # A 6000ms Lifetime (vs AE's 4000) lets the full composite sequence finish, which is
+    # the same value the Paladin needed. Deliberate deviation from the capture; see
+    # KNOWN_VARIANCES in test_infinity_hero.py.
     {"Name": "PlayerAnimation", "Animation": "Attack1_Auto",
      "Priority": "Interrupt All", "Speed": 1.0, "Targets": 1},
+    {"Name": "Particle", "Particle": "classInfinityHero_S1_P4",
+     "Animation": "Attack1_Auto", "Time": 0, "X": 0, "Y": 0,
+     "Lifetime": 6000, "Targets": "@target"},
+    {"Name": "PlayerHitStream", "X": 0.0, "Y": 0.0, "Width": 20.0, "Height": 10.0,
+     "Duration": 2500, "Interval": 200, "Origin": "Self", "Slot": 0},
     {"Name": "SetSkillIndex", "Slot": 0, "Index": 0, "Icon": _ICO + "AA1"},
     {"Name": "UpdateAnimation", "Tag": "combatIdle", "Value": "2H_Fight"},
 ]

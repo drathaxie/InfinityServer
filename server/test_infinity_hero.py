@@ -279,14 +279,15 @@ KNOWN_VARIANCES = [
     # reading under which the buff means anything — we follow those.
     ("Concealed Blade applied to nobody",
      lambda d: '"AuraName": "Concealed Blade"' in d and '"Targets": []' in d),
-    # AE's own capture gives the ult's classInfinityHero_S1_P4 particle a 4000ms
-    # Lifetime, but that's the composite "InfinitySword-Animation" prefab (giant
-    # sword, three lightning strikes, gold pillars, runes, smoke, explosion) — the
-    # Paladin's use of this same asset needed a full 6000ms for the sequence to
-    # finish (see PALADIN_GRAPH_VERSION v6 in seed.py); 4000ms visibly truncates it
-    # into a flash. Deliberate deviation, not a replication bug.
-    ("sky-blade particle Lifetime extended past AE's own truncated capture",
-     lambda d: '"Particle": "classInfinityHero_S1_P4"' in d and '"Lifetime": 4000.0' in d),
+    # The ult's classInfinityHero_S1_P4 node is DELIBERATELY not replayed verbatim.
+    # AE's captured shape (Lifetime 4000, Y 10.0, caster-anchored, AnimSpeed+No Follow,
+    # emitted before its PlayerAnimation) renders as a ~1-frame flash in our client,
+    # confirmed on-device across several attempts. The Paladin's Meteor finisher drives
+    # this SAME prefab and renders correctly, so _IH_ULT now mirrors that known-good
+    # node shape instead. See the comment block in seed.py's _IH_ULT for the four
+    # specific differences. Deliberate deviation, not a replication bug.
+    ("sky-blade particle rebuilt to the Paladin's working S1_P4 config",
+     lambda d: '"Particle": "classInfinityHero_S1_P4"' in d),
 ]
 
 
