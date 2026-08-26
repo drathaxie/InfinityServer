@@ -147,6 +147,12 @@ def _cast(area, uid, slot, target, data, forge, skill_id, rules_config,
     for n in out:
         if n.get("Name") == "Aura" and n.get("AuraName"):
             combat.apply_aura(area, n["AuraName"], n.get("Targets") or [], caster)
+        # A self-centered PlayerHitStream (the Infinity Hero's Heroic Empowerment
+        # sky-blade) only declares the zone to the client; the actual damage ticks
+        # over its Duration via combat.hitstream_ticks(), same as a DoT.
+        if n.get("Name") == "PlayerHitStream" and n.get("Origin") == "Self" \
+                and n.get("Duration"):
+            combat.start_hitstream(area, uid, n["Duration"] / 1000.0)
     attack = build_attack(caster, slot, out)
     return (attack, list(ctx.vars.get("_killed") or []), ctx.vars.get("dmg_total", 0),
             list(ctx.extra_packets), list(ctx.delayed_packets))

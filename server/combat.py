@@ -1686,6 +1686,66 @@ def drop_auras_for(ts):
             _stun.pop(key, None)
 
 
+# --- player-cast AoE damage-over-time zones (the Infinity Hero's Heroic Empowerment
+# sky-blade, and anything future authored the same way) --------------------------------
+# A PlayerHitStream node (Origin: "Self") only DECLARES the zone to the client; AE's own
+# capture shows the actual damage lands as separate InstantDamage packets over the
+# window, exactly like a DoT tick (docs/combat-engine/fixtures/golden_attack_fixtures.json
+# packet #347's ult is followed by 5 InstantDamage packets across its 2.5s duration).
+# The class guide (artix.com/posts/infinity-hero-class-guide) confirms the mechanic in
+# words: "massive magical damage to nearby targets over 2.5 seconds" -- a radius, not a
+# facing-relative cone/box, so there's no client-reported hit geometry to wait on; ticks
+# land on whatever is aggro'd on the caster in this area, same as a monster's tile skill
+# lands on whichever players report being caught in it.
+_hitstreams = []                 # [{"area","uid","caster","end","interval","next","mult","magical","cap"}]
+HITSTREAM_TICK_INTERVAL = 0.5    # seconds: capture shows 5 ticks over the ult's 2.5s window
+HITSTREAM_MAX_TARGETS = 5
+
+
+def start_hitstream(area, uid, duration_s, multiplier=1.5, magical=True,
+                    interval_s=HITSTREAM_TICK_INTERVAL, max_targets=HITSTREAM_MAX_TARGETS):
+    """Register one AoE damage-over-time window for a player's cast."""
+    now = time.time()
+    _hitstreams.append({"area": area, "uid": uid, "caster": f"p:{uid}",
+                        "end": now + float(duration_s), "interval": float(interval_s),
+                        "next": now + float(interval_s), "mult": float(multiplier),
+                        "magical": bool(magical), "cap": int(max_targets)})
+
+
+def hitstream_ticks():
+    """Due sky-blade-style ticks across all areas -> [(area, attack_packet, killed_list)],
+    the same shape aura_ticks() returns so the AI loop handles both identically."""
+    now = time.time()
+    out = []
+    for st in list(_hitstreams):
+        if now >= st["end"]:
+            _hitstreams.remove(st)
+            continue
+        if now < st["next"]:
+            continue
+        st["next"] += st["interval"]
+        targets = [mon_ts for (area, mon_ts), info in _aggro.items()
+                  if area == st["area"] and info.get("uid") == st["uid"]][:st["cap"]]
+        if not targets:
+            continue
+        dtypes, damages, hps, killed = [], [], [], []
+        for ts in targets:
+            d, dtype = _hit(st["caster"], st["mult"], st["magical"])
+            key = (st["area"], ts)
+            prev = _mon.get(key, DEFAULT_HP)
+            hp = max(0, prev - d)
+            _mon[key] = hp
+            dtypes.append(dtype); damages.append(d); hps.append(hp)
+            if prev > 0 and hp <= 0:
+                killed.append(ts)
+        node = {"Name": "InstantDamage", "DamageTypes": dtypes, "Damages": damages,
+                "Targets": targets, "TargetHPs": hps}
+        out.append((st["area"], {"Cmd": "Attack", "Caster": st["caster"], "Slot": -1,
+                                 "StatusCode": 1, "Wait": False, "Error": "", "Nodes": [node]},
+                   killed))
+    return out
+
+
 def monster_alive(area, mon_ts):
     return _mon.get((area, mon_ts), DEFAULT_HP) > 0
 
