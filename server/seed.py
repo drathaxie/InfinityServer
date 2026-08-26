@@ -1528,7 +1528,7 @@ def seed_void(conn):
 # timings, aura names/flags — is capture-verbatim and replay-tested by test_infinity_hero.py.
 INFINITY_HERO_CLASS_ID = 2022
 INFINITY_HERO_ARMOR_ITEM = 200022
-INFINITY_HERO_GRAPH_VERSION = 1
+INFINITY_HERO_GRAPH_VERSION = 2   # v2: sky-blade particle Lifetime 4000 -> 6000ms (full reveal)
 CLASS_SHOP_ID = 2468                    # Gravelyn's Infinity — where classes are bought
 
 _IH_RESOURCE = {"model": "heroic", "ResourceColor": 16773977, "MaxRP": 50,
