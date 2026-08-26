@@ -79,6 +79,34 @@ async def mon_tile_hit(session, writer, cmd, params, msg):
         combat.cancel_player_actions(session.member.uid)
         world.broadcast(session.area, combat.player_death_packet(session.member.uid, mon))
         print(f"  [death] {session.char['name']} slain by {mon} (tile, 10s respawn)")
+
+
+@register("pmah")
+async def player_hitstream_hit(session, writer, cmd, params, msg):
+    # RequestPlayerMonHit: the mirror image of gmah -- a client reports which monsters ITS
+    # OWN PlayerHitStream caught (the Infinity Hero's Heroic Empowerment sky-blade, Meteor's
+    # burning field, ...). Params = ["PlayerHitStream:<slot>", *monTargets]. The client keeps
+    # re-checking and re-reporting for the whole window (hundreds of reports per cast, live-
+    # verified), so combat.player_hitstream_hit throttles per (caster, slot, monster) --
+    # this handler just answers whatever survives that throttle.
+    if session.char is None or session.member is None or not params:
+        return
+    header = str(params[0])
+    if ":" not in header:
+        return
+    _, _, slot_s = header.partition(":")
+    try:
+        slot = int(slot_s)
+    except ValueError:
+        return
+    targets = [str(p) for p in params[1:]]
+    attack, killed = combat.player_hitstream_hit(session.member.uid, slot, targets)
+    if attack is None:                  # no active window for this slot (stale report)
+        return
+    await send_obj(writer, attack)
+    world.broadcast(session.area, attack, exclude=session.member.uid)
+    if killed:
+        await _handle_kills(session, writer, killed)
     return
 
 

@@ -314,6 +314,12 @@ async def ai_loop():
             for area, status, payload in combat.due_delayed(now):
                 try:
                     from combat_engine import live as _engine_live
+                    caster, slot, nodes = payload
+                    if caster.startswith("p:"):
+                        for n in nodes:
+                            if n.get("Name") == "PlayerHitStream" and n.get("Duration"):
+                                combat.start_hitstream(area, int(caster[2:]), slot,
+                                                       n["Duration"] / 1000.0)
                     world.broadcast(area, _engine_live.delayed_attack(payload, status))
                 except Exception as exc:                # never let a late packet kill the loop
                     print(f"  [rules] delayed packet dropped: {exc!r}")
@@ -409,11 +415,10 @@ async def ai_loop():
                     await _handle_kills(sess, sess.writer, killed)
                     combat.auto_disengage(uid)               # target dead -> stop auto
 
-            # DoT/HoT aura ticks (Bleeding/Scorched damage, Radiance heal) — P2-4, plus
-            # player-cast AoE hit-streams (the Infinity Hero's Heroic Empowerment sky-blade)
-            for area, attack, killed in combat.aura_ticks() + combat.hitstream_ticks():
+            # DoT/HoT aura ticks (Bleeding/Scorched damage, Radiance heal) — P2-4
+            for area, attack, killed in combat.aura_ticks():
                 world.broadcast(area, attack)
-                if killed:                                   # a DoT/hit-stream finished the monster off
+                if killed:                                   # a DoT finished the monster off
                     caster = attack.get("Caster") or ""
                     cuid = int(caster[2:]) if caster.startswith("p:") and caster[2:].isdigit() else None
                     sess = _players.get(cuid)

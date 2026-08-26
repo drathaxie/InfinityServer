@@ -1686,64 +1686,66 @@ def drop_auras_for(ts):
             _stun.pop(key, None)
 
 
-# --- player-cast AoE damage-over-time zones (the Infinity Hero's Heroic Empowerment
-# sky-blade, and anything future authored the same way) --------------------------------
-# A PlayerHitStream node (Origin: "Self") only DECLARES the zone to the client; AE's own
-# capture shows the actual damage lands as separate InstantDamage packets over the
-# window, exactly like a DoT tick (docs/combat-engine/fixtures/golden_attack_fixtures.json
-# packet #347's ult is followed by 5 InstantDamage packets across its 2.5s duration).
-# The class guide (artix.com/posts/infinity-hero-class-guide) confirms the mechanic in
-# words: "massive magical damage to nearby targets over 2.5 seconds" -- a radius, not a
-# facing-relative cone/box, so there's no client-reported hit geometry to wait on; ticks
-# land on whatever is aggro'd on the caster in this area, same as a monster's tile skill
-# lands on whichever players report being caught in it.
-_hitstreams = []                 # [{"area","uid","caster","end","interval","next","mult","magical","cap"}]
-HITSTREAM_TICK_INTERVAL = 0.5    # seconds: capture shows 5 ticks over the ult's 2.5s window
-HITSTREAM_MAX_TARGETS = 5
+# --- player-cast AoE damage zones (the Infinity Hero's Heroic Empowerment sky-blade,
+# Meteor's Warrior-aspect burning field, and anything future authored the same way) ----
+# A PlayerHitStream node only DECLARES the zone to the client -- exactly like a monster's
+# tile skill, the ACTUAL hit detection is CLIENT-AUTHORITATIVE: the client reports who it
+# caught via a `pmah` c2s command (RequestPlayerMonHit), Params = ["PlayerHitStream:<slot>",
+# *monster_targets], repeatedly over the zone's lifetime (confirmed live: one Infinity Hero
+# ult produced 455 separate pmah reports; one Meteor burning field produced ~2957 across a
+# session -- this is a client-side per-frame/per-tick recheck, not a handful of authored
+# ticks, so results MUST be throttled per (caster, slot, monster) the same way monster tile
+# hits are throttled for the reverse direction). We register the active window (so a stale
+# or spoofed report after it expires is ignored) when the PlayerHitStream node renders, and
+# apply damage only in response to the client's own report -- no server-side blind ticking.
+_hitstreams = {}                 # (uid, slot) -> {"area","end","mult","magical"}
+_hitstream_last = {}             # (area, uid, slot, mon_ts) -> last applied ts (throttle)
+HITSTREAM_HIT_THROTTLE = 0.5     # seconds: one damage application per target per window
 
 
-def start_hitstream(area, uid, duration_s, multiplier=1.5, magical=True,
-                    interval_s=HITSTREAM_TICK_INTERVAL, max_targets=HITSTREAM_MAX_TARGETS):
-    """Register one AoE damage-over-time window for a player's cast."""
+def start_hitstream(area, uid, slot, duration_s, multiplier=1.5, magical=True):
+    """Register one active AoE zone so a later `pmah` report from this caster/slot is
+    honored (and a stale one after it ends is not)."""
+    _hitstreams[(uid, slot)] = {"area": area, "end": time.time() + float(duration_s),
+                                "mult": float(multiplier), "magical": bool(magical)}
+
+
+def player_hitstream_hit(uid, slot, mon_targets):
+    """Apply a client-reported PlayerHitStream hit (pmah) -> (attack_packet, killed_list),
+    or (None, []) if there's no active window for this caster/slot (expired/stale report)
+    or every listed target is still inside its throttle window."""
+    st = _hitstreams.get((uid, slot))
+    if st is None or time.time() >= st["end"]:
+        return None, []
+    area = st["area"]
     now = time.time()
-    _hitstreams.append({"area": area, "uid": uid, "caster": f"p:{uid}",
-                        "end": now + float(duration_s), "interval": float(interval_s),
-                        "next": now + float(interval_s), "mult": float(multiplier),
-                        "magical": bool(magical), "cap": int(max_targets)})
-
-
-def hitstream_ticks():
-    """Due sky-blade-style ticks across all areas -> [(area, attack_packet, killed_list)],
-    the same shape aura_ticks() returns so the AI loop handles both identically."""
-    now = time.time()
-    out = []
-    for st in list(_hitstreams):
-        if now >= st["end"]:
-            _hitstreams.remove(st)
+    landed = []
+    for ts in mon_targets:
+        if not (isinstance(ts, str) and ts.startswith("m:")):
             continue
-        if now < st["next"]:
+        k = (area, uid, slot, ts)
+        if now - _hitstream_last.get(k, 0.0) < HITSTREAM_HIT_THROTTLE:
             continue
-        st["next"] += st["interval"]
-        targets = [mon_ts for (area, mon_ts), info in _aggro.items()
-                  if area == st["area"] and info.get("uid") == st["uid"]][:st["cap"]]
-        if not targets:
-            continue
-        dtypes, damages, hps, killed = [], [], [], []
-        for ts in targets:
-            d, dtype = _hit(st["caster"], st["mult"], st["magical"])
-            key = (st["area"], ts)
-            prev = _mon.get(key, DEFAULT_HP)
-            hp = max(0, prev - d)
-            _mon[key] = hp
-            dtypes.append(dtype); damages.append(d); hps.append(hp)
-            if prev > 0 and hp <= 0:
-                killed.append(ts)
-        node = {"Name": "InstantDamage", "DamageTypes": dtypes, "Damages": damages,
-                "Targets": targets, "TargetHPs": hps}
-        out.append((st["area"], {"Cmd": "Attack", "Caster": st["caster"], "Slot": -1,
-                                 "StatusCode": 1, "Wait": False, "Error": "", "Nodes": [node]},
-                   killed))
-    return out
+        _hitstream_last[k] = now
+        landed.append(ts)
+    if not landed:
+        return None, []
+    caster = f"p:{uid}"
+    dtypes, damages, hps, killed = [], [], [], []
+    for ts in landed:
+        d, dtype = _hit(caster, st["mult"], st["magical"])
+        key = (area, ts)
+        prev = _mon.get(key, DEFAULT_HP)
+        hp = max(0, prev - d)
+        _mon[key] = hp
+        dtypes.append(dtype); damages.append(d); hps.append(hp)
+        if prev > 0 and hp <= 0:
+            killed.append(ts)
+    node = {"Name": "InstantDamage", "DamageTypes": dtypes, "Damages": damages,
+            "Targets": landed, "TargetHPs": hps}
+    attack = {"Cmd": "Attack", "Caster": caster, "Slot": -1, "StatusCode": 1,
+             "Wait": False, "Error": "", "Nodes": [node]}
+    return attack, killed
 
 
 def monster_alive(area, mon_ts):
