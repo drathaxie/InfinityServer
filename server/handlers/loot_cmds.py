@@ -27,7 +27,8 @@ async def bulk_operation(session, writer, cmd, params, msg):
             add, bulk = loot.take_all(session.conn, session.char["id"], session.member.uid)
             await send_obj(writer, add)
             await send_obj(writer, bulk)
-            print(f"  [s2c] bulkOperation loot-all -> {len(add['items'])} item(s)")
+            print(f"  [s2c] bulkOperation loot-all -> {len(add['items'])} item(s), "
+                  f"{len(add['patternItems'])} gem(s)")
         else:
             await send_obj(writer, loot.discard_all(session.member.uid))
             print("  [s2c] bulkOperation discard-all")

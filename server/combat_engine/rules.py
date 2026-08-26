@@ -183,6 +183,16 @@ def resolve_props(props, ctx):
 RULES = {}
 
 
+def _decorate_aura_node(node, name):
+    """Attach optional mod-facing timing data to an ordinary Aura node."""
+    reg = AURA_REGISTRY.get(name) or {}
+    if reg.get("animation_speed") is not None and reg.get("secs") is not None:
+        node["Duration"] = float(reg["secs"])
+    if reg.get("animation_speed") is not None:
+        node["AnimationSpeed"] = float(reg["animation_speed"])
+    return node
+
+
 def rule(name):
     def deco(fn):
         RULES[name] = fn
@@ -297,13 +307,15 @@ def _r_apply_aura(ctx, r, out):
                               mods=reg.get("mods"),
                               max_stacks=reg.get("max_stacks", 1),
                               caster=ctx.caster, now=now)
-    out.append(render_node(ctx, {
+    node = render_node(ctx, {
         "Name": "Aura", "AuraName": name,
         "Hide": r.get("Hide", bool(reg.get("hide"))),
         "Animation": r.get("Animation", ""),
         "Targets": targets,
         "uniquenessType": r.get("uniquenessType", reg.get("uniquenessType", 1)),
-    }))
+    })
+    # The stock client ignores these optional fields; InfinityLoader uses them.
+    out.append(_decorate_aura_node(node, name))
     fire_triggers(ctx, "aura_applied", extra={"aura": name})
     for ev in reg.get("events") or []:
         fire_triggers(ctx, ev, extra={"aura": name})
@@ -341,6 +353,8 @@ def _r_graph(ctx, r, out):
                 merged[k] = v
         node = render_node(ctx, resolve_props(merged, ctx))
         if node is not None:
+            if node.get("Name") == "Aura" and node.get("AuraName"):
+                _decorate_aura_node(node, node["AuraName"])
             out.append(node)
 
 

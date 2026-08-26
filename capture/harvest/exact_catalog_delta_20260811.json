@@ -1,0 +1,188 @@
+{
+  "items": {
+    "101329": {
+      "Quantity": 1,
+      "ID": 101329,
+      "Bundle": {
+        "ID": 78454,
+        "Name": "Gold and Sapphire Paladin Spear",
+        "Filename": "items/polearms/78454_InfinityAlphaPaladinSpear1.unity3d",
+        "VersionStage": 1,
+        "VersionLive": 1
+      },
+      "PrefabName": "InfinityAlphaPaladinSpear1_weaponGO",
+      "EquipSpot": 2,
+      "ItemType": 20,
+      "Name": "Golden Ancient Sapphire Palladion Spear",
+      "Description": "An old Paladin's weapon of choice to face the Undead in the Graveyard. This Paladin met their faithful end at the hands of the Lich. \r\n\r\nThese weapons were then buried and locked away in chests to hide such a powerful instrument that could end the Undead horde.",
+      "DamageRange": 0.1,
+      "Filename": "items/polearms/78454_InfinityAlphaPaladinSpear1.unity3d",
+      "Linkage": "",
+      "Icon": "iwpolearm",
+      "Level": 1,
+      "StackSize": 1,
+      "Rarity": 67,
+      "Element": 1,
+      "Faction": 1,
+      "ReqQuests": [],
+      "strReqQuests": "",
+      "Coins": true,
+      "MetaString": "",
+      "boostValues": {},
+      "MobileCompatibility": 1
+    },
+    "101330": {
+      "Quantity": 1,
+      "ID": 101330,
+      "Bundle": {
+        "ID": 78455,
+        "Name": "Gold and Ruby Paladin Spear",
+        "Filename": "items/polearms/78455_InfinityAlphaPaladinSpear2.unity3d",
+        "VersionStage": 1,
+        "VersionLive": 1
+      },
+      "PrefabName": "InfinityAlphaPaladinSpear2_weaponGO",
+      "EquipSpot": 2,
+      "ItemType": 20,
+      "Name": "Golden Ancient Ruby Palladion",
+      "Description": "An old Paladin's weapon of choice to face the Undead in the Graveyard. This Paladin met their faithful end at the hands of the Lich. \r\n\r\nThese weapons were then buried and locked away in chests to hide such a powerful instrument that could end the Undead horde.",
+      "DamageRange": 0.1,
+      "Filename": "items/polearms/78455_InfinityAlphaPaladinSpear2.unity3d",
+      "Linkage": "",
+      "Icon": "iwpolearm",
+      "Level": 1,
+      "StackSize": 1,
+      "Rarity": 67,
+      "Element": 1,
+      "Faction": 1,
+      "ReqQuests": [],
+      "strReqQuests": "",
+      "Coins": true,
+      "MetaString": "",
+      "boostValues": {},
+      "MobileCompatibility": 1
+    }
+  },
+  "shops": {
+    "2742": {
+      "meta": {
+        "Cmd": "loadShop",
+        "shop": {
+          "$type": "AQ2D_Server.Game_Engine.Shop.ItemShop, AQ2D_Server",
+          "shopID": 2742,
+          "Name": "Robber's Chest  - Golden Spears",
+          "items": []
+        }
+      },
+      "items": [
+        {
+          "shop_item_id": 1,
+          "item_id": 101330,
+          "cost": 0,
+          "coins": 1,
+          "quantity_remain": -1
+        },
+        {
+          "shop_item_id": 2,
+          "item_id": 101329,
+          "cost": 0,
+          "coins": 1,
+          "quantity_remain": -1
+        }
+      ]
+    }
+  },
+  "bundles": {
+    "78758": {
+      "ID": 78758,
+      "Name": "Archivist of Temporis",
+      "Type": "ITEM",
+      "FileName": "armors/78758_CC26V.unity3d",
+      "SourceFile": "CC26V",
+      "Version": 0,
+      "VersionContent": 0,
+      "VersionStage": 1,
+      "VersionLive": -1,
+      "DependencyID": 0,
+      "Repository": ""
+    },
+    "78759": {
+      "ID": 78759,
+      "Name": "Lae Test Item",
+      "Type": "ITEM",
+      "FileName": "armors/78759_0DWearGold.unity3d",
+      "SourceFile": "0DWearGold",
+      "Version": 0,
+      "VersionContent": 0,
+      "VersionStage": 1,
+      "VersionLive": -1,
+      "DependencyID": 0,
+      "Repository": ""
+    },
+    "78760": {
+      "ID": 78760,
+      "Name": "Crystalized Darkovian Tear",
+      "Type": "ITEM",
+      "FileName": "items/capes/78760_OrbofProphecy.unity3d",
+      "SourceFile": "OrbofProphecy",
+      "Version": 0,
+      "VersionContent": 0,
+      "VersionStage": 1,
+      "VersionLive": -1,
+      "DependencyID": 0,
+      "Repository": ""
+    },
+    "78761": {
+      "ID": 78761,
+      "Name": "Witch Princess' Astrolabe",
+      "Type": "ITEM",
+      "FileName": "items/capes/78761_RingsofProphecy.unity3d",
+      "SourceFile": "RingsofProphecy",
+      "Version": 0,
+      "VersionContent": 0,
+      "VersionStage": 1,
+      "VersionLive": -1,
+      "DependencyID": 0,
+      "Repository": ""
+    },
+    "78762": {
+      "ID": 78762,
+      "Name": "Amelianesa",
+      "Type": "ITEM",
+      "FileName": "items/polearms/78762_StargazedFacet.unity3d",
+      "SourceFile": "StargazedFacet",
+      "Version": 0,
+      "VersionContent": 0,
+      "VersionStage": 1,
+      "VersionLive": -1,
+      "DependencyID": 0,
+      "Repository": ""
+    },
+    "78763": {
+      "ID": 78763,
+      "Name": "Witch Queen's Astrolabe",
+      "Type": "ITEM",
+      "FileName": "items/flooritems/78763_HouseSphereOfProphecy.unity3d",
+      "SourceFile": "HouseSphereOfProphecy",
+      "Version": 0,
+      "VersionContent": 0,
+      "VersionStage": 1,
+      "VersionLive": -1,
+      "DependencyID": 0,
+      "Repository": ""
+    },
+    "78764": {
+      "ID": 78764,
+      "Name": "Map-SwordhavenUndead",
+      "Type": "MAP",
+      "FileName": "maps/zone-oaklore/swordhavenundead/78764_map-swordhavenundead.unity3d",
+      "SourceFile": "Assets/Resources/Maps/Zone-Oaklore/SwordhavenUndead/Map-SwordhavenUndead.prefab",
+      "Version": 0,
+      "VersionContent": 0,
+      "VersionStage": 0,
+      "VersionLive": -1,
+      "DependencyID": 0,
+      "Repository": "Unknown"
+    }
+  }
+}

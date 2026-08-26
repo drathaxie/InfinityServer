@@ -25,6 +25,7 @@ import combat        # weapon-damage coefficients (WEAPON_MIN/MAX) shared with t
 import forge         # build_seact: the class's skill bar + particle list (initPlayer.Actions)
 import friends       # initPlayer.friends (mutual persistent friends list)
 import guilds         # playerInfo.guild (persistent guild membership)
+import titles        # native AE founder-title eligibility and selected-title validation
 
 
 # Wire field (user.customization / user.stats) -> character column. Plain ints,
@@ -52,6 +53,10 @@ DEFAULT_UPGRADE_EXPIRES = "2024-01-01T00:00:00"
 # PlayerInfo.ActivationFlag is deserialized but never gated on in the client (decomp: declared
 # only) — a neutral "activated" constant is safe and account-agnostic.
 DEFAULT_ACTIVATION_FLAG = 1
+# InfinityServer does not collect birth dates. The native client treats both account.iAge and
+# playerInfo.Age as chat eligibility gates; zero marks every account as under 13 and disables the
+# input box. Use one adult test-server default consistently in both login stages.
+DEFAULT_ACCOUNT_AGE = 18
 
 
 def membership_days(char):
@@ -1764,11 +1769,11 @@ def build_init_player(conn, char):
     # Default every relog. [[name-plates]]
     prefs["PortraitPreference"] = portrait_pref
 
-    # Cosmetic title (the selectable subtitle under the nameplate) is persisted in the prefs blob
-    # like PortraitPref; pop it out so it rides the user object as the top-level "Title"
-    # (ComUserData.Title -> Player.Title) and doesn't leak into the emitted userPrefs toggles.
-    # The InfinityLoader mod draws it below the name (the guild tag moved above). [[titles]]
-    title_pref = prefs.pop("Title", "") or ""
+    # The native client renders ComUserData.Title under the nameplate.  Keep the selection in the
+    # character prefs, but emit it only when it remains owned in our custom title catalog.
+    # (This also hides a stale/forged selection from the native client.)
+    prefs.pop("Title", None)
+    title_pref = titles.selected(char)
 
     # The equipped class drives the visual rig (skin + ClassParticleBundle) AND the skill bar.
     # A real ClassID is REQUIRED for the client to activate the class; a fresh character has the
@@ -1833,10 +1838,11 @@ def build_init_player(conn, char):
         "strFrame": "Enter",
         "strPad": "Spawn",
         "particleList": seact.get("particleList", []),
-        # Overhead guild tag (base client ignores these; the InfinityLoader mod reads them off the
-        # AreaAdd/uoBranch JSON and renders a coloured "«Guild»" line under the nameplate).
-        "guildName": guild_name_for(conn, char),
-        "guildTagColor": resolve_guild_tag_color(conn, char),
+        # Compatibility clear marker for older InfinityLoader builds.  Guild membership remains in
+        # playerInfo.guild, but custom guild nameplate tags are retired: the native player name and
+        # native Player.Title are the only overhead text we serve.
+        "guildName": "",
+        "guildTagColor": "",
     }
 
     # playerInfo: THIS character's identity + neutral free-account defaults; never another
@@ -1864,6 +1870,7 @@ def build_init_player(conn, char):
         "intAccessLevel": access,
         "Gold": char["gold"],
         "Coins": char["coins"],
+        "Dust": char["dust"],
         "Exp": char["exp"],
         "ExpToLevel": xp_to_level(char["level"]),     # XP bar for the current level
         # MUST be non-empty: the client's chat email-guard does s.Contains(Info.Email), and in C#
@@ -1875,7 +1882,7 @@ def build_init_player(conn, char):
         "UpgradeDays": membership_days(char),
         "iUpg": 1 if membership_days(char) > 0 else 0,  # membership flag
         "ActivationFlag": DEFAULT_ACTIVATION_FLAG,
-        "Age": 0,
+        "Age": DEFAULT_ACCOUNT_AGE,
         "Buyer": False,
         "intHits": 0,
         "MQ": 0, "DF": 0, "AQ": 0,                    # other-game character ids
@@ -1903,7 +1910,6 @@ def build_init_player(conn, char):
         "houseItems": house_items(conn, char["id"]),  # owned houses + furniture (houseItem shape)
         "friends": friends.friend_list(conn, char["id"]),   # mutual persistent friends
         "Actions": seact,                             # the class skill bar (sEAct) the HUD shows
-        "tagShop": guild_tag_shop(conn, char),        # guild-tag colour palette + ownership (mod UI)
     }
 
 
@@ -1997,7 +2003,7 @@ def build_account(conn, char, username, token):
         "userid": uid_for(char),
         "iAccess": access,
         "iUpg": 1 if membership_days(char) > 0 else 0,
-        "iAge": 0,
+        "iAge": DEFAULT_ACCOUNT_AGE,
         "iLevel": char["level"],
         "mobileLevel": char["level"],
         "mobileGold": char["gold"],

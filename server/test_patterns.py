@@ -7,11 +7,16 @@ a gem. Verifies: a weapon gem carries a damage Base, gear gems carry stat bonuse
 applied gem persists on the item (shows in initPlayer so it stays equipped on relog), and
 removePattern clears it.
 """
+import asyncio
+import json
+
 import db
 import seed
 import game
 import patterns
 import combat
+import loot
+from handlers import patterns_cmds
 
 
 def _mk_item(conn, item_id, equip_spot, name, level=10):
@@ -61,6 +66,9 @@ def main():
             "a granted gem shows in the bag (initPlayer.patterns[])"
         re = patterns.equip_pattern(c, char["id"], 90001, cpid, -1)
         assert re["Cmd"] == "UpdatePattern" and re["Success"], f"equipPattern must resolve, got {re}"
+        assert re["_consumedPatternID"] == cpid, "client must be told to remove the used gem"
+        assert re["_bouncedPatternItem"]["pattern"]["Base"] == rw["pattern"]["Base"], \
+            "the replaced Common gem returns to the bag/client as a PatternItem"
         assert re["pattern"]["Base"] == wgem["Base"] and re["pattern"]["STR"] == wgem["STR"], \
             "the gear gets the BAG gem's own stats (not a fixed Common)"
         assert not any(g["CharPatternID"] == cpid for g in patterns.loose_gems(c, char["id"])), \
@@ -76,15 +84,90 @@ def main():
         gpat = patterns.gem_item_pattern({"Name": "Wizard Armor Gem", "ItemType": 43}, quality=8)
         assert gpat["EquipSpot"] == patterns.ARMOR and gpat["INT"] > gpat["STR"], \
             "'Wizard Armor Gem' -> a wizard (INT) gem for the Armor slot"
-        # removePattern pulls the weapon's gem back into the bag (not destroyed)
-        cpid2 = c.execute("SELECT char_pattern_id FROM char_items WHERE char_id=? AND item_id=90001",
-                          (char["id"],)).fetchone()["char_pattern_id"]
-        rr = patterns.remove_pattern(c, char["id"], cpid2)
+        # removePattern is PatternPreview's Destroy Gem action: it deletes a LOOSE gem while
+        # leaving the applied weapon enhancement intact.
+        rr = patterns.remove_pattern(c, char["id"], acp)
         assert rr["Cmd"] == "removePattern"
-        assert any(g["pattern"].get("Base") == wgem["Base"] for g in patterns.loose_gems(c, char["id"])), \
-            "the removed gem returns to the bag"
+        assert not any(g["CharPatternID"] == acp for g in patterns.loose_gems(c, char["id"])), \
+            "Destroy Gem removes the loose PatternItem from persistence"
         inv3 = {i["ID"]: i for i in game.inventory(c, char["id"])}
-        assert inv3[90001].get("ItemPattern") is None, "removePattern clears the gear's gem"
+        assert inv3[90001]["ItemPattern"]["Base"] == wgem["Base"], \
+            "destroying a loose gem must not strip the equipped weapon"
+
+        # RequestDustPattern is the real Delete/Dust button flow. It destroys exactly one owned
+        # loose gem, increments the persistent currency once, and returns ResponseDust's native
+        # fields. A replay or another character's id cannot mint dust.
+        dust_gem = patterns.roll_pattern(
+            {"EquipSpot": patterns.ARMOR}, archetype="wizard", quality=8)
+        dust_id = patterns.grant_gem(c, char["id"], dust_gem)
+        c.commit()
+        before_dust = c.execute("SELECT dust FROM characters WHERE id=?", (char["id"],)).fetchone()["dust"]
+        dr = patterns.dust_pattern(c, char["id"], dust_id)
+        assert dr == {"Cmd": "dust", "bSuccess": True, "Gained": 40,
+                      "Total": before_dust + 40, "CharPatternID": dust_id, "message": ""}
+        assert not any(g["CharPatternID"] == dust_id for g in patterns.loose_gems(c, char["id"]))
+        replay = patterns.dust_pattern(c, char["id"], dust_id)
+        assert not replay["bSuccess"] and replay["Gained"] == 0 and replay["Total"] == dr["Total"], \
+            "a repeated dust request cannot award twice"
+
+        # The handler mirrors all three client mutations immediately: update the gear, remove
+        # the consumed gem, and return the displaced old gem to the PatternItem bag.
+        agem2 = patterns.roll_pattern({"EquipSpot": patterns.ARMOR}, archetype="wizard", quality=8)
+        acp2 = patterns.grant_gem(c, char["id"], agem2)
+        c.commit()
+
+        class _Writer:
+            def __init__(self):
+                self.frames = []
+
+            def write(self, raw):
+                self.frames.append(json.loads(raw.rstrip(b"\x00")))
+
+            async def drain(self):
+                pass
+
+        class _Member:
+            uid = 99123
+
+        class _Session:
+            conn = c
+            member = _Member()
+
+            def __init__(self, current):
+                self.char = current
+
+        out = _Writer()
+        asyncio.run(patterns_cmds.equip_pattern(
+            _Session(char), out, "equipPattern", [90002, acp2, -1], {}))
+        assert [p["Cmd"] for p in out.frames] == ["UpdatePattern", "removePattern", "addItems"]
+        assert out.frames[1]["CharPatternID"] == acp2
+        assert out.frames[2]["items"] == [] and len(out.frames[2]["patternItems"]) == 1
+        assert out.frames[2]["patternItems"][0]["pattern"]["Base"] == ra["pattern"]["Base"]
+
+        # The same request can dust a gem directly from the loot window. LootID selects the
+        # pending drop; it must disappear without first entering char_patterns.
+        loot_gem = {"ID": 99001, "Name": "Wizard Armor Gem", "ItemType": 43,
+                    "ItemPattern": patterns.roll_pattern(
+                        {"EquipSpot": patterns.ARMOR}, archetype="wizard", quality=7)}
+        pending = loot.add_pending(_Member.uid, [loot_gem])[0]
+        out2 = _Writer()
+        asyncio.run(patterns_cmds.dust_pattern(
+            _Session(char), out2, "dustPattern", [0, pending["LootID"]], {}))
+        assert [frame["Cmd"] for frame in out2.frames] == [
+            "dust", "removePattern", "getLoot",
+        ]
+        assert out2.frames[0]["bSuccess"] and out2.frames[0]["Gained"] == 20
+        assert out2.frames[1]["CharPatternID"] == 0
+        assert out2.frames[2] == {
+            "Cmd": "getLoot", "bSuccess": True, "message": "",
+            "ItemID": loot_gem["ID"], "LootID": pending["LootID"],
+        }
+        assert loot.pending(_Member.uid) == [], "dusted loot must leave the pending window"
+
+        init = game.build_init_player(c, c.execute(
+            "SELECT * FROM characters WHERE id=?", (char["id"],)).fetchone())
+        assert init["playerInfo"]["Dust"] == before_dust + 60, \
+            "the persisted Dust total must survive through initPlayer"
 
         # --- KEYSTONE (capture 2026-06-18): gems are the source of stats + weapon damage ---
         # 1=1 anchors: the minted default weapon gem equals the captured "Common Weapon"
@@ -188,7 +271,7 @@ def main():
           f"(31..230) + primary stat ({lo/200:.0f}->{hi/200:.0f})")
 
     print(f"patterns OK: weapon gem Base={rw['pattern']['Base']}, gear gem END={ra['pattern']['END']}, "
-          f"persists on item, removePattern clears it")
+          f"persists; apply syncs consume+bounce; Destroy Gem removes loose pattern")
     print(f"KEYSTONE OK: default gem == captured Common Weapon (27-34 tooltip); gems add stats "
           f"(STR {sta0['STR']}->{sta1['STR']}) + HP ({hp0}->{hp1}); _hit rolls gem band "
           f"[{glo},{ghi}] not ap fallback [{flo},{fhi}]")
@@ -197,4 +280,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

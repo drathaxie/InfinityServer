@@ -51,6 +51,8 @@ def main():
     assert got["Cmd"] == "getLoot" and got["bSuccess"] and got["LootID"] == first["LootID"]
     assert add["items"][0]["LootID"] == -1 and add["items"][0]["CharItemID"] > 0, "kept item is owned"
     assert add["items"][0]["ID"] == first["ID"]
+    assert add["patternItems"] == [] and add["bankedItems"] == [], \
+        "addItems initializes every client list"
     assert len(loot.pending(uid)) == 2, "one fewer pending after a keep"
     assert len(game.inventory(conn, char["id"])) == start_inv + 1, "kept item is in the inventory"
 
@@ -97,6 +99,38 @@ def main():
     conn.execute("DELETE FROM global_drops WHERE item_id=?", (gear_id,))
     conn.commit()
     print("drop-gems OK: enhanceable gear drops carry + persist a random-rarity gem")
+
+    # --- ItemType 43 gem TOKENS use the separate PatternItem bag. If they land in char_items,
+    #     the client opens ItemPreviewNew and its Equip button is permanently disabled. A kept
+    #     token must instead be emitted in addItems.patternItems and survive in char_patterns.
+    gem_item = next((db.item(conn, r["item_id"]) for r in conn.execute(
+        "SELECT item_id FROM items WHERE item_type=43 ORDER BY item_id")
+        if db.item(conn, r["item_id"])), None)
+    assert gem_item and gem_item.get("ItemPattern"), "seed must include a real Pattern token"
+
+    before_items = conn.execute(
+        "SELECT COUNT(*) AS n FROM char_items WHERE char_id=? AND item_id=?",
+        (char["id"], gem_item["ID"])).fetchone()["n"]
+    before_patterns = len(patterns.loose_gems(conn, char["id"]))
+    gwire = loot.add_pending(uid, [dict(gem_item)])
+    gadd, ggot = loot.take(conn, char["id"], uid, gwire[0]["ID"], gwire[0]["LootID"])
+    assert ggot["bSuccess"] and gadd["items"] == [] and len(gadd["patternItems"]) == 1
+    gp = gadd["patternItems"][0]
+    assert gp["pattern"] == gem_item["ItemPattern"] and gp["CharPatternID"] > 0
+    assert len(patterns.loose_gems(conn, char["id"])) == before_patterns + 1
+    assert conn.execute("SELECT COUNT(*) AS n FROM char_items WHERE char_id=? AND item_id=?",
+                        (char["id"], gem_item["ID"])).fetchone()["n"] == before_items, \
+        "a gem token must never become a normal inventory row"
+
+    # Loot All can mix normal items and gems in one fully initialized addItems response.
+    normal = loot._catalog(conn, drop_ids[0])
+    mixed = loot.add_pending(uid, [dict(normal), dict(gem_item)])
+    madd, mbulk = loot.take_all(conn, char["id"], uid)
+    assert len(madd["items"]) == 1 and len(madd["patternItems"]) == 1
+    assert madd["bankedItems"] == [] and len(mbulk["consumedLoot"]) == 2
+    assert {x["LootID"] for x in mbulk["consumedLoot"]} == {x["LootID"] for x in mixed}
+    print("pattern-token OK: single keep + Loot All emit PatternItems, persist in gem bag, "
+          "and never create disabled normal-inventory gems")
     print("\nALL LOOT TESTS PASSED")
 
 

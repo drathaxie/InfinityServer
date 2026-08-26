@@ -12,7 +12,8 @@ the item equippable.
 Wire (decomp):
   c2s itemdefaultpattern [itemID]                  -> s2c UpdatePattern {Success,ItemID,pattern,stats}
   c2s equipPattern [CharItemID,CharPatternID,LootID]-> s2c UpdatePattern  (apply a chosen gem)
-  c2s removePattern [CharPatternID]                -> s2c removePattern   (clear a gem)
+  c2s dustPattern [CharPatternID,LootID]             -> s2c dust           (dust/delete a gem)
+  c2s removePattern [CharPatternID]                -> s2c removePattern   (destroy a loose gem)
 
 Pattern fields (Pattern.cs): Level, Quality(5=Common..10=Mythic), EquipSpot,
 STR/END/DEX/INT/WIS/LUK, Wild, Base, Power, Name. Weapons use Base/Wild for their
@@ -52,6 +53,10 @@ QUALITY_NAME = {5: "Common", 6: "Uncommon", 7: "Rare", 8: "Epic", 9: "Legendary"
 _QUALITY_WEIGHTS = [(5, 0.55), (6, 0.25), (7, 0.12), (8, 0.05), (9, 0.025), (10, 0.005)]
 _BASE_BY_QUALITY = {5: 31, 6: 68, 7: 95, 8: 130, 9: 175, 10: 230}
 _POWER_BY_QUALITY = {5: 26, 6: 32, 7: 40, 8: 50, 9: 63, 10: 80}
+# The client treats Dust as server-authored Pattern data and only displays the authoritative
+# Gained/Total values returned by ResponseDust. The captured catalog patterns predate that field,
+# so InfinityServer uses a simple rarity ladder for both old and newly rolled gems.
+_DUST_BY_QUALITY = {5: 5, 6: 10, 7: 20, 8: 40, 9: 80, 10: 160}
 
 # Gems are CLASS-BASED: the archetype decides which primary stat the gem pumps (a Warrior gem
 # raises STR, a Wizard gem INT, ...). The archetype's primary stat gets the big rarity-scaled
@@ -127,6 +132,7 @@ def roll_pattern(item, archetype=None, quality=None, level=5):
     pat = {"ID": 1, "Quality": q, "Level": int(level or 5),
            "Wild": 0.1, "EquipSpot": spot,
            "Base": _BASE_BY_QUALITY[q], "Power": _POWER_BY_QUALITY[q],
+           "Dust": _DUST_BY_QUALITY[q],
            "Name": f"{QUALITY_NAME[q]} {arch.capitalize()}"}
     pat.update(stats)
     if spot == HEAD:                                      # helms also carry flat HP, scaled by rarity
@@ -278,32 +284,85 @@ def equip_pattern(conn, char_id, item_id, char_pattern_id, loot_id=-1):
     if gem_spot and int(ci["spot"] or 0) and gem_spot != int(ci["spot"]):
         return _update_pattern(item_id, None, ok=False,
                                err="That gem doesn't fit this item's slot.")
+    bounced = None
     if ci["pattern_json"]:                          # bounce the gem already on this gear to the bag
         old = _parse_pattern(ci["pattern_json"])
         if old is not None:
-            grant_gem(conn, char_id, old)
+            old_id = grant_gem(conn, char_id, old)
+            bounced = {"CharPatternID": old_id, "pattern": old, "LootID": -1}
     conn.execute("UPDATE char_items SET pattern_json=?, char_pattern_id=? WHERE char_item_id=?",
                  (json.dumps(pat), int(char_pattern_id), ci["char_item_id"]))
     conn.execute("DELETE FROM char_patterns WHERE char_pattern_id=?", (int(char_pattern_id),))
     conn.commit()
-    return _update_pattern(int(item_id), pat)
+    resp = _update_pattern(int(item_id), pat)
+    # Internal transport metadata. The handler removes these before sending UpdatePattern, then
+    # mirrors the server-side bag mutation to the client: consume the used gem and, on a swap,
+    # add the displaced gem back as a new PatternItem.
+    resp["_consumedPatternID"] = int(char_pattern_id)
+    resp["_bouncedPatternItem"] = bounced
+    return resp
 
 
 def remove_pattern(conn, char_id, char_pattern_id):
-    """Handle c2s removePattern: pull the gem off its gear and return it to the loose bag (so it
-    isn't destroyed — it can be re-slotted elsewhere)."""
-    ci = conn.execute(
-        "SELECT char_item_id, pattern_json FROM char_items "
-        "WHERE char_id=? AND char_pattern_id=? AND pattern_json IS NOT NULL",
-        (char_id, int(char_pattern_id))).fetchone()
-    if ci is not None:
-        old = _parse_pattern(ci["pattern_json"])
-        conn.execute("UPDATE char_items SET pattern_json=NULL, char_pattern_id=NULL "
-                     "WHERE char_item_id=?", (ci["char_item_id"],))
-        if old is not None:
-            grant_gem(conn, char_id, old)           # back to the bag, not lost
+    """Handle c2s removePattern from PatternPreview.DeleteClicked: destroy a LOOSE gem.
+
+    The request carries a PatternItem.CharPatternID from ``initPlayer.patterns``. Applied gear
+    is not in that collection and the stock client has no request that uses removePattern to
+    strip gear, so treating this as a gear lookup left the database gem behind after the UI
+    removed it.
+    """
+    conn.execute("DELETE FROM char_patterns WHERE char_id=? AND char_pattern_id=?",
+                 (char_id, int(char_pattern_id)))
     conn.commit()
     return {"Cmd": "removePattern", "CharPatternID": int(char_pattern_id)}
+
+
+def dust_value(pattern):
+    """Dust awarded for destroying a gem. Prefer server/catalog-authored Dust, while giving
+    older persisted gems (created before Dust was stored) the same rarity-based value."""
+    pat = pattern or {}
+    explicit = int(pat.get("Dust", 0) or 0)
+    if explicit > 0:
+        return explicit
+    quality = max(5, min(10, int(pat.get("Quality", 5) or 5)))
+    return _DUST_BY_QUALITY[quality]
+
+
+def _dust_response(conn, char_id, char_pattern_id, pattern=None, success=False, message=""):
+    gained = dust_value(pattern) if success else 0
+    if success:
+        conn.execute("UPDATE characters SET dust=dust+? WHERE id=?", (gained, int(char_id)))
+    row = conn.execute("SELECT dust FROM characters WHERE id=?", (int(char_id),)).fetchone()
+    return {"Cmd": "dust", "bSuccess": bool(success), "Gained": gained,
+            "Total": int(row["dust"] if row is not None else 0),
+            "CharPatternID": int(char_pattern_id), "message": message}
+
+
+def dust_pattern(conn, char_id, char_pattern_id):
+    """Destroy one owned loose PatternItem and award its Dust atomically.
+
+    A missing or foreign id fails without awarding currency, making retries safe.
+    """
+    cpid = int(char_pattern_id)
+    row = conn.execute(
+        "SELECT pattern_json FROM char_patterns WHERE char_id=? AND char_pattern_id=?",
+        (int(char_id), cpid)).fetchone()
+    pat = _parse_pattern(row["pattern_json"]) if row is not None else None
+    if pat is None:
+        return _dust_response(conn, char_id, cpid, success=False,
+                              message="That gem is no longer available.")
+    conn.execute("DELETE FROM char_patterns WHERE char_id=? AND char_pattern_id=?",
+                 (int(char_id), cpid))
+    resp = _dust_response(conn, char_id, cpid, pattern=pat, success=True)
+    conn.commit()
+    return resp
+
+
+def dust_loot_pattern(conn, char_id, char_pattern_id, pattern):
+    """Award Dust for a pending-loot gem removed by loot.dust_pending_pattern()."""
+    resp = _dust_response(conn, char_id, char_pattern_id, pattern=pattern, success=True)
+    conn.commit()
+    return resp
 
 
 def _parse_pattern(pj):

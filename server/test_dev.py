@@ -42,9 +42,13 @@ def main():
     assert init["user"]["iUpgDays"] == days, "world user carries membership days"
     assert init["playerInfo"]["UpgradeDays"] == days, "playerInfo carries membership days"
     assert init["playerInfo"]["upgradeExpires"] == expires, "playerInfo carries membership expiry"
+    assert init["playerInfo"]["Age"] == game.DEFAULT_ACCOUNT_AGE >= 13, \
+        "initPlayer carries a chat-eligible age"
     account = game.build_account(conn, staff, "__staff__", "tok")
     assert account["iUpg"] == 1 and account["iUpgDays"] == days, "login account carries membership"
     assert account["chars"][0]["iUpgDays"] == days, "char select carries membership"
+    assert account["iAge"] == game.DEFAULT_ACCOUNT_AGE >= 13, \
+        "launcher account carries the same chat-eligible age"
 
     # Dialogger editor: Save (new) -> returns an id; Load(id) -> the same JSON back
     import urllib.parse

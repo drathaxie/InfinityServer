@@ -1,26 +1,16 @@
-"""Player cosmetic titles — the selectable subtitle shown under the overhead nameplate.
+"""Custom player titles delivered through AE's native title pipeline.
 
-Client feature shipped in build 24358633 (Assets/Scripts/Comm/Messages/*PlayerTitle*.cs,
-Assets/Scripts/UI/TitleOption.cs):
-  c2s getPlayerTitles              -> s2c {Cmd:getPlayerTitles, Titles:[str,...]}   (owned list)
-  c2s savePlayerTitle Params=[str] -> s2c {Cmd:savePlayerTitle, CharID:int, Title:str}
-
-The chosen title rides the normal user object as a top-level "Title" (ComUserData.Title ->
-Player.Title in SetUserData), so every client learns it the same way it learns level/class. The
-base client does NOT draw it; the InfinityLoader mod renders it as the line BELOW the name (the
-guild tag moved ABOVE the name to make room). Selection is stored in the per-char `prefs` blob
-(same as PortraitPref) and popped out in game.build_init_player, so no schema change is needed.
-
-Ownership is server-authoritative: savePlayerTitle only accepts a title the character actually
-owns (see available_titles), so a crafted Params can't set arbitrary text.
+The current live client sends ``getPlayerTitles`` after ``initPlayer`` and equips a choice with
+``savePlayerTitle``.  We keep that exact message contract and the client's native ``Player.Title``
+rendering, while this module remains the server-authoritative catalog of *our* custom titles.
 """
 import json
 
 DEV_ACCESS_LEVEL = 100                      # matches game.DEV_ACCESS_LEVEL (staff)
 
-# Titles every character may equip — cosmetic flair, extend freely.
+# Custom title inventory.  The native client is only the picker/renderer; it does not own this
+# list.  Extend these lists (or add entitlement-backed groups) without changing the wire protocol.
 BASE_TITLES = ["Adventurer", "Hero", "Champion", "Slayer", "Legend", "Wanderer"]
-# Staff-only titles (access_level >= 100).
 DEV_TITLES = ["Architect", "Game Master"]
 
 
@@ -29,7 +19,7 @@ def _access(char):
 
 
 def available_titles(char):
-    """The list of titles this character may choose from (what getPlayerTitles returns)."""
+    """Custom titles this character owns, returned as the native picker list."""
     titles = list(BASE_TITLES)
     if _access(char) >= DEV_ACCESS_LEVEL:
         titles += DEV_TITLES
@@ -42,13 +32,14 @@ def is_allowed(char, title):
 
 
 def selected(char):
-    """The character's currently-equipped title ('' if none), read from the prefs blob."""
+    """The character's valid equipped custom title (``''`` if none)."""
     if char is None or "prefs" not in char.keys() or not char["prefs"]:
         return ""
     try:
-        return (json.loads(char["prefs"]) or {}).get("Title", "") or ""
+        title = (json.loads(char["prefs"]) or {}).get("Title", "") or ""
     except (TypeError, ValueError):
         return ""
+    return title if title in available_titles(char) else ""
 
 
 def set_selected(conn, char, title):

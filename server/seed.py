@@ -46,7 +46,7 @@ def seed_hairs(conn):
 
 
 def seed_redeem_codes(conn):
-    """Install versioned promo-code definitions and their exact reward bundles."""
+    """Install versioned promo-code definitions, exclusive items, and exact reward bundles."""
     try:
         definitions = json.loads(REDEEM_CODES_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -56,6 +56,12 @@ def seed_redeem_codes(conn):
         code = str(code).strip().upper()
         if not code:
             continue
+        # A promo can carry complete item definitions for bundle-only art that does not have a
+        # canonical ItemID yet. Replace the synthetic placeholder deterministically so restarts
+        # and fresh installs preserve the public name and render metadata used by the reward.
+        for item in definition.get("itemDefinitions", []):
+            if isinstance(item, dict) and int(item.get("ID", 0) or 0) > 0:
+                db.store_item(conn, item, replace=True)
         conn.execute(
             "INSERT INTO redeem_codes(code,description,max_uses,active,created) VALUES(?,?,?,?,0) "
             "ON CONFLICT(code) DO UPDATE SET description=excluded.description,"
@@ -238,6 +244,19 @@ CLASS_RIGS_FILE = DATA / "class_rigs.json"
 #   placeholder 2 (data/classes.json) until a targeted capture provides it.
 REAL_CLASS_IDS = {1: 17, 3: 33}        # old placeholder -> real captured ClassID
 
+# Five Flex skills lost their regMana field in the mined SkillData even though
+# their captured descriptions state the requirement explicitly. Store the wire
+# convention (negative = cost). Applied once and only while the existing value
+# is zero, so later SkillForge tuning is not repeatedly clobbered.
+TOOLTIP_MANA_COST_FIX_VERSION = 1
+TOOLTIP_MANA_COST_FIXES = {
+    117: -10,  # Warrior: Prepared Strike
+    118: -15,  # Warrior: On Guard
+    142: -20,  # Healer: Healing Word
+    133: -15,  # Rogue: Stiletto
+    132: -5,   # Rogue: Footwork
+}
+
 
 def seed_classes(conn):
     """Seed classes + their slotted skills + the shared skill library from the
@@ -318,6 +337,17 @@ def seed_classes(conn):
                  float(meta.get("autoVRange", 0) or 0), 1 if meta.get("autoHoldAtRange") else 0,
                  int(meta.get("regMana", 0) or 0)))
             n_skills += 1
+    mana_fix = conn.execute(
+        "SELECT v FROM kv WHERE k='tooltip_mana_cost_fix_version'").fetchone()
+    stored_mana_fix = int(mana_fix["v"]) if mana_fix and str(mana_fix["v"]).isdigit() else 0
+    if stored_mana_fix < TOOLTIP_MANA_COST_FIX_VERSION:
+        for sid, reg_mana in TOOLTIP_MANA_COST_FIXES.items():
+            conn.execute("UPDATE skills SET mana=? WHERE skill_id=? AND COALESCE(mana,0)=0",
+                         (reg_mana, sid))
+        conn.execute(
+            "INSERT INTO kv(k,v) VALUES('tooltip_mana_cost_fix_version',?) "
+            "ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+            (str(TOOLTIP_MANA_COST_FIX_VERSION),))
     return (n_cls, n_skills)
 
 
@@ -481,6 +511,61 @@ def _author_damage(data, element, mult):
                 nd["DamageType"] = element
                 nd["Multiplier"] = mult
     return data
+
+
+MAGE_SPELL_FX = {
+    135: ("classMage_S1_P1", "classMage_S1_P2"),
+    136: ("classMage_S2_P1", "classMage_S2_P2"),
+    137: ("classMage_S3_P1", "classMage_S3_P2"),
+    138: ("classMage_S4_P1", "classMage_S4_P2"),
+}
+MAGE_SPELL_FX_VERSION = 1
+
+
+def _author_mage_fx(data, skill_id):
+    """Fill only blank Mage SpellAnimation projectile fields; preserve Forge customization."""
+    fx = MAGE_SPELL_FX.get(skill_id)
+    if not fx:
+        return data
+    data = json.loads(json.dumps(data))
+    if isinstance(data, list) and len(data) > 1 and isinstance(data[1], dict):
+        for node in data[1].values():
+            if isinstance(node, dict) and node.get("Name") == "SpellAnimation":
+                defaults = {"FX": "ORIGIN", "SpellGraphic": fx[0], "SpellImpact": fx[1],
+                            "AttachInit": "CastAttach", "Attach": "Cast",
+                            "AttachImpact": "Origin", "Follow": True}
+                for key, value in defaults.items():
+                    if node.get(key) in (None, ""):
+                        node[key] = value
+    return data
+
+
+def _patch_mage_spell_fx(conn):
+    """One-time additive visual repair over live Mage graphs without refreshing other skills."""
+    row = conn.execute("SELECT v FROM kv WHERE k='mage_spell_fx_version'").fetchone()
+    stored = int(row["v"]) if row and str(row["v"]).isdigit() else 0
+    if stored >= MAGE_SPELL_FX_VERSION:
+        return 0
+    changed = 0
+    for skill_id in MAGE_SPELL_FX:
+        skill = conn.execute("SELECT data FROM skills WHERE skill_id=?", (skill_id,)).fetchone()
+        if not skill or not skill["data"]:
+            continue
+        try:
+            before = json.loads(skill["data"])
+        except (TypeError, ValueError):
+            continue
+        after = _author_mage_fx(before, skill_id)
+        if after != before:
+            conn.execute("UPDATE skills SET data=? WHERE skill_id=?",
+                         (json.dumps(after, separators=(",", ":")), skill_id))
+            changed += 1
+    conn.execute("INSERT INTO kv(k,v) VALUES('mage_spell_fx_version',?) "
+                 "ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                 (str(MAGE_SPELL_FX_VERSION),))
+    return changed
+
+
 SKILL_GRAPHS_FILE = DATA / "skill_graphs.json"   # mined per-skill graphs (all classes)
 CLASS_ITEM_DEFS_FILE = DATA / "class_item_defs.json"   # real captured class-armor item defs
 _class_item_defs = {}
@@ -1941,6 +2026,138 @@ def seed_infinity_hero(conn):
     return n
 
 
+# --- Chronomancer (class 2099) ---------------------------------------------------------
+# OUR five-button class (auto included), deliberately authored with the existing Skill Forge
+# node vocabulary. Chrono Charges are a 0..12 stacking pool. Time Dilation and Temporal Stasis
+# are normal Aura nodes whose mechanics are server-owned in combat.py; InfinityLoader mirrors
+# their AnimationSpeed metadata on only the affected monster Animators.
+CHRONOMANCER_CLASS_ID = 2099
+CHRONOMANCER_ARMOR_ITEM = 200024
+CHRONOMANCER_GRAPH_VERSION = 3
+_CHRONO_SKILL_IDS = [90410, 90411, 90412, 90413, 90414]
+_CHRONO_ICON = "InfinityHero/InfinityHero"
+_CHRONO_RESOURCE = {"model": "stacking", "ResourceColor": 6737151, "MaxRP": 12,
+                    "Threshold": 12, "ThresholdColor": 16766720}
+_CHRONO_RIG = {
+    "ID": CHRONOMANCER_ARMOR_ITEM,
+    "Bundle": {"ID": 8814, "Name": "Doctor When",
+               "Filename": "armors/8814_DoctorWho.unity3d",
+               "VersionStage": 4, "VersionLive": 4},
+    "PrefabName": "ArmorSlots", "EquipSpot": 6, "ItemType": 21,
+}
+_CHRONO_ITEM = {
+    "ID": CHRONOMANCER_ARMOR_ITEM, "Name": "TimeLord",
+    "Description": "A wandering master of time and relative dimensions. Build up to 12 "
+                   "Chrono Charges, steal an enemy's seconds, then bring about the End of Time.",
+    "ItemType": 21, "EquipSpot": 6, "Linkage": "", "Icon": "iiclass", "Level": 1,
+    "Quantity": 1, "StackSize": 1, "Element": 1, "Faction": 1,
+    "MetaString": str(CHRONOMANCER_CLASS_ID), "DamageRange": 0.1, "Rarity": 50,
+    "Filename": "armors/8814_DoctorWho.unity3d", "Coins": True,
+    "PrefabName": "ArmorSlots", "MobileCompat": 1, "IsClass": True,
+    "Bundle": _CHRONO_RIG["Bundle"],
+}
+
+
+def _chrono_graph(cd, multiplier=0, magical=True, targets="@target", max_targets=1,
+                  animation="Mage_CastOffensive3", hits=1):
+    nodes = [("0", {"Name": "OnRequest"}),
+             ("1", {"Name": "Range", "HRange": 22, "VRange": 8}),
+             ("2", {"Name": "Cooldown", "CD": cd}),
+             ("3", {"Name": "PlayerAnimation", "Animation": animation})]
+    for i in range(hits):
+        nodes.append((str(4 + i), {"Name": "Damage",
+                     "DamageType": "Magical" if magical else "Physical",
+                     "Multiplier": multiplier, "Targets": targets,
+                     "MaxTargets": max_targets}))
+    return nodes
+
+
+_CHRONO_SKILLS = [
+    (0, 90410, "Temporal Strike", _CHRONO_ICON + "AA1",
+     "A measured strike that generates 1 Chrono Charge.",
+     _chrono_graph(1800, 1.0, False, animation="Attack1_Auto,Attack2,Attack3")),
+    (1, 90411, "Echoed Blow", _CHRONO_ICON + "A1",
+     "Fold one attack across two moments, striking twice. Generates 2 Chrono Charges.",
+     _chrono_graph(4500, 0.75, True, hits=2)),
+    (2, 90412, "Rewind", _CHRONO_ICON + "C1",
+     "Rewind your wounds, restoring health from spell power. Generates 2 Chrono Charges.",
+     [("0", {"Name": "OnRequest"}), ("1", {"Name": "Cooldown", "CD": 9000}),
+      ("2", {"Name": "PlayerAnimation", "Animation": "Healer_Cast2"}),
+      ("3", {"Name": "Damage", "Heal": True, "DamageType": "Magical",
+             "Multiplier": 1.2, "Targets": "@self", "MaxTargets": 1})]),
+    (3, 90413, "Stolen Seconds", _CHRONO_ICON + "B1",
+     "Damage up to four enemies and slow their attacks, casts, and animations by 65% for 6 seconds. "
+     "Generates 3 Chrono Charges.",
+     _chrono_graph(10000, 1.1, True, "@enemies", 4) +
+     [("4a", {"Name": "Aura", "AuraName": "Time Dilation", "Targets": "@hits"})]),
+    (4, 90414, "End of Time", _CHRONO_ICON + "D1",
+     "Consume every Chrono Charge for an expanding time rupture, then freeze surviving enemies "
+     "for 2.5 seconds. Damage increases by 8% per charge consumed.",
+     _chrono_graph(22000, 1.4, True, "@enemies", 6) +
+     [("4a", {"Name": "Aura", "AuraName": "Temporal Stasis", "Targets": "@hits"})]),
+]
+
+CHRONOMANCER_RULES = {
+    "engine": 1, "resource": {"model": "stacking", "max": 12},
+    "skills": {
+        "90410": [{"Do": "ResourceOp", "Op": "gain", "Amount": 1}, {"Do": "Graph"}],
+        "90411": [{"Do": "ResourceOp", "Op": "gain", "Amount": 2}, {"Do": "Graph"}],
+        "90412": [{"Do": "ResourceOp", "Op": "gain", "Amount": 2}, {"Do": "Graph"}],
+        "90413": [{"Do": "ResourceOp", "Op": "gain", "Amount": 3}, {"Do": "Graph"}],
+        "90414": [{"Do": "ResourceOp", "Op": "spend_all"},
+                  {"Do": "Graph", "Overlay": {"Damage": {
+                      "MultScale": {"$": "1 + 0.08*spent"}}}}],
+    },
+}
+
+
+def seed_chronomancer(conn):
+    """Seed the five-skill Chronomancer, class armor, rules, and class-shop link."""
+    import forge
+    import db as _db
+    row = conn.execute("SELECT v FROM kv WHERE k='chronomancer_graph_version'").fetchone()
+    stored = int(row["v"]) if row and str(row["v"]).isdigit() else 0
+    refresh = stored < CHRONOMANCER_GRAPH_VERSION
+    rig_json = json.dumps(_CHRONO_RIG, separators=(",", ":"))
+    conn.execute(
+        "INSERT INTO classes(class_id,name,bundle,rig,resource) VALUES(?,?,?,?,?) "
+        "ON CONFLICT(class_id) DO NOTHING",
+        (CHRONOMANCER_CLASS_ID, "TimeLord", "", rig_json,
+         json.dumps(_CHRONO_RESOURCE, separators=(",", ":"))))
+    conn.execute("UPDATE classes SET name=?,rig=?,resource=? WHERE class_id=?",
+                 ("TimeLord", rig_json, json.dumps(_CHRONO_RESOURCE, separators=(",", ":")),
+                  CHRONOMANCER_CLASS_ID))
+    if refresh:
+        _seed_class_rules(conn, CHRONOMANCER_CLASS_ID, CHRONOMANCER_RULES)
+    _db.store_item(conn, _CHRONO_ITEM, replace=True)
+    conn.execute(
+        "INSERT INTO shop_items(shop_id,shop_item_id,item_id,cost,coins,quantity_remain) "
+        "VALUES(?,?,?,?,?,?) ON CONFLICT(shop_id,shop_item_id) DO NOTHING",
+        (CLASS_SHOP_ID, CHRONOMANCER_ARMOR_ITEM, CHRONOMANCER_ARMOR_ITEM, 0, 1, -1))
+    n = 0
+    for slot, skill_id, name, icon, desc, node_list in _CHRONO_SKILLS:
+        data, forge_data = forge.linear_graph(node_list)
+        srow = conn.execute("SELECT data FROM skills WHERE skill_id=?", (skill_id,)).fetchone()
+        cur = (srow["data"] or "").replace(" ", "") if srow else ""
+        if srow is None or not cur or cur in ("[{},{}]", "[]", "null") or refresh:
+            conn.execute(
+                "INSERT INTO skills(skill_id,action,name,description,icon,slot,data,forge_data) "
+                "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(skill_id) DO UPDATE SET "
+                "name=excluded.name,description=excluded.description,icon=excluded.icon,"
+                "slot=excluded.slot,data=excluded.data,forge_data=excluded.forge_data",
+                (skill_id, 1 if slot == 0 else 0, name, desc, icon, slot,
+                 json.dumps(data, separators=(",", ":")),
+                 json.dumps(forge_data, separators=(",", ":"))))
+            n += 1
+        conn.execute("INSERT INTO class_skills(class_id,slot,skill_id) VALUES(?,?,?) "
+                     "ON CONFLICT(class_id,slot) DO UPDATE SET skill_id=excluded.skill_id",
+                     (CHRONOMANCER_CLASS_ID, slot, skill_id))
+    conn.execute("INSERT INTO kv(k,v) VALUES('chronomancer_graph_version',?) "
+                 "ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                 (str(CHRONOMANCER_GRAPH_VERSION),))
+    return n
+
+
 def seed_skill_graphs(conn):
     """Give the Dragonslayer kit its node-graphs (reconstructed from the capture). Seeds
     empty skills always; force-refreshes our seeded graphs once per SKILL_GRAPH_VERSION
@@ -1988,11 +2205,13 @@ def seed_skill_graphs(conn):
             dmg = SKILL_DAMAGE.get(sid)
             if dmg:                                # author element + multiplier (P1-4)
                 g_data = _author_damage(g_data, *dmg)
+            g_data = _author_mage_fx(g_data, sid)
             conn.execute("UPDATE skills SET data=?, forge_data=? WHERE skill_id=?",
                          (json.dumps(g_data, separators=(",", ":")),
                           json.dumps(g["forge"], separators=(",", ":")), sid))
             n += 1
 
+    n += _patch_mage_spell_fx(conn)
     conn.execute("INSERT INTO kv(k,v) VALUES('skill_graph_version',?) "
                  "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (str(SKILL_GRAPH_VERSION),))
     return n
@@ -2286,6 +2505,7 @@ def run():
         pala = seed_paladin(conn)               # Reduxidain Paladin (Conviction class)
         void = seed_void(conn)                  # Voidwalker (Hunger class, hidden Void anims)
         ihero = seed_infinity_hero(conn)        # Infinity Hero (class 2022, pure-data mechanics)
+        chrono = seed_chronomancer(conn)        # Chronomancer (12-charge time-control class)
         class_grants = grant_class_items(conn)
         cutscenes = seed_cutscenes(conn)
         dclasses = seed_defaultclasses(conn)
@@ -2298,6 +2518,7 @@ def run():
           f"quests={quests} apops={apops} classes={cls} skills={sk} skill_graphs={graphs} "
           f"monster_skills_linked={mon_skills} paladin_skills={pala} void_skills={void} "
           f"infinity_hero_skills={ihero} "
+          f"chronomancer_skills={chrono} "
           f"class_items_granted={class_grants} cutscenes={cutscenes} defaultclasses={dclasses} "
           f"monster_drops={mdrops} global_drops={gdrops} quest_obj_refs={qrefs} item_sponsors={isponsors} "
           f"redeem_codes={redeem_codes}")

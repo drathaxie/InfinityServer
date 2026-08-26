@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redeem Code Editor</title>
+<style>
+  :root { --bg:#1d2127; --panel:#272c34; --panel2:#2f3640; --line:#3a4150; --ink:#e6e9ef;
+          --muted:#9aa4b2; --accent:#5b8cff; --accent2:#3fa46a; --danger:#c0504d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; gap:8px; align-items:center; padding:10px 14px; background:var(--panel);
+           border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0 10px 0 0; font-weight:600; }
+  select, input, button { font:inherit; color:var(--ink); background:var(--panel2);
+           border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  input[type=text], input[type=number] { width:100%; }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.go { background:var(--accent2); border-color:var(--accent2); color:#fff; }
+  button.del { background:transparent; border-color:var(--line); color:var(--muted); padding:4px 9px; }
+  button.del:hover { color:#fff; border-color:var(--danger); background:var(--danger); }
+  .status { margin-left:auto; color:var(--muted); font-size:13px; }
+  main { max-width:1000px; margin:0 auto; padding:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:16px; }
+  .card > h2 { margin:0 0 10px; font-size:14px; color:var(--accent); text-transform:uppercase; letter-spacing:.04em; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px; }
+  .field { display:flex; flex-direction:column; gap:3px; flex:1; min-width:120px; }
+  .field label { font-size:12px; color:var(--muted); }
+  .li { display:flex; gap:10px; align-items:flex-end; background:var(--panel2); border:1px solid var(--line);
+        border-radius:8px; padding:10px; margin-bottom:8px; }
+  .li .field { min-width:90px; }
+  .li .nm { flex:1.4; color:var(--ink); font-size:13px; padding-bottom:8px; text-transform:capitalize; }
+  .pick { position:relative; max-width:360px; margin-top:6px; }
+  .pickres { position:absolute; z-index:10; left:0; right:0; top:100%; background:var(--panel2);
+             border:1px solid var(--line); border-radius:6px; max-height:220px; overflow:auto; display:none; }
+  .pickres div { padding:5px 8px; cursor:pointer; }
+  .pickres div:hover { background:var(--accent); color:#fff; }
+  .empty { color:var(--muted); font-style:italic; padding:6px 0; }
+  .hint { color:var(--muted); font-size:12px; margin-top:4px; }
+  .finder { position:relative; }
+  .finder input { min-width:240px; }
+  .results { position:absolute; z-index:20; left:0; right:0; top:100%; background:var(--panel2);
+             border:1px solid var(--line); border-radius:6px; max-height:320px; overflow:auto; display:none; }
+  .results div { padding:6px 9px; cursor:pointer; }
+  .results div:hover { background:var(--accent); color:#fff; }
+  .addrow { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; }
+  #btnNew { background:var(--panel2); }
+  input[type=checkbox] { width:auto; padding:0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Redeem Code Editor</h1>
+  <div class="finder">
+    <input id="search" placeholder="Search code…" autocomplete="off">
+    <div id="results" class="results"></div>
+  </div>
+  <button id="btnNew">+ New</button>
+  <button class="go" id="btnSave">Save</button>
+  <span class="status" id="status"></span>
+</header>
+<main id="main"></main>
+
+<script>
+const $ = s => document.querySelector(s);
+let data = { redeem:{}, rewards:[] };
+function setStatus(m, ok=true){ const s=$("#status"); s.textContent=m; s.style.color=ok?"#9aa4b2":"#e08585"; }
+function field(label, el){ const f=document.createElement("div"); f.className="field"; const l=document.createElement("label"); l.textContent=label; f.append(l, el); return f; }
+function inp(val, on, type="text"){ const i=document.createElement("input"); i.type=type; i.value=(val??""); i.oninput=()=>on(type==="number"?(i.value===""?0:(parseInt(i.value)||0)):i.value); return i; }
+function chk(val, on){ const i=document.createElement("input"); i.type="checkbox"; i.checked=!!val; i.style.marginBottom="8px"; i.onchange=()=>on(i.checked?1:0); return i; }
+function card(title){ const d=document.createElement("div"); d.className="card"; const h=document.createElement("h2"); h.textContent=title; d.appendChild(h); return d; }
+function picker(endpoint, placeholder, add){
+  const wrap=document.createElement("div"); wrap.className="pick";
+  const i=document.createElement("input"); i.type="text"; i.placeholder=placeholder; i.style.width="100%";
+  const res=document.createElement("div"); res.className="pickres"; let t=null;
+  i.oninput=()=>{ clearTimeout(t); t=setTimeout(async()=>{
+    const arr=await (await fetch(endpoint+"?q="+encodeURIComponent(i.value.trim()))).json();
+    res.innerHTML=""; res.style.display=arr.length?"block":"none";
+    for(const m of arr){ const d=document.createElement("div"); d.textContent=m.id+" — "+m.name;
+      d.onclick=()=>{ add(m.id, m.name); i.value=""; res.style.display="none"; }; res.appendChild(d); }
+  }, 180); };
+  i.onblur=()=>setTimeout(()=>res.style.display="none", 200);
+  wrap.append(i, res); return wrap;
+}
+function rewardText(r){
+  if(r.reward_type==="item") return (r.name?r.name+"  ":"")+"#"+r.reward_value;
+  if(r.reward_type==="achievement") return "bit "+r.reward_value+" -> "+(r.reward_field||"ip25");
+  return String(r.reward_value);
+}
+
+let LIST = [];
+async function loadList(){ LIST = await (await fetch("list")).json(); }
+function showResults(q){
+  q=(q||"").trim().toLowerCase();
+  const box=$("#results"); box.innerHTML="";
+  let arr = q ? LIST.filter(it => String(it.ID).toLowerCase().includes(q) || (it.name||"").toLowerCase().includes(q)) : LIST;
+  arr = arr.slice(0, 60);
+  for(const it of arr){ const d=document.createElement("div"); d.textContent=it.ID+" — "+it.name;
+    d.onmousedown=()=>{ $("#search").value=it.ID; box.style.display="none"; loadCode(it.ID); }; box.appendChild(d); }
+  box.style.display = arr.length ? "block" : "none";
+}
+function newRecord(){
+  const v = prompt("New code:", "");
+  if(v==null) return;
+  const code = v.trim();
+  if(!code){ setStatus("code can't be blank", false); return; }
+  if(LIST.some(it=>String(it.ID).toLowerCase()===code.toLowerCase())){ setStatus("code "+code+" exists — loading it", false); loadCode(code); return; }
+  data = { redeem:{ code:code, description:"", max_uses:0, active:1 }, rewards:[] }; render(); setStatus("new code "+code+" — add reward(s) + Save");
+}
+async function loadCode(code){
+  if(!code) return;
+  data = await (await fetch("load?ID="+encodeURIComponent(code))).json();
+  if(!data || !data.redeem || !data.redeem.code){ data={ redeem:{ code:code, description:"", max_uses:0, active:1 }, rewards:[] }; }
+  data.rewards = data.rewards || [];
+  render(); setStatus("loaded "+(data.redeem.code||code));
+}
+function render(){
+  const m=$("#main"); m.innerHTML="";
+  const rc=data.redeem||{};
+  const c=card("Code: "+(rc.code||"?"));
+  const r=document.createElement("div"); r.className="row";
+  r.appendChild(field("Description (blank = auto-built from rewards)", inp(rc.description, v=>rc.description=v)));
+  r.appendChild(field("Max Uses (0 = unlimited)", inp(rc.max_uses==null?0:rc.max_uses, v=>rc.max_uses=v, "number")));
+  const af=field("Active", chk(rc.active==null?1:rc.active, v=>rc.active=v)); af.style.flex="0"; af.style.minWidth="70px";
+  r.appendChild(af);
+  c.appendChild(r); m.appendChild(c);
+  const hint=document.createElement("div"); hint.className="hint";
+  hint.textContent="One redemption per account regardless of Max Uses. Every reward below is granted together on redemption.";
+  c.appendChild(hint);
+
+  const d=card("Rewards  ("+(data.rewards.length)+")");
+  if(!data.rewards.length){ const e=document.createElement("div"); e.className="empty"; e.textContent="No rewards yet. Add one below."; d.appendChild(e); }
+  data.rewards.forEach((rw,idx)=>{
+    const row=document.createElement("div"); row.className="li";
+    const nm=document.createElement("div"); nm.className="nm"; nm.textContent=rw.reward_type; row.appendChild(nm);
+    if(rw.reward_type==="item"){
+      const lbl=document.createElement("div"); lbl.className="nm"; lbl.textContent=(rw.name?rw.name+" ":"")+"#"+rw.reward_value;
+      row.appendChild(lbl);
+      row.appendChild(field("Qty", inp(rw.reward_qty??1, v=>rw.reward_qty=v, "number")));
+    } else if(rw.reward_type==="achievement"){
+      row.appendChild(field("Bitmask", inp(rw.reward_value??0, v=>rw.reward_value=v, "number")));
+      row.appendChild(field("Field", inp(rw.reward_field||"ip25", v=>rw.reward_field=v)));
+    } else {
+      row.appendChild(field(rw.reward_type==="coins"?"AC Amount":"Gold Amount", inp(rw.reward_value??0, v=>rw.reward_value=v, "number")));
+    }
+    const del=document.createElement("button"); del.className="del"; del.textContent="✕"; del.title="remove reward";
+    del.onclick=()=>{ data.rewards.splice(idx,1); render(); };
+    const dw=document.createElement("div"); dw.className="field"; dw.style.flex="0"; dw.style.minWidth="0";
+    const sp=document.createElement("label"); sp.innerHTML="&nbsp;"; dw.append(sp, del); row.appendChild(dw);
+    d.appendChild(row);
+  });
+
+  const add=document.createElement("div"); add.className="addrow"; add.style.marginTop="10px";
+  const amt=document.createElement("input"); amt.type="number"; amt.value="0"; amt.style.width="140px";
+  const addGold=document.createElement("button"); addGold.textContent="+ Gold";
+  addGold.onclick=()=>{ data.rewards.push({reward_type:"gold", reward_value:parseInt(amt.value)||0, reward_qty:1}); render(); };
+  const addCoins=document.createElement("button"); addCoins.textContent="+ AC";
+  addCoins.onclick=()=>{ data.rewards.push({reward_type:"coins", reward_value:parseInt(amt.value)||0, reward_qty:1}); render(); };
+  const addAch=document.createElement("button"); addAch.textContent="+ Achievement (ip25 bit)";
+  addAch.onclick=()=>{ data.rewards.push({reward_type:"achievement", reward_value:parseInt(amt.value)||0, reward_qty:1, reward_field:"ip25"}); render(); };
+  add.append(field("Amount / bitmask", amt), addGold, addCoins, addAch);
+  d.appendChild(add);
+  d.appendChild(picker("items", "find an item to add as a reward…", (id, name)=>{
+    data.rewards.push({reward_type:"item", reward_value:id, reward_qty:1, name:name});
+    render();
+  }));
+  m.appendChild(d);
+}
+async function save(){
+  const rc=data.redeem||{};
+  if(!rc.code){ setStatus("nothing to save", false); return; }
+  if(!data.rewards.length){ setStatus("add at least one reward first", false); return; }
+  setStatus("saving…");
+  const fd=new URLSearchParams(); fd.set("json", JSON.stringify(data));
+  const r=await fetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).then(r=>r.json());
+  if(r.ok){ setStatus("saved "+r.ID); loadList(); } else setStatus(r.msg||"save failed", false);
+}
+(async function(){
+  await loadList();
+  $("#search").oninput = e=>showResults(e.target.value);
+  $("#search").onfocus = e=>showResults(e.target.value);
+  $("#search").onblur = ()=>setTimeout(()=>$("#results").style.display="none", 200);
+  $("#btnNew").onclick = newRecord;
+  $("#btnSave").onclick = save;
+  const id = new URLSearchParams(location.search).get("ID");
+  if(id) loadCode(id);
+})();
+</script>
+<script src="/editor/nav.js"></script>
+</body>
+</html>

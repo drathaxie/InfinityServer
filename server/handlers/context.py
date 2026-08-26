@@ -209,8 +209,7 @@ async def _enter_area(session, writer, base, room, house_data=None):
     # has its own monster set (the captured entities carry only the m:<MonMapID> instance id).
     combat.register_area_monsters(area_name, area.get("monBranch"))
     if session.member is not None:
-        combat.drop_aggro_for(session.member.uid)   # changing map ends any combat
-        combat.auto_disengage(session.member.uid)
+        combat.cancel_player_actions(session.member.uid)  # no old-map casts/fields survive
         old = world.leave(session.member)            # leave old room, announce departure
         if old and old != area_name:
             world.broadcast(old, {"Cmd": "AreaRemove", "uid": session.member.uid,

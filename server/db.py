@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS characters (
     gender       TEXT NOT NULL DEFAULT 'M',
     gold         INTEGER NOT NULL DEFAULT 0,
     coins        INTEGER NOT NULL DEFAULT 0,
+    dust         INTEGER NOT NULL DEFAULT 0,
     level        INTEGER NOT NULL DEFAULT 1,
     exp          INTEGER NOT NULL DEFAULT 0,
     class_id     INTEGER NOT NULL DEFAULT 0,
@@ -854,6 +855,7 @@ GEM_ITEMTYPE = 43
 # Character columns added after the table's first version (additive migration).
 _CHARACTER_COLUMNS = [
     "gender TEXT NOT NULL DEFAULT 'M'", "exp INTEGER NOT NULL DEFAULT 0",
+    "dust INTEGER NOT NULL DEFAULT 0",
     "class_id INTEGER NOT NULL DEFAULT 0", "access_level INTEGER NOT NULL DEFAULT 0",
     "stat_str INTEGER NOT NULL DEFAULT 0", "stat_end INTEGER NOT NULL DEFAULT 0",
     "stat_dex INTEGER NOT NULL DEFAULT 0", "stat_int INTEGER NOT NULL DEFAULT 0",

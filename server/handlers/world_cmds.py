@@ -63,12 +63,12 @@ async def move_to_cell(session, writer, cmd, params, msg):
             combat.register_monster(session.area, ts, e.get("HP"), mon_id=mon_id, frame=frame,
                                     level=e.get("Level") or e.get("intLevel"),
                                     race=e.get("sRace") or e.get("Race"),
-                                    element=e.get("strElement") or e.get("Element"))
+                                    element=e.get("strElement") or e.get("Element"),
+                                    x=e.get("x"), y=e.get("y"))
     if session.member is not None:
         # changing cell breaks combat: drop the player's aggro so monsters in the
         # old cell stop attacking them across frames, and stop auto-attacking.
-        combat.drop_aggro_for(session.member.uid)
-        combat.auto_disengage(session.member.uid)
+        combat.cancel_player_actions(session.member.uid)
         session.member.frame = frame
         peers = [world.entity(m) for m in world.members(session.area, exclude=session.member.uid)
                  if m.frame == frame]

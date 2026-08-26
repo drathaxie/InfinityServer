@@ -46,6 +46,15 @@ def _cmds(writer):
     return out
 
 
+def _packets(writer):
+    """Decoded framed JSON packets written to this socket."""
+    out = []
+    for chunk in bytes(writer.data).split(b"\x00"):
+        if chunk:
+            out.append(json.loads(chunk))
+    return out
+
+
 def _mkchar(conn, name):
     conn.execute("INSERT INTO accounts(username, password) VALUES(?, 'x')", (name,))
     acc = conn.execute("SELECT id FROM accounts WHERE username=?", (name,)).fetchone()["id"]
@@ -114,6 +123,15 @@ def main():
         assert bob_gid == gid, "bob joined alice's guild"
         assert "gAddMem" in _cmds(wa), "existing member told about the newcomer"
         assert "newGuild" in _cmds(wb), "joiner gets the guild"
+        # Guild membership remains native playerInfo.guild, but the retired custom nameplate-tag
+        # transport deliberately carries blanks so older PC loaders clear their local tag cache.
+        init = game.build_init_player(conn, sa.char)
+        assert init["user"]["guildName"] == "" and init["user"]["guildTagColor"] == "", \
+            "custom guild nameplate tag is disabled"
+        assert "tagShop" not in init, "custom guild tag shop is not served"
+        wa.data.clear()
+        await server.dispatch(sa, wa, _pkt("cmd", "tagcolor"))
+        assert "chatm" in _cmds(wa), "retired tag command reports unavailable"
         # motd (alice is leader)
         wa.data.clear(); wb.data.clear()
         await server.dispatch(sa, wa, _pkt("gmotd", "Welcome!"))
@@ -156,15 +174,20 @@ def main():
         assert new_g == "F", "gender flipped to F"
         assert "genderSwap" in _cmds(wa), "genderSwap broadcast"
 
-        # --- titles: list owned, equip a valid one (persist + broadcast), reject a spoofed one ---
+        # --- custom titles through AE's native picker/save protocol ---
         import titles as titlesvc
 
         def _reload(c):
             return conn.execute("SELECT * FROM characters WHERE id=?", (c["id"],)).fetchone()
 
+        assert "Hero" in titlesvc.available_titles(sa.char), "custom title is available to all players"
+
         wa.data.clear()
         await server.dispatch(sa, wa, _pkt("getPlayerTitles"))
         assert "getPlayerTitles" in _cmds(wa), "getPlayerTitles returns a list"
+        response = next(p for p in _packets(wa) if p["Cmd"] == "getPlayerTitles")
+        assert response["Titles"] == titlesvc.available_titles(sa.char), \
+            "native picker response carries the custom catalog"
 
         wa.data.clear(); wb.data.clear()
         await server.dispatch(sa, wa, _pkt("savePlayerTitle", "Hero"))

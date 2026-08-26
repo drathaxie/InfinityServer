@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cutscene Editor</title>
+<style>
+  :root { --bg:#1d2127; --panel:#272c34; --panel2:#2f3640; --line:#3a4150; --ink:#e6e9ef;
+          --muted:#9aa4b2; --accent:#5b8cff; --accent2:#3fa46a; --danger:#c0504d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink);
+         height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+  header { display:flex; gap:8px; align-items:center; padding:10px 14px; background:var(--panel);
+           border-bottom:1px solid var(--line); flex-wrap:wrap; z-index:5; }
+  header h1 { font-size:15px; margin:0 10px 0 0; font-weight:600; }
+  select, input, button, textarea { font:inherit; color:var(--ink); background:var(--panel2);
+           border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  textarea { width:100%; resize:vertical; min-height:44px; }
+  input[type=text], input[type=number] { width:100%; }
+  button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  button.go { background:var(--accent2); border-color:var(--accent2); color:#fff; }
+  button.del { background:transparent; border-color:var(--line); color:var(--muted); padding:4px 9px; }
+  button.del:hover { color:#fff; border-color:var(--danger); background:var(--danger); }
+  button.add { background:var(--panel2); }
+  button.mini { padding:3px 7px; font-size:12px; }
+  .status { margin-left:auto; color:var(--muted); font-size:13px; }
+  .finder { position:relative; } .finder input { min-width:230px; }
+  .results { position:absolute; z-index:30; left:0; right:0; top:100%; background:var(--panel2);
+             border:1px solid var(--line); border-radius:6px; max-height:340px; overflow:auto; display:none; }
+  .results div { padding:6px 9px; cursor:pointer; } .results div:hover { background:var(--accent); color:#fff; }
+  .layout { flex:1; display:flex; min-height:0; }
+  .side { width:340px; min-width:300px; background:var(--panel); border-right:1px solid var(--line);
+          overflow-y:auto; padding:12px; }
+  .side.right { border-right:none; border-left:1px solid var(--line); width:320px; }
+  .center { flex:1; display:flex; flex-direction:column; min-width:0; }
+  .stagewrap { flex:1; position:relative; background:#15181d; overflow:hidden; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  .toolbar { display:flex; gap:6px; align-items:center; padding:8px 12px; background:var(--panel);
+             border-top:1px solid var(--line); flex-wrap:wrap; }
+  .pager { display:flex; gap:5px; align-items:center; }
+  .pager .count { min-width:66px; text-align:center; color:var(--muted); }
+  h2 { font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:.05em; margin:14px 0 7px; }
+  h2:first-child { margin-top:0; }
+  .grp { margin-bottom:6px; }
+  .objrow { display:flex; align-items:center; gap:6px; padding:5px 7px; border:1px solid var(--line);
+            border-radius:7px; margin-bottom:5px; background:var(--panel2); cursor:pointer; }
+  .objrow.sel { border-color:var(--accent); background:#33405c; }
+  .objrow .tag { font-size:10px; color:var(--muted); border:1px solid var(--line); border-radius:4px; padding:1px 4px; }
+  .objrow .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+  .objrow.off .nm { color:var(--muted); text-decoration:line-through; }
+  .field { display:flex; flex-direction:column; gap:3px; margin-bottom:7px; }
+  .field label { font-size:12px; color:var(--muted); }
+  .row2 { display:flex; gap:8px; } .row2 > * { flex:1; }
+  .row3 { display:flex; gap:6px; } .row3 > * { flex:1; }
+  .pick { position:relative; }
+  .pickres { position:absolute; z-index:25; left:0; right:0; top:100%; background:var(--panel2);
+             border:1px solid var(--line); border-radius:6px; max-height:220px; overflow:auto; display:none; }
+  .pickres div { padding:5px 8px; cursor:pointer; font-size:13px; } .pickres div:hover { background:var(--accent); color:#fff; }
+  .hint { color:var(--muted); font-size:12px; margin:8px 0; }
+  .rawcmd { font:12px/1.4 ui-monospace,Consolas,monospace; background:var(--panel2); border:1px solid var(--line);
+            border-radius:6px; padding:4px 7px; margin-bottom:4px; display:flex; gap:6px; align-items:center; }
+  .rawcmd .txt { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:text; }
+  .rawcmd.dirty { border-color:var(--accent2); }
+  .swatch { display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid var(--line); vertical-align:middle; }
+  .empty { color:var(--muted); font-style:italic; }
+  details { margin-top:6px; } summary { cursor:pointer; color:var(--muted); font-size:12px; }
+  .addbar { display:flex; flex-wrap:wrap; gap:5px; margin:6px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cutscene Editor</h1>
+  <div class="finder">
+    <input id="search" placeholder="Search a cutscene…" autocomplete="off">
+    <div id="results" class="results"></div>
+  </div>
+  <button class="add" id="btnNew">New cutscene</button>
+  <button class="go" id="btnSave">Save</button>
+  <span class="status" id="status">Pick or create a cutscene to begin.</span>
+</header>
+
+<div class="layout">
+  <!-- LEFT: scene meta + object tree -->
+  <aside class="side" id="left">
+    <h2>Scene</h2>
+    <div class="field"><label>Name</label><input id="scName" type="text"></div>
+    <div class="field"><label>Description</label><input id="scDesc" type="text"></div>
+    <div class="field"><label>Stored ID</label><input id="scId" type="text" disabled></div>
+
+    <h2>Add asset (frame 0)</h2>
+    <div class="addbar">
+      <button class="add mini" data-add="actor">+ Actor bundle</button>
+      <button class="add mini" data-add="npc">+ NPC</button>
+      <button class="add mini" data-add="player">+ Player</button>
+      <button class="add mini" data-add="bg">+ Background</button>
+      <button class="add mini" data-add="music">+ Music</button>
+      <button class="add mini" data-add="sfx">+ SFX</button>
+      <button class="add mini" data-add="box">+ Dialog box</button>
+    </div>
+    <div id="addpanel"></div>
+
+    <h2>Objects</h2>
+    <div id="tree"></div>
+  </aside>
+
+  <!-- CENTER: canvas + pager + tools -->
+  <section class="center">
+    <div class="stagewrap" id="stagewrap"><canvas id="stage"></canvas></div>
+    <div class="toolbar">
+      <div class="pager">
+        <button class="mini" id="pgFirst">⏮ First</button>
+        <button class="mini" id="pgBack">◀ Back</button>
+        <span class="count" id="pgCount">– / –</span>
+        <button class="mini" id="pgNext">Next ▶</button>
+        <button class="mini" id="pgEnd">End ⏭</button>
+      </div>
+      <button class="add mini" id="pgNew">New page (clone)</button>
+      <button class="add mini" id="pgBlank">Blank page</button>
+      <button class="del mini" id="pgDel">Delete page</button>
+      <span style="width:12px"></span>
+      <button class="add mini" id="tTimer">+ Timer</button>
+      <button class="add mini" id="tFadeTo">FadeToBlack</button>
+      <button class="add mini" id="tFadeFrom">FadeFromBlack</button>
+      <button class="add mini" id="tCutTo">CutToBlack</button>
+      <button class="add mini" id="tCutFrom">CutFromBlack</button>
+      <span class="status" id="fstatus"></span>
+    </div>
+  </section>
+
+  <!-- RIGHT: selected-object properties + raw frame commands -->
+  <aside class="side right" id="right">
+    <div id="props"><p class="empty">Select an object on the left or the canvas.</p></div>
+    <details open>
+      <summary>Frame commands (raw)</summary>
+      <div id="rawlist"></div>
+      <button class="add mini" id="addRaw" style="margin-top:6px">+ raw command</button>
+    </details>
+  </aside>
+</div>
+
+<datalist id="anims">
+  <option>Idle</option><option>Walk</option><option>Run</option><option>Attack1</option>
+  <option>Attack2</option><option>Attack3</option><option>Death</option><option>Hurt</option>
+  <option>em_unsheath</option><option>em_punt</option><option>n</option>
+</datalist>
+
+<script>
+const $ = s => document.querySelector(s);
+const el = (t,c) => { const e=document.createElement(t); if(c) e.className=c; return e; };
+function setStatus(m, ok=true){ const s=$("#status"); s.textContent=m; s.style.color=ok?"#9aa4b2":"#e08585"; }
+function setF(m){ $("#fstatus").textContent=m||""; }
+
+// ---- model ---------------------------------------------------------------
+// envelope: the parsed Dialogger_Data (key order preserved for byte-identical saves).
+// frames:   parallel array of arrays of command objects {name, params|null, orig, dirty}.
+let LIST=[], envelope=null, frames=[], page=0, sel=null, origRaw="", curId="";
+
+function parseCmd(str){
+  const m = str.match(/^([A-Za-z]+)\{([\s\S]*)\}$/);
+  if(!m) return { name:str, params:null, bare:true, orig:str, dirty:false };  // "" or a bare flag
+  return { name:m[1], params:m[2].split("|"), orig:str, dirty:false };
+}
+function buildCmd(c){
+  if(c.dirty===false) return c.orig;                 // verbatim passthrough — the round-trip guarantee
+  if(c.params===null) return c.name;                 // bare flag / empty
+  return c.name + "{" + c.params.join("|") + "}";
+}
+function serialize(){
+  envelope.frames = frames.map(f => f.map(buildCmd));
+  const rebuilt = JSON.stringify(envelope);
+  // If nothing was edited but the rebuilt bytes differ from what we loaded (source was
+  // pretty-printed), preserve the original raw so an untouched scene round-trips exactly.
+  const anyDirty = frames.some(f => f.some(c => c.dirty)) || envDirty;
+  if(!anyDirty && origRaw && rebuilt !== origRaw) return origRaw;
+  return rebuilt;
+}
+let envDirty=false;
+
+function curFrame(){ return frames[page] || []; }
+function markDirty(c){ c.dirty=true; }
+
+// find a command in the current frame by name (+ optional id in params[0])
+function findCmd(name, id){
+  return curFrame().find(c => c.name===name && (id===undefined || (c.params && c.params[0]===String(id))));
+}
+function findCmdIn(frameArr, name, id){
+  return frameArr.find(c => c.name===name && (id===undefined || (c.params && c.params[0]===String(id))));
+}
+
+// ---- object roster (from frame-0 Load / SpawnBox) ------------------------
+function roster(){
+  const f0 = frames[0] || [];
+  const objs=[];
+  for(const c of f0){
+    if(c.name==="Load" && c.params){
+      const [id, link, type] = c.params;
+      objs.push({ kind:"load", id, link, type, name:loadName(link,type,id) });
+    } else if(c.name==="SpawnBox" && c.params){
+      objs.push({ kind:"box", id:c.params[0], type:"box", name:"Box "+c.params[0] });
+    }
+  }
+  return objs;
+}
+function loadName(link, type, id){
+  if(type==="player") return "Player";
+  if(type==="npc") return "NPC "+link;
+  if(type==="bg") return link || ("BG "+id);
+  if(type==="music") return "Music "+link;
+  if((type==="actor"||type==="sfx") && link){ const p=link.split(","); return p[1]||p[0]; }
+  return (type||"?")+" "+id;
+}
+function category(o){
+  if(o.kind==="box") return "Boxes";
+  if(o.type==="music"||o.type==="sfx") return "Audio";
+  if(o.type==="bg") return "BGs";
+  if(o.type==="actor" && /(^|[^a-z])bg([^a-z]|$)|background|scenery|_bg|-bg/i.test(o.name)) return "BGs";
+  return "Actors";
+}
+
+// ---- server I/O ----------------------------------------------------------
+async function loadList(){ LIST = await (await fetch("list")).json(); }
+function showResults(q){
+  q=(q||"").trim().toLowerCase(); const box=$("#results"); box.innerHTML="";
+  let arr = q ? LIST.filter(it => (it.name||"").toLowerCase().includes(q) || String(it.ID).includes(q)) : LIST;
+  arr = arr.slice(0, 80);
+  for(const it of arr){ const d=el("div"); d.textContent = it.ID+" — "+it.name;
+    d.onmousedown=()=>{ $("#search").value=it.name; box.style.display="none"; loadScene(it.ID); }; box.appendChild(d); }
+  box.style.display = arr.length ? "block" : "none";
+}
+async function loadScene(id){
+  const txt = await (await fetch("load?ID="+encodeURIComponent(id))).text();
+  if(!txt.trim()){ setStatus("cutscene "+id+" is empty", false); return; }
+  try { envelope = JSON.parse(txt); } catch(e){ setStatus("stored JSON is unparseable", false); return; }
+  adopt(txt, String(id));
+  setStatus(`loaded cutscene ${id} — ${frames.length} page(s)`);
+}
+function adopt(txt, id){
+  origRaw = txt; curId = id; envDirty=false;
+  envelope.frames = envelope.frames || [[""]];
+  frames = envelope.frames.map(fr => (fr||[]).map(parseCmd));
+  page=0; sel=null;
+  $("#scName").value = envelope.cutsceneName||"";
+  $("#scDesc").value = envelope.cutsceneDescription||"";
+  $("#scId").value = id;
+  renderAll();
+}
+function newScene(){
+  envelope = { ID:"", cutsceneName:"New Cutscene", cutsceneDescription:"", idCount:0, boxCount:0,
+               trackCount:0, sfxCount:0, completeActions:[], frames:[[""]] };
+  adopt("", "");
+  origRaw=""; setStatus("new cutscene — add assets, then Save to mint an id");
+}
+async function save(){
+  if(!envelope){ setStatus("nothing to save", false); return; }
+  envelope.cutsceneName = $("#scName").value;
+  envelope.cutsceneDescription = $("#scDesc").value;
+  const json = serialize();
+  const fd = new URLSearchParams(); fd.set("id", curId||""); fd.set("json", json);
+  setStatus("saving…");
+  const r = await fetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).then(r=>r.json());
+  if(r.ok){ curId=String(r.ID); $("#scId").value=curId; origRaw=json; envDirty=false;
+            frames.forEach(f=>f.forEach(c=>c.dirty=false));
+            setStatus(`saved cutscene ${r.ID} (${json.length} bytes)`); await loadList(); }
+  else setStatus(r.msg||"save failed", false);
+}
+
+// ---- rendering: object tree ----------------------------------------------
+function renderTree(){
+  const t=$("#tree"); t.innerHTML="";
+  const cats={ Camera:[{kind:"camera",id:"cam",type:"camera",name:"Camera"}], Actors:[], BGs:[], Boxes:[], Audio:[] };
+  for(const o of roster()) (cats[category(o)]||cats.Actors).push(o);
+  for(const cat of ["Camera","Actors","BGs","Boxes","Audio"]){
+    const list=cats[cat]; if(!list.length) continue;
+    const h=el("h2"); h.textContent=cat; t.appendChild(h);
+    for(const o of list){
+      const key=o.kind+":"+o.id;
+      const row=el("div","objrow"+(sel===key?" sel":""));
+      // dim if hidden on this page
+      let vis=true;
+      if(o.kind==="load"){ const oc=findCmd("Object",o.id); if(oc&&oc.params) vis=oc.params[1]!=="0"; }
+      if(o.kind==="box"){ const bc=findCmd("Box",o.id); if(bc&&bc.params) vis=bc.params[4]!=="0"; }
+      if(!vis) row.classList.add("off");
+      const tag=el("span","tag"); tag.textContent=o.type; row.appendChild(tag);
+      const nm=el("span","nm"); nm.textContent=(o.id!=="cam"?("#"+o.id+" "):"")+o.name; row.appendChild(nm);
+      if(o.kind!=="camera"){
+        const d=el("button","del mini"); d.textContent="✕"; d.title="remove asset (all frames)";
+        d.onclick=(e)=>{ e.stopPropagation(); removeObject(o); }; row.appendChild(d);
+      }
+      row.onclick=()=>{ sel=key; renderTree(); renderProps(); drawStage(); };
+      t.appendChild(row);
+    }
+  }
+  if(!roster().length){ const e=el("p","hint"); e.textContent="No assets yet — add one above."; t.appendChild(e); }
+}
+
+// ---- rendering: selected-object properties -------------------------------
+function num(v){ return (v===""||v==null)?0:(parseFloat(v)||0); }
+function fieldInp(label, val, on, type="text"){
+  const f=el("div","field"); const l=el("label"); l.textContent=label;
+  const i=el("input"); i.type=type; i.value=(val??""); i.oninput=()=>on(i.value);
+  f.append(l,i); return f;
+}
+function renderProps(){
+  const p=$("#props"); p.innerHTML="";
+  if(!sel){ p.innerHTML='<p class="empty">Select an object on the left or the canvas.</p>'; return; }
+  const [kind,id]=sel.split(":");
+  if(kind==="camera") return renderCameraProps(p);
+  if(kind==="box") return renderBoxProps(p, id);
+  return renderObjectProps(p, id);
+}
+function ensureObjectCmd(id){
+  let c=findCmd("Object",id);
+  if(c) return c;
+  // clone the nearest prior frame's Object for this id, else a default
+  for(let k=page-1;k>=1;k--){ const pc=findCmdIn(frames[k],"Object",id); if(pc){ c=parseCmd(pc.orig); c.dirty=true; break; } }
+  if(!c) c=parseCmd(`Object{${id}|1|1|0|1|0|0|0|-1 0|FFFFFFFF|0|0|1}`), c.dirty=true;
+  else c.params[0]=String(id);
+  curFrame().push(c); return c;
+}
+function objFieldRow(c, label, idx, cb){
+  return fieldInp(label, c.params[idx], v=>{ c.params[idx]=v; markDirty(c); if(cb)cb(); drawStage(); renderTree(); });
+}
+function renderObjectProps(p, id){
+  const o=roster().find(x=>x.kind==="load"&&x.id===id);
+  const title=el("h2"); title.textContent=(o?o.name:("#"+id)); p.appendChild(title);
+  let c=findCmd("Object",id);
+  if(!c){ const b=el("button","add"); b.textContent="Place on this page"; b.onclick=()=>{ ensureObjectCmd(id); renderProps(); drawStage(); }; p.appendChild(b);
+    const h=el("p","hint"); h.textContent="This object has no transform on the current page."; p.appendChild(h); return; }
+  const row2=(a,b)=>{ const r=el("div","row2"); r.append(a,b); return r; };
+  p.appendChild(row2(objFieldRow(c,"X",5), objFieldRow(c,"Y",6)));
+  p.appendChild(row2(objFieldRow(c,"Scale",4), objFieldRow(c,"Rotation",10)));
+  p.appendChild(row2(objFieldRow(c,"Z-order",3), objFieldRow(c,"Pos Z",7)));
+  // visible / direction / active as selects
+  const vis=el("select"); [["1","visible"],["0","hidden"]].forEach(([v,t])=>{const op=el("option");op.value=v;op.textContent=t;vis.appendChild(op);});
+  vis.value=c.params[1]; vis.onchange=()=>{ c.params[1]=vis.value; markDirty(c); drawStage(); renderTree(); };
+  const dir=el("select"); [["1","face right"],["-1","face left"]].forEach(([v,t])=>{const op=el("option");op.value=v;op.textContent=t;dir.appendChild(op);});
+  dir.value=c.params[2]; dir.onchange=()=>{ c.params[2]=dir.value; markDirty(c); drawStage(); };
+  const vf=el("div","field"); const vl=el("label"); vl.textContent="Visible"; vf.append(vl,vis);
+  const df=el("div","field"); const dl=el("label"); dl.textContent="Facing"; df.append(dl,dir);
+  p.appendChild(row2(vf,df));
+  p.appendChild(objFieldRow(c,"Tween (speed ease [shi sht shk])",8));
+  // tint with swatch
+  const tf=objFieldRow(c,"Tint (hex)",9); p.appendChild(tf);
+  // animation
+  const af=el("div","field"); const al=el("label"); al.textContent="Animation (Actor on this page)";
+  const ai=el("input"); ai.setAttribute("list","anims");
+  const ac=findCmd("Actor",id); ai.value = ac&&ac.params?ac.params[1]:"";
+  ai.placeholder="e.g. Idle, Walk, Cut_X#Face_Y";
+  ai.onchange=()=>{ setActorAnim(id, ai.value); };
+  af.append(al,ai); p.appendChild(af);
+  const rm=el("button","del"); rm.textContent="Remove transform from this page";
+  rm.onclick=()=>{ const i=curFrame().indexOf(c); if(i>=0)curFrame().splice(i,1); envDirty=true; renderProps(); drawStage(); renderTree(); };
+  p.appendChild(rm);
+}
+function setActorAnim(id, anim){
+  let a=findCmd("Actor",id);
+  if(!anim){ if(a){ const i=curFrame().indexOf(a); curFrame().splice(i,1); envDirty=true; } drawStage(); return; }
+  if(!a){ a=parseCmd(`Actor{${id}|${anim}|1}`); a.dirty=true; curFrame().push(a); }
+  else { a.params[1]=anim; markDirty(a); }
+  setF("animation set");
+}
+function renderCameraProps(p){
+  const title=el("h2"); title.textContent="Camera"; p.appendChild(title);
+  let c=findCmd("Camera");
+  if(!c){ c=parseCmd("Camera{1|0|0|1|0|-1 0|0}"); c.dirty=true; curFrame().push(c); }
+  if(c.params.length<7){ // upgrade legacy 5-field to 7-field for editing
+    const x=c.params[0],y=c.params[1],sc=c.params[3]||"1",sp=c.params[4]||"-1";
+    c.params=[sc,x,y,"1","0",sp+" 0","0"]; markDirty(c);
+  }
+  const row2=(a,b)=>{ const r=el("div","row2"); r.append(a,b); return r; };
+  const F=(lbl,idx)=>fieldInp(lbl,c.params[idx],v=>{c.params[idx]=v;markDirty(c);drawStage();});
+  p.appendChild(row2(F("Zoom",0),F("Rotation",4)));
+  p.appendChild(row2(F("X",1),F("Y",2)));
+  p.appendChild(row2(F("Pos Z",3),F("Curve",6)));
+  p.appendChild(F("Tween (speed ease [shi sht shk])",5));
+}
+function ensureSpawn(id){ if(!findCmdIn(frames[0],"SpawnBox",id)){ const s=parseCmd(`SpawnBox{${id}}`); s.dirty=true; frames[0].push(s); } }
+function renderBoxProps(p, id){
+  const title=el("h2"); title.textContent="Box "+id; p.appendChild(title);
+  let c=findCmd("Box",id);
+  if(!c){ const b=el("button","add"); b.textContent="Show box on this page";
+    b.onclick=()=>{ ensureSpawn(id); const nc=parseCmd(`Box{${id}|0|0|1|1|0.5|0.862069|<size=42></size>\n<size=24></size>||1|0|38|000000|FFFFFF|FFFFFF|000000|-1|0|0}`); nc.dirty=true; curFrame().push(nc); renderProps(); drawStage(); };
+    p.appendChild(b); const h=el("p","hint"); h.textContent="This box isn't shown on the current page."; p.appendChild(h); return; }
+  // nameplate = <size=42>NAME</size>\n<size=24>SUB</size>
+  const np=c.params[7]||""; const nm=(np.match(/<size=42>([\s\S]*?)<\/size>/)||[,""])[1];
+  const sub=(np.match(/<size=24>([\s\S]*?)<\/size>/)||[,""])[1];
+  const row2=(a,b)=>{ const r=el("div","row2"); r.append(a,b); return r; };
+  // speaker name / subtitle
+  function setPlate(name, subt){ c.params[7] = (name||subt) ? (`<size=42>${name}</size>\n<size=24>${subt}</size>`) : ""; markDirty(c); drawStage(); }
+  const nmF=fieldInp("Speaker name", nm, v=>setPlate(v, subF.q().value));
+  const subF=fieldInp("Subtitle", sub, v=>setPlate(nmF.q().value, v));
+  nmF.q=()=>nmF.querySelector("input"); subF.q=()=>subF.querySelector("input");
+  p.appendChild(row2(nmF, subF));
+  // body (textarea)
+  const bf=el("div","field"); const bl=el("label"); bl.textContent="Dialog text";
+  const ta=el("textarea"); ta.value=c.params[8]||""; ta.oninput=()=>{ c.params[8]=ta.value.replace(/\|/g,"/"); markDirty(c); drawStage(); }; ta.rows=3;
+  bf.append(bl,ta); p.appendChild(bf);
+  const hint=el("p","hint"); hint.textContent="Note: a | is not allowed in text (it splits fields) — it is replaced with /."; p.appendChild(hint);
+  // visibility + position + size
+  const vis=el("select"); [["1","visible"],["0","hidden"]].forEach(([v,t])=>{const op=el("option");op.value=v;op.textContent=t;vis.appendChild(op);});
+  vis.value=c.params[4]; vis.onchange=()=>{ c.params[4]=vis.value; markDirty(c); drawStage(); renderTree(); };
+  const vf=el("div","field"); const vl=el("label"); vl.textContent="Visible"; vf.append(vl,vis);
+  const F=(lbl,idx)=>fieldInp(lbl,c.params[idx],v=>{c.params[idx]=v;markDirty(c);drawStage();});
+  p.appendChild(row2(vf, F("Scale",3)));
+  p.appendChild(row2(F("X",1),F("Y",2)));
+  p.appendChild(row2(F("Width",5),F("Height",6)));
+  p.appendChild(row2(F("Font size",11), F("Skin",18)));
+  // colors — a labelled hex input + live swatch each
+  function colorField(lbl, idx){
+    const f=el("div","field"); const l=el("label"); l.innerHTML=lbl+' <span class="swatch" style="background:#'+(c.params[idx]||"000000")+'"></span>';
+    const i=el("input"); i.type="text"; i.value=c.params[idx];
+    i.oninput=()=>{ c.params[idx]=i.value.replace(/[^0-9A-Fa-f]/g,""); l.querySelector(".swatch").style.background="#"+c.params[idx]; markDirty(c); drawStage(); };
+    f.append(l,i); return f;
+  }
+  p.appendChild(row2(colorField("Plate",12), colorField("Name text",13)));
+  p.appendChild(row2(colorField("Box",14), colorField("Body text",15)));
+  p.appendChild(row2(F("Lead shown",16), F("Lead pos",17)));
+  const rm=el("button","del"); rm.textContent="Hide box on this page (remove Box cmd)";
+  rm.onclick=()=>{ const i=curFrame().indexOf(c); if(i>=0)curFrame().splice(i,1); envDirty=true; renderProps(); drawStage(); renderTree(); };
+  p.appendChild(rm);
+}
+
+// ---- rendering: raw frame commands ---------------------------------------
+function renderRaw(){
+  const rl=$("#rawlist"); rl.innerHTML="";
+  curFrame().forEach((c,i)=>{
+    const row=el("div","rawcmd"+(c.dirty?" dirty":""));
+    const txt=el("span","txt"); txt.textContent = buildCmd(c)||"(empty)"; txt.title="click to edit as text";
+    txt.onclick=()=>{ const v=prompt("Edit command:", buildCmd(c)); if(v!=null){ const nc=parseCmd(v); nc.dirty=true; curFrame()[i]=nc; envDirty=true; renderAll(); } };
+    const d=el("button","del mini"); d.textContent="✕";
+    d.onclick=()=>{ curFrame().splice(i,1); envDirty=true; renderAll(); };
+    row.append(txt,d); rl.appendChild(row);
+  });
+  if(!curFrame().length){ const e=el("p","hint"); e.textContent="No commands on this page."; rl.appendChild(e); }
+}
+
+// ---- canvas stage --------------------------------------------------------
+const cv=$("#stage"), ctx=cv.getContext("2d");
+let view={ scale:0.28, ox:0, oy:0 }, drag=null, panning=null;
+function resizeCanvas(){ const w=$("#stagewrap"); cv.width=w.clientWidth; cv.height=w.clientHeight; drawStage(); }
+function W2S(x,y){ return [cv.width/2 + (x+view.ox)*view.scale, cv.height/2 - (y+view.oy)*view.scale]; }
+function S2W(sx,sy){ return [(sx-cv.width/2)/view.scale - view.ox, -((sy-cv.height/2)/view.scale) - view.oy]; }
+let hit=[];  // drawn object screen rects for hit-testing
+function drawStage(){
+  if(!ctx) return;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.fillStyle="#15181d"; ctx.fillRect(0,0,cv.width,cv.height);
+  if(!envelope){ return; }
+  // grid + origin
+  ctx.strokeStyle="#222831"; ctx.lineWidth=1;
+  const [ox,oy]=W2S(0,0);
+  ctx.beginPath(); ctx.moveTo(ox,0); ctx.lineTo(ox,cv.height); ctx.moveTo(0,oy); ctx.lineTo(cv.width,oy); ctx.stroke();
+  hit=[];
+  if(page===0){ // setup page renders nothing
+    ctx.fillStyle="#5b6472"; ctx.font="14px system-ui"; ctx.textAlign="center";
+    ctx.fillText("Page 0 — setup / asset load (renders nothing in game)", cv.width/2, cv.height/2);
+    ctx.textAlign="left"; drawCameraFrame(); return;
+  }
+  // gather Object transforms, sort by z
+  const objs = curFrame().filter(c=>c.name==="Object"&&c.params).map(c=>({c, id:c.params[0],
+     vis:c.params[1]!=="0", z:num(c.params[3]), scale:num(c.params[4]), x:num(c.params[5]), y:num(c.params[6]),
+     rot:num(c.params[10]), tint:c.params[9], dir:num(c.params[2]) }));
+  objs.sort((a,b)=>a.z-b.z);
+  const names={}; for(const o of roster()) names[o.id]=o.name;
+  for(const o of objs){
+    if(!o.vis) continue;
+    const [sx,sy]=W2S(o.x,o.y); const sz=Math.max(16, 70*o.scale*view.scale);
+    ctx.save(); ctx.translate(sx,sy); ctx.rotate(-o.rot*Math.PI/180);
+    let col=tintCss(o.tint);
+    ctx.fillStyle=col; ctx.globalAlpha=0.85; ctx.fillRect(-sz/2*(o.dir<0?-1:1)-(o.dir<0?-sz:0), -sz*0.7, sz, sz*1.4);
+    ctx.globalAlpha=1; ctx.strokeStyle=(sel==="load:"+o.id)?"#5b8cff":"#0008"; ctx.lineWidth=(sel==="load:"+o.id)?3:1;
+    ctx.strokeRect(-sz/2, -sz*0.7, sz, sz*1.4);
+    ctx.restore();
+    ctx.fillStyle="#e6e9ef"; ctx.font="11px system-ui"; ctx.textAlign="center";
+    ctx.fillText("#"+o.id+" "+(names[o.id]||""), sx, sy - sz*0.7 - 4);
+    ctx.textAlign="left";
+    hit.push({ key:"load:"+o.id, x:sx-sz/2, y:sy-sz*0.7, w:sz, h:sz*1.4, o });
+  }
+  // boxes
+  const boxes = curFrame().filter(c=>c.name==="Box"&&c.params&&c.params[4]!=="0");
+  for(const c of boxes){
+    const x=num(c.params[1]), y=num(c.params[2]), sc=num(c.params[3])||1;
+    const [sx,sy]=W2S(x,y); const bw=180*view.scale/0.28*sc, bh=70*view.scale/0.28*sc;
+    ctx.fillStyle="#"+(c.params[14]||"FFFFFF"); ctx.globalAlpha=0.95;
+    roundRect(sx-bw/2, sy-bh/2, bw, bh, 8); ctx.fill(); ctx.globalAlpha=1;
+    ctx.strokeStyle=(sel==="box:"+c.params[0])?"#5b8cff":"#0006"; ctx.lineWidth=(sel==="box:"+c.params[0])?3:1;
+    roundRect(sx-bw/2, sy-bh/2, bw, bh, 8); ctx.stroke();
+    const plate=c.params[7]||""; const nm=(plate.match(/<size=42>([\s\S]*?)<\/size>/)||[,""])[1];
+    ctx.fillStyle="#"+(c.params[15]||"000000"); ctx.font="11px system-ui"; ctx.textAlign="center";
+    if(nm){ ctx.fillStyle="#"+(c.params[13]||"FFFFFF"); ctx.fillRect(sx-bw/2, sy-bh/2-15, Math.min(bw,nm.length*7+12), 14);
+            ctx.fillStyle="#"+(c.params[12]||"000000"); ctx.fillText(nm, sx-bw/2+Math.min(bw,nm.length*7+12)/2, sy-bh/2-4); }
+    ctx.fillStyle="#"+(c.params[15]||"000000");
+    wrapText((c.params[8]||"").replace(/<[^>]*>/g,""), sx, sy-bh/2+14, bw-14, 13);
+    ctx.textAlign="left";
+    hit.push({ key:"box:"+c.params[0], x:sx-bw/2, y:sy-bh/2, w:bw, h:bh });
+  }
+  drawCameraFrame();
+}
+function drawCameraFrame(){
+  const c=findCmd("Camera"); if(!c||!c.params) return;
+  let zoom, cx, cy;
+  if(c.params.length>=7){ zoom=num(c.params[0])||1; cx=num(c.params[1]); cy=num(c.params[2]); }
+  else { cx=num(c.params[0]); cy=num(c.params[1]); zoom=num(c.params[3])||1; }
+  const halfW=760/zoom, halfH=430/zoom;
+  const [x1,y1]=W2S(cx-halfW, cy+halfH), [x2,y2]=W2S(cx+halfW, cy-halfH);
+  ctx.strokeStyle="#e0a85e"; ctx.lineWidth=1.5; ctx.setLineDash([6,4]);
+  ctx.strokeRect(x1,y1,x2-x1,y2-y1); ctx.setLineDash([]);
+  ctx.fillStyle="#e0a85e"; ctx.font="11px system-ui"; ctx.fillText("camera", x1+4, y1+14);
+}
+function tintCss(hex){ if(!hex) return "#8899bb"; const h=hex.slice(0,6).padEnd(6,"F"); return "#"+h; }
+function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function wrapText(text,cx,ty,maxw,lh){ const words=text.split(/\s+/); let line="",y=ty; for(const w of words){ const t=line?line+" "+w:w; if(ctx.measureText(t).width>maxw&&line){ ctx.fillText(line,cx,y); line=w; y+=lh; if(y>ty+lh*3){ctx.fillText(line+"…",cx,y);return;} } else line=t; } if(line)ctx.fillText(line,cx,y); }
+
+cv.addEventListener("mousedown", e=>{
+  const r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  const h=[...hit].reverse().find(t=>mx>=t.x&&mx<=t.x+t.w&&my>=t.y&&my<=t.y+t.h);
+  if(h){ sel=h.key; const [kind,id]=sel.split(":");
+    const cmd = kind==="box"?findCmd("Box",id):findCmd("Object",id);
+    if(cmd){ const xi=kind==="box"?1:5, yi=kind==="box"?2:6;
+      drag={ cmd, xi, yi, sw:S2W(mx,my), ox:num(cmd.params[xi]), oy:num(cmd.params[yi]) }; }
+    renderTree(); renderProps(); drawStage();
+  } else { panning={ mx, my, ox:view.ox, oy:view.oy }; }
+});
+window.addEventListener("mousemove", e=>{
+  if(!drag&&!panning) return;
+  const r=cv.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  if(drag){ const w=S2W(mx,my); const nx=drag.ox+(w[0]-drag.sw[0]), ny=drag.oy+(w[1]-drag.sw[1]);
+    drag.cmd.params[drag.xi]=round2(nx); drag.cmd.params[drag.yi]=round2(ny); markDirty(drag.cmd); drawStage(); setF("moving…"); }
+  else if(panning){ view.ox=panning.ox+(mx-panning.mx)/view.scale; view.oy=panning.oy-(my-panning.my)/view.scale; drawStage(); }
+});
+window.addEventListener("mouseup", ()=>{ if(drag){ renderProps(); setF(""); } drag=null; panning=null; });
+$("#stagewrap").addEventListener("wheel", e=>{ e.preventDefault(); const f=e.deltaY<0?1.1:0.9; view.scale=Math.max(0.05,Math.min(2,view.scale*f)); drawStage(); }, {passive:false});
+function round2(v){ return String(Math.round(v*100)/100); }
+
+// ---- pager + page ops ----------------------------------------------------
+function gotoPage(p){ page=Math.max(0,Math.min(frames.length-1,p)); sel=null; renderAll(); }
+function renderAll(){ $("#pgCount").textContent=(frames.length?page:"–")+" / "+(frames.length?frames.length-1:"–");
+  renderTree(); renderProps(); renderRaw(); drawStage(); }
+
+// ---- asset add panel -----------------------------------------------------
+function nextObjId(){ const n=envelope.idCount||0; envelope.idCount=n+1; envDirty=true; return n; }
+function nextBoxId(){ const n=envelope.boxCount||0; envelope.boxCount=n+1; envDirty=true; return n; }
+function addLoad(link, type){ const id=nextObjId(); const c=parseCmd(`Load{${id}|${link}|${type}}`); c.dirty=true; frames[0].push(c);
+  if(type==="music") envelope.trackCount=(envelope.trackCount||0)+1;
+  if(type==="sfx") envelope.sfxCount=(envelope.sfxCount||0)+1;
+  envDirty=true; sel="load:"+id; renderAll(); setStatus("added "+type+" #"+id); }
+function addBox(){ const id=nextBoxId(); const s=parseCmd(`SpawnBox{${id}}`); s.dirty=true; frames[0].push(s);
+  sel="box:"+id; envDirty=true; renderAll(); setStatus("added dialog box #"+id+" — select a page ≥1 to show it"); }
+
+function picker(placeholder, endpoint, fmt, onPick){
+  const wrap=el("div","pick"); const i=el("input"); i.type="text"; i.placeholder=placeholder;
+  const res=el("div","pickres"); let t=null;
+  i.oninput=()=>{ clearTimeout(t); t=setTimeout(async()=>{
+    const arr=await (await fetch(endpoint+"?q="+encodeURIComponent(i.value.trim()))).json();
+    res.innerHTML=""; res.style.display=arr.length?"block":"none";
+    for(const m of arr){ const d=el("div"); d.textContent=fmt(m); d.onmousedown=()=>{ onPick(m); res.style.display="none"; wrap.remove(); }; res.appendChild(d); } }, 180); };
+  i.onblur=()=>setTimeout(()=>res.style.display="none",200);
+  wrap.append(i,res); return wrap;
+}
+function showAdd(kind){
+  const box=$("#addpanel"); box.innerHTML="";
+  if(kind==="npc"){ box.appendChild(picker("find NPC/monster…","npcs", m=>m.id+" — "+m.name, m=>addLoad(m.id,"npc"))); }
+  else if(kind==="actor"||kind==="sfx"){
+    const p=picker("find bundle…","bundles", b=>b.id+" — "+b.name, b=>{
+      const prefab=prompt("Prefab/asset name inside bundle "+b.id+" ("+(b.name||"")+"):", b.name||"");
+      if(prefab!=null) addLoad(b.id+","+prefab, kind);
+    }); box.appendChild(p);
+    const h=el("p","hint"); h.textContent="Pick a bundle, then name the prefab inside it (actor = "+kind+")."; box.appendChild(h);
+  }
+  else if(kind==="player"){ addLoad("","player"); }
+  else if(kind==="bg"){ const f=fieldInp("Background image filename", "", ()=>{}); const inp=f.querySelector("input");
+    const b=el("button","add mini"); b.textContent="Add BG"; b.onclick=()=>{ if(inp.value.trim()) addLoad(inp.value.trim(),"bg"); };
+    box.append(f,b); }
+  else if(kind==="music"){ const f=fieldInp("Soundtrack ID", "", ()=>{}, "number"); const inp=f.querySelector("input");
+    const b=el("button","add mini"); b.textContent="Add music"; b.onclick=()=>{ if(inp.value.trim()) addLoad(inp.value.trim(),"music"); };
+    box.append(f,b); }
+  else if(kind==="box"){ addBox(); }
+}
+function removeObject(o){
+  // strip its Load/SpawnBox and every Object/Box/Actor referencing this id, across all frames
+  for(const fr of frames){ for(let i=fr.length-1;i>=0;i--){ const c=fr[i];
+    if(!c.params) continue;
+    if(o.kind==="load" && (c.name==="Load"||c.name==="Object"||c.name==="Actor") && c.params[0]===o.id) fr.splice(i,1);
+    if(o.kind==="box" && (c.name==="SpawnBox"||c.name==="Box") && c.params[0]===o.id) fr.splice(i,1);
+  }}
+  envDirty=true; if(sel===o.kind+":"+o.id) sel=null; renderAll(); setStatus("removed "+o.name);
+}
+
+// ---- toolbar: fades / timer ----------------------------------------------
+function toggleFlag(name){
+  const i=curFrame().findIndex(c=>c.bare&&c.name===name);
+  if(i>=0){ curFrame().splice(i,1); setF(name+" removed"); }
+  else { const c=parseCmd(name); c.dirty=true; curFrame().push(c); setF(name+" added"); }
+  envDirty=true; renderRaw(); drawStage();
+}
+function addTimer(){ const v=prompt("Timer seconds:", "2"); if(v==null) return;
+  const c=parseCmd("Timer{"+v+"}"); c.dirty=true; curFrame().push(c); envDirty=true; renderRaw(); setF("timer added"); }
+
+// ---- wire up -------------------------------------------------------------
+document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>showAdd(b.dataset.add));
+$("#pgFirst").onclick=()=>gotoPage(0);
+$("#pgBack").onclick=()=>gotoPage(page-1);
+$("#pgNext").onclick=()=>gotoPage(page+1);
+$("#pgEnd").onclick=()=>gotoPage(frames.length-1);
+$("#pgNew").onclick=()=>{ const clone=curFrame().map(c=>{ const n=parseCmd(c.orig!==undefined&&!c.dirty?c.orig:buildCmd(c)); return n; });
+  frames.splice(page+1,0,clone); envDirty=true; gotoPage(page+1); setStatus("cloned page"); };
+$("#pgBlank").onclick=()=>{ frames.splice(page+1,0,[]); envDirty=true; gotoPage(page+1); setStatus("blank page added"); };
+$("#pgDel").onclick=()=>{ if(frames.length<=1){ setF("can't delete the last page"); return; } if(page===0){ setF("page 0 is the required setup page"); return; }
+  frames.splice(page,1); envDirty=true; gotoPage(Math.min(page,frames.length-1)); setStatus("page deleted"); };
+$("#tTimer").onclick=addTimer;
+$("#tFadeTo").onclick=()=>toggleFlag("FadeToBlack");
+$("#tFadeFrom").onclick=()=>toggleFlag("FadeFromBlack");
+$("#tCutTo").onclick=()=>toggleFlag("CutToBlack");
+$("#tCutFrom").onclick=()=>toggleFlag("CutFromBlack");
+$("#addRaw").onclick=()=>{ const v=prompt("New command (e.g. Music{Play|0|} or OverrideMapMusic):",""); if(v){ const c=parseCmd(v); c.dirty=true; curFrame().push(c); envDirty=true; renderAll(); } };
+$("#scName").oninput=()=>{ envDirty=true; };
+$("#scDesc").oninput=()=>{ envDirty=true; };
+$("#btnNew").onclick=newScene;
+$("#btnSave").onclick=save;
+$("#search").oninput=e=>showResults(e.target.value);
+$("#search").onfocus=e=>showResults(e.target.value);
+$("#search").onblur=()=>setTimeout(()=>$("#results").style.display="none",200);
+window.addEventListener("resize", resizeCanvas);
+
+(async function(){
+  try { await loadList(); } catch(e){ setStatus("could not load cutscene list", false); }
+  resizeCanvas();
+  const id=new URLSearchParams(location.search).get("ID");
+  if(id){ $("#search").value=id; loadScene(id); } else { renderAll(); }
+})();
+</script>
+<script src="/editor/nav.js"></script>
+</body>
+</html>

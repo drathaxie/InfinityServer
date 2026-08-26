@@ -33,7 +33,7 @@ import guilds
 import handlers
 from handlers.context import (Session, send_str, send_obj, _players, _is_staff,  # noqa: F401
                               attack_summary, _handle_kills, _enter_area,        # noqa: F401
-                              load_shop, UNHANDLED, log_unhandled)               # noqa: F401
+                              load_shop, _area_allies, UNHANDLED, log_unhandled) # noqa: F401
 # (several of these are re-exported for the tests + any tooling that imports
 # server.<name>; the handler modules themselves import handlers.context directly)
 
@@ -334,6 +334,7 @@ async def ai_loop():
                 # the combat tick.
                 mon_id = combat.monster_catalog_id(area, mon)
                 skills = _monster_skills_for(mon_id, now) if mon_id else []
+                casted_skill = False
                 if skills and combat.monster_skill_due(area, mon, now):
                     idx = (combat.monster_skill_index(area, mon) + 1) % len(skills)
                     skill = skills[idx]
@@ -351,40 +352,58 @@ async def ai_loop():
                                                    "ReqTS": req_ts, "Response": node})
                         print(f"        [mob] {mon} casts {skill['name']} "
                               f"({len(skill['nodes'])}x {skill['nodes'][0].get('Name')})")
-                if now - _mon_swing.get((area, mon), 0.0) < combat.MON_ATTACK_CD:
+                    casted_skill = True
+                if casted_skill:
+                    # A telegraphed/summon skill is this monster's action for the
+                    # tick. Starting the melee timer here prevents a simultaneous
+                    # invisible basic hit from landing underneath the telegraph.
+                    _mon_swing[(area, mon)] = now
+                    continue
+                if now - _mon_swing.get((area, mon), 0.0) < \
+                        combat.monster_attack_interval(area, mon):
                     continue
                 _mon_swing[(area, mon)] = now
+                resource_before = combat.resource_total(uid)
                 attack, _hp, died = combat.monster_attack(area, mon, uid)
                 world.broadcast(area, attack)
+                if combat.resource_total(uid) != resource_before:
+                    # Arcane Shield spends five mana per landed hit. The owning
+                    # client needs an authoritative hpmp refresh immediately.
+                    await send_obj(mem.writer, combat.resource_packet(uid, mem.name))
                 print(f"        [mob] {mon} -> {attack_summary(attack)} (you {_hp} HP)")
                 if died:
                     # the lethal Attack (Immediate, HP=0) + entityDeath makes the victim's client run
                     # its real death flow: Die -> 10s respawn UI -> resPlayerTimed -> playerRes. Don't
                     # auto-revive; just stop the monsters swinging at the corpse.
-                    combat.drop_aggro_for(uid)
+                    combat.cancel_player_actions(uid)
                     world.broadcast(area, combat.player_death_packet(uid, mon))
                     print(f"  [death] {mem.name} slain by {mon} (10s respawn)")
 
             # players keep auto-attacking their target until it dies or they leave
-            for uid, area, target, data, fdata, cd in combat.auto_engagements():
+            for uid, area, target, data, fdata, cd, skill_id in combat.auto_engagements():
                 sess = _players.get(uid)
                 if sess is None or sess.member is None or \
                         not any(m.uid == uid for m in world.members(area)):
                     combat.auto_disengage(uid)
+                    continue
+                if combat.player_hp(uid) <= 0:
+                    combat.cancel_player_actions(uid)
                     continue
                 if not combat.monster_alive(area, target):   # dead/respawning -> stop
                     combat.auto_disengage(uid)
                     continue
                 if not combat.off_cooldown(uid, 0, cd):
                     continue
-                if data is not None:
-                    attack, killed, _dmg = combat.cast_skill(area, uid, 0, target, data, fdata)
-                else:
-                    attack, hit, _ = combat.auto_attack(area, target, uid)
-                    killed = [target] if hit else []
-                await send_obj(sess.writer, attack)          # the attacker
-                world.broadcast(area, attack, exclude=uid)   # everyone else in the area
-                if combat.resource_model(uid) == "conviction" and sess.member is not None:
+                resource_before = combat.resource_total(uid)
+                packets, killed, _dmg = combat.execute_auto(
+                    area, uid, target, data, fdata, skill_id, _area_allies(sess))
+                if packets and packets[0].get("StatusCode") == 0:
+                    combat.auto_disengage(uid)
+                for attack in packets:
+                    await send_obj(sess.writer, attack)          # the attacker
+                    if attack.get("StatusCode") != 0:
+                        world.broadcast(area, attack, exclude=uid)  # successful casts are visible
+                if combat.resource_total(uid) != resource_before:
                     await send_obj(sess.writer, combat.resource_packet(uid, sess.member.name))
                 if killed:
                     await _handle_kills(sess, sess.writer, killed)

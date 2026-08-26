@@ -23,8 +23,7 @@ async def tkill(session, writer, cmd, params, msg):
             await _handle_kills(session, writer, [ts])
             print(f"  [kill] {session.member.name} -> {ts}")
     elif ts.startswith("p:"):            # /die -> lethal self-hit + entityDeath; the client runs
-        combat.auto_disengage(session.member.uid)   # the real death flow (10s respawn timer)
-        combat.drop_aggro_for(session.member.uid)
+        combat.cancel_player_actions(session.member.uid)  # real death flow (10s respawn timer)
         hit = combat.lethal_self_packet(session.member.uid)
         death = combat.player_death_packet(session.member.uid, f"p:{session.member.uid}")
         for pk in (hit, death):
@@ -39,6 +38,9 @@ async def rest_revive(session, writer, cmd, params, msg):
     if session.member is None or session.char is None:
         return
     if cmd == "rest":                       # out-of-combat rest -> full-heal HP (+ mana)
+        if combat.in_combat(session.member.uid, session.area):
+            await send_obj(writer, {"Cmd": "rNotify", "msg": "You cannot rest while in combat."})
+            return
         pk = combat.rest_player(session.member.uid, session.char["name"])
         await send_obj(writer, pk)
         world.broadcast(session.area, pk, exclude=session.member.uid)
@@ -64,14 +66,17 @@ async def mon_tile_hit(session, writer, cmd, params, msg):
     hits = _gmah_hits(params)
     if hits <= 0:                       # player stood clear of the red — no damage
         return
+    resource_before = combat.resource_total(session.member.uid)
     attack, hp, died = combat.monster_tile_hit(session.area, mon, session.member.uid, hits)
     if attack is None:                  # no armed skill for this monster (stale report)
         return
     await send_obj(writer, attack)
     world.broadcast(session.area, attack, exclude=session.member.uid)
+    if combat.resource_total(session.member.uid) != resource_before:
+        await send_obj(writer, combat.resource_packet(session.member.uid, session.member.name))
     print(f"        [mob] {mon} tile-hit {session.char['name']} x{hits} -> {hp} HP")
     if died:
-        combat.drop_aggro_for(session.member.uid)
+        combat.cancel_player_actions(session.member.uid)
         world.broadcast(session.area, combat.player_death_packet(session.member.uid, mon))
         print(f"  [death] {session.char['name']} slain by {mon} (tile, 10s respawn)")
     return
@@ -92,6 +97,7 @@ async def continue_cast(session, writer, cmd, params, msg):
         return
     ctx = params[1] if len(params) > 1 else ""
     node_name = params[2] if len(params) > 2 else "?"
+    resource_before = combat.resource_total(session.member.uid)
     pkts, killed, dmg = combat.resume_cast(ctx, params)
     for pk in pkts:
         await send_obj(writer, pk)
@@ -103,6 +109,9 @@ async def continue_cast(session, writer, cmd, params, msg):
     if pkts:
         print(f"  [gai] {node_name} ctx={ctx} "
               f"-> {len(pkts)} pkt, {dmg} dmg{' KILL' if killed else ''}")
+    if combat.resource_total(session.member.uid) != resource_before:
+        await send_obj(writer, combat.resource_packet(
+            session.member.uid, session.member.name))
     await _handle_kills(session, writer, killed)
     return
 
@@ -119,44 +128,71 @@ async def begin_cast(session, writer, cmd, params, msg):
     if session.member is None:
         return
     slot = params[0] if params else "0"
-    target = combat.target_from_params(params)
+    requested_target = combat.target_from_params(params)
     try:
         slot_i = int(slot)
     except ValueError:
         return
-    if slot_i == 0 and not target:
-        return                          # auto-attack needs a target; self-buffs don't
     uid = session.member.uid
+    if slot_i < 0 or slot_i > 5:
+        await send_obj(writer, combat.cast_failure(uid, slot_i, "Invalid skill slot."))
+        return
+    if combat.player_hp(uid) <= 0:
+        await send_obj(writer, combat.cast_failure(
+            uid, slot_i, "You cannot cast while defeated."))
+        return
     # Slots 0-4 belong to the class. Slot 5 is the client's shipped sixth/potion slot and
     # resolves through the character's equipped ItemType 44 Spellstone instead.
     sk = (forge.equipped_spellstone(session.conn, session.char["id"])
           if slot_i == 5 and session.char is not None else
           forge.skill_for_slot(session.conn, session.equipped_class, slot_i))
+    if sk is None:
+        await send_obj(writer, combat.cast_failure(uid, slot_i, "Skill is unavailable."))
+        return
+    # Class skills are combat actions. A selected living monster always wins;
+    # otherwise a running engagement wins, then the nearest living monster in
+    # this cell. This lets a mobile player start combat by tapping a skill while
+    # retaining explicit desktop target selection. Slot 5 remains usable out of
+    # combat (potions, practice transformations, and other self-directed spellstones).
+    target = requested_target
+    if slot_i <= 4:
+        target = combat.resolve_combat_target(
+            session.area, uid, requested_target,
+            frame=getattr(session.member, "frame", None),
+            x=getattr(session.member, "x", None),
+            y=getattr(session.member, "y", None))
+        if target is None:
+            await send_obj(writer, combat.cast_failure(
+                uid, slot_i, "You need a living target to use combat skills."))
+            return
     data = sk["data"] if sk else None
     forge_data = sk["forge"] if sk else None
     has_graph = sk is not None and combat.has_graph(data, forge_data)
+    allowed, mana_required = combat.can_pay_resource(uid, slot_i, sk["skill_id"])
+    if not allowed:
+        await send_obj(writer, combat.cast_failure(
+            uid, slot_i, f"Not enough Mana!,{mana_required}"))
+        return
     cd = combat.skill_cooldown_ms(data, forge_data) if has_graph else 0
     if not combat.off_cooldown(uid, slot_i, cd):
-        return                          # still cooling down -> ignore the cast
+        # A terminal Fail is required to release Combat.ExecutionState. Empty
+        # Error avoids flashing a warning for a harmless duplicate request.
+        await send_obj(writer, combat.cast_failure(uid, slot_i))
+        return
     allies = _area_allies(session)      # heal/ally-buff targets (caster + nearby players)
+    resource_before = combat.resource_total(uid)
     if slot_i == 0:
         # AUTO-ATTACK: single-shot (no igai handshake, so it re-fires cleanly) and
         # SERVER-SUSTAINED (the AI loop keeps swinging on the cooldown until the target
         # dies or you leave) so you don't have to spam it.
-        if has_graph and combat.class_rules(uid, sk["skill_id"]) is not None:
-            # data-driven class: the auto is authored in the rule config too (the Infinity
-            # Hero's Heroic Strike becomes the sky-blade once the pool is armed)
-            pkts, killed, dmg = combat.begin_cast(session.area, uid, 0, target,
-                                                  data, forge_data, sk["skill_id"], allies)
-        elif has_graph:
-            attack, killed, dmg = combat.cast_skill(session.area, uid, 0, target,
-                                                    data, forge_data, sk["skill_id"], allies)
-            pkts = [attack]
-        else:
-            attack, hit, _ = combat.auto_attack(session.area, target, uid)
-            killed = [target] if hit else []
-            pkts = [attack]
-        combat.auto_engage(uid, session.area, target, data, forge_data, cd or 600)
+        auto_data = data if has_graph else None
+        auto_forge = forge_data if has_graph else None
+        auto_skill_id = sk["skill_id"] if has_graph else None
+        pkts, killed, dmg = combat.execute_auto(
+            session.area, uid, target, auto_data, auto_forge, auto_skill_id, allies)
+        if pkts and pkts[0].get("StatusCode") == 1:
+            combat.auto_engage(uid, session.area, target, auto_data, auto_forge,
+                               cd or 600, auto_skill_id)
     elif has_graph:                     # authored skill: run its graph (handshake)
         pkts, killed, dmg = combat.begin_cast(session.area, uid, slot_i, target,
                                               data, forge_data, sk["skill_id"], allies)
@@ -165,6 +201,32 @@ async def begin_cast(session, writer, cmd, params, msg):
     else:                               # unauthored skill slot -> default hit
         pkts, killed, dmg = combat.begin_cast(session.area, uid, slot_i, target,
                                               data, forge_data, None, allies)
+    cast_rejected = any(pk.get("Cmd") == "Attack" and pk.get("StatusCode") == 0
+                        for pk in pkts)
+    if cast_rejected:
+        combat.release_cooldown(uid, slot_i)
+    # A valid class cast may initially return only igai, or a pending Attack,
+    # while the client resolves Range/Hitbox. Those accepted handshakes start
+    # combat just as an immediate StatusCode-1 damage skill does.
+    cast_accepted = bool(pkts) and not cast_rejected
+    if 0 < slot_i <= 4 and cast_accepted and \
+            not combat.auto_engaged(uid, session.area, target):
+        # Starting combat with a class skill must also start the equipped class's
+        # sustained slot-0 attack. Prime its cooldown so the first automatic swing
+        # follows the authored cadence instead of overlapping the opening skill.
+        auto_sk = forge.skill_for_slot(session.conn, session.equipped_class, 0)
+        if auto_sk is not None:
+            auto_data = auto_sk["data"]
+            auto_forge = auto_sk["forge"]
+            auto_has_graph = combat.has_graph(auto_data, auto_forge)
+            auto_cd = (combat.skill_cooldown_ms(auto_data, auto_forge)
+                       if auto_has_graph else 0) or 600
+            repeat_data = auto_data if auto_has_graph else None
+            repeat_forge = auto_forge if auto_has_graph else None
+            repeat_skill_id = auto_sk["skill_id"] if auto_has_graph else None
+            combat.off_cooldown(uid, 0, auto_cd)
+            combat.auto_engage(uid, session.area, target, repeat_data, repeat_forge,
+                               auto_cd, repeat_skill_id)
     for pk in pkts:
         await send_obj(writer, pk)
         world.broadcast(session.area, pk, exclude=session.member.uid)
@@ -172,9 +234,10 @@ async def begin_cast(session, writer, cmd, params, msg):
             summ = attack_summary(pk)
             if summ:
                 print(f"        [combat] slot {slot_i}: {summ}")
-    # push a live resource re-sync so a consume (Smite empties Conviction) shows on the bar
-    # THIS cast, not on the next one (the in-Attack Resource node repaints a beat late).
-    if combat.resource_model(uid) in combat.STACK_MODELS:
+    # The Attack Resource node is intentionally not trusted as the sole UI update:
+    # handshakes and server-sustained autos can repaint a beat late. Re-sync every
+    # model whenever the authoritative value changed (mana, determination, all stacks).
+    if combat.resource_total(uid) != resource_before:
         await send_obj(writer, combat.resource_packet(uid, session.member.name))
     combat.engage(session.area, target, session.member.uid)   # monster now aggros
     await _handle_kills(session, writer, killed)

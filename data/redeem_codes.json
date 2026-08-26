@@ -9,5 +9,172 @@
       {"type": "item", "value": 978719, "quantity": 1},
       {"type": "coins", "value": 10000, "quantity": 1}
     ]
+  },
+  "THANKYOUJON": {
+    "description": "Thank you, Jon! Five-piece Timekeeper cosmetic set",
+    "maxUses": 1,
+    "active": true,
+    "itemDefinitions": [
+      {
+        "ID": 936854,
+        "Name": "Runes Of Time",
+        "Description": "A thank-you gift for Jon's dedicated testing and combat feedback.",
+        "ItemType": 9,
+        "EquipSpot": 2,
+        "Linkage": "",
+        "Icon": "iwmace",
+        "Level": 1,
+        "Quantity": 1,
+        "StackSize": 1,
+        "Element": 1,
+        "Faction": 1,
+        "strReqQuests": "",
+        "MetaString": "",
+        "DamageRange": 0.1,
+        "Filename": "items/maces/36854_RunesOfTime.unity3d",
+        "PrefabName": "RunesOfTime_weaponSlots",
+        "MobileCompatibility": 1,
+        "ReqQuests": [],
+        "boostValues": {},
+        "Bundle": {
+          "ID": 36854,
+          "Name": "Runes Of Time",
+          "Filename": "items/maces/36854_RunesOfTime.unity3d",
+          "VersionStage": 2,
+          "VersionLive": 2
+        }
+      },
+      {
+        "ID": 948141,
+        "Name": "Mage of Time",
+        "Description": "A thank-you gift for Jon's dedicated testing and combat feedback.",
+        "ItemType": 22,
+        "EquipSpot": 7,
+        "Linkage": "",
+        "Icon": "iwarmor",
+        "Level": 1,
+        "Quantity": 1,
+        "StackSize": 1,
+        "Element": 1,
+        "Faction": 1,
+        "strReqQuests": "",
+        "MetaString": "",
+        "DamageRange": 0.1,
+        "Filename": "armors/48141_DnoMoT.unity3d",
+        "PrefabName": "ArmorSlots",
+        "MobileCompatibility": 1,
+        "ReqQuests": [],
+        "boostValues": {},
+        "Bundle": {
+          "ID": 48141,
+          "Name": "Mage of Time",
+          "Filename": "armors/48141_DnoMoT.unity3d",
+          "VersionStage": 4,
+          "VersionLive": 4
+        }
+      },
+      {
+        "ID": 903309,
+        "Name": "Earthen Locks",
+        "Description": "A thank-you gift for Jon's dedicated testing and combat feedback.",
+        "ItemType": 12,
+        "EquipSpot": 3,
+        "Linkage": "",
+        "Icon": "iihelm",
+        "Level": 1,
+        "Quantity": 1,
+        "StackSize": 1,
+        "Element": 1,
+        "Faction": 1,
+        "strReqQuests": "",
+        "MetaString": "",
+        "DamageRange": 0.1,
+        "Filename": "items/helms/3309_autumn-hair01a.unity3d",
+        "PrefabName": "ArmorSlots",
+        "MobileCompatibility": 1,
+        "ReqQuests": [],
+        "boostValues": {},
+        "Bundle": {
+          "ID": 3309,
+          "Name": "Harvest Hair 12",
+          "Filename": "items/helms/3309_autumn-hair01a.unity3d",
+          "VersionStage": 3,
+          "VersionLive": 3
+        }
+      },
+      {
+        "ID": 950646,
+        "Name": "Warrior of Time's Wrap",
+        "Description": "A thank-you gift for Jon's dedicated testing and combat feedback.",
+        "ItemType": 15,
+        "EquipSpot": 4,
+        "Linkage": "",
+        "Icon": "iicape",
+        "Level": 1,
+        "Quantity": 1,
+        "StackSize": 1,
+        "Element": 1,
+        "Faction": 1,
+        "strReqQuests": "",
+        "MetaString": "",
+        "DamageRange": 0.1,
+        "Filename": "items/capes/50646_DnoWoTC.unity3d",
+        "PrefabName": "DnoWoTC_capeSlots",
+        "MobileCompatibility": 1,
+        "ReqQuests": [],
+        "boostValues": {},
+        "Bundle": {
+          "ID": 50646,
+          "Name": "DnoWoTC",
+          "Filename": "items/capes/50646_DnoWoTC.unity3d",
+          "VersionStage": 3,
+          "VersionLive": 3
+        }
+      },
+      {
+        "ID": 950639,
+        "Name": "Mage of Time's Tome Pet",
+        "Description": "A thank-you gift for Jon's dedicated testing and combat feedback.",
+        "ItemType": 15,
+        "EquipSpot": 4,
+        "Linkage": "",
+        "Icon": "iicape",
+        "Level": 1,
+        "Quantity": 1,
+        "StackSize": 1,
+        "Element": 1,
+        "Faction": 1,
+        "strReqQuests": "",
+        "MetaString": "",
+        "DamageRange": 0.1,
+        "Filename": "items/capes/50639_DnoMoTC.unity3d",
+        "PrefabName": "DnoMoTC_capeSlots",
+        "MobileCompatibility": 1,
+        "ReqQuests": [],
+        "boostValues": {},
+        "Bundle": {
+          "ID": 50639,
+          "Name": "DnoMoTC",
+          "Filename": "items/capes/50639_DnoMoTC.unity3d",
+          "VersionStage": 3,
+          "VersionLive": 3
+        }
+      }
+    ],
+    "rewards": [
+      {"type": "item", "value": 936854, "quantity": 1},
+      {"type": "item", "value": 948141, "quantity": 1},
+      {"type": "item", "value": 903309, "quantity": 1},
+      {"type": "item", "value": 950646, "quantity": 1},
+      {"type": "item", "value": 950639, "quantity": 1}
+    ]
+  },
+  "UNDEADFOUNDER": {
+    "description": "Infinity: Underworld Founder Achievement",
+    "maxUses": 1000,
+    "active": true,
+    "rewards": [
+      {"type": "achievement", "value": 16, "quantity": 1, "field": "ip25"}
+    ]
   }
 }

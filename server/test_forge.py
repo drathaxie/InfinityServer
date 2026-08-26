@@ -165,14 +165,20 @@ def main():
         assert fb["ResourceColor"] == 255 and fb["Threshold"] == -1
 
         # mana costs: cost = max(0, -regMana). The capture carries regMana ONLY on act=0
-        # Regular skills (Holy -20, Heartbeat -10, ...); act=2 Flex skills (Healing Word,
-        # Arcane Shield) carry NO regMana, so they don't spend via RegularMana (faithful to
-        # capture — their mana spend, if any, is server-internal via a Resource node).
+        # Regular skills carry regMana directly. Five Flex skills lost that field
+        # in mined metadata but state explicit costs in their captured tooltips;
+        # seed_classes applies the narrow one-time correction asserted below.
         healer_cid = int(init["classes"]["Healer"]["ID"])
         costs = forge.class_mana_costs(conn, healer_cid)
         assert costs.get(144) == 20, f"Holy (act=0) should cost 20 mana, got {costs.get(144)}"
         assert costs.get(141) == 10, f"Heartbeat (act=0) should cost 10 mana, got {costs.get(141)}"
-        assert costs.get(142) == 0, "Healing Word (act=2 Flex) carries no regMana in capture"
+        assert costs.get(142) == 20, \
+            "Healing Word's captured tooltip requires 20 mana despite missing regMana metadata"
+        warrior_cid = int(init["classes"]["Warrior"]["ID"])
+        warrior_costs = forge.class_mana_costs(conn, warrior_cid)
+        assert warrior_costs.get(117) == 10 and warrior_costs.get(118) == 15
+        rogue_costs = forge.class_mana_costs(conn, 27)
+        assert rogue_costs.get(133) == 15 and rogue_costs.get(132) == 5
         assert any(v > 0 for v in costs.values()), "mana class must have spend-able skills"
     print("P0-2 resource OK: DS=Determination(white/50/orange), mana=blue/no-threshold, "
           "act0 skills spend regMana (Holy 20, Heartbeat 10)")

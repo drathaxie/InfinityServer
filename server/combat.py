@@ -12,6 +12,7 @@ Stage 1 scope: slot-0 auto-attack only. The server owns monster HP, rolls its ow
 damage (not AE's formula), and emits a valid Attack. Skills (slots 1-5) get a benign
 ack for now; real skill node-graphs come with the Skill Forge work (Stage 3).
 """
+import math
 import random
 import time
 import uuid
@@ -78,10 +79,11 @@ def monster_catalog_id(area, target_string):
 
 
 def register_monster(area, target_string, hp, mon_id=None, frame=None, level=None,
-                     race=None, element=None):
+                     race=None, element=None, x=None, y=None):
     """Learn a monster's HP/identity from the CellJoin we serve, so the HP bar stays sane,
     we can re-spawn it (RespawnMon needs the catalog id + frame), and its swing scales with
-    its level (P1-3). race/element are stored for later (Dragon's Bane vs dragons = P2-3)."""
+    its level (P1-3). Position is retained for targetless mobile casts; race/element are
+    stored for later (Dragon's Bane vs dragons = P2-3)."""
     if not target_string or not target_string.startswith("m:"):
         return
     key = (area, target_string)
@@ -102,6 +104,12 @@ def register_monster(area, target_string, hp, mon_id=None, frame=None, level=Non
         info["race"] = race
     if element is not None:
         info["element"] = element
+    try:
+        if x is not None and y is not None:
+            info["x"] = float(x)
+            info["y"] = float(y)
+    except (TypeError, ValueError):
+        pass
 
 
 def target_from_params(params):
@@ -341,7 +349,10 @@ def _render_node(area, slot, caster, default_targets, nodes, props,
     if name == "AnimationCancel":
         return ({"Name": "AnimationCancel"}, 0, killed)
     if name == "Aura":
-        if (AURA_FX.get(props.get("AuraName")) or {}).get("kind") == "guard":
+        aura_fx = AURA_FX.get(props.get("AuraName")) or {}
+        if aura_fx.get("self_only"):
+            tgts = [caster]
+        elif aura_fx.get("kind") == "guard":
             # a friendly party buff lands on the caster + allies, never the cast target
             cap = int(props.get("MaxTargets") or PALADIN_MAX_TARGETS)
             tgts = _ally_targets(caster, allies)[:cap]
@@ -458,7 +469,8 @@ def cast_skill(area, uid, slot, target, data, forge, skill_id=None, allies=None)
         if skill_id == INFINITY_METEOR_SKILL_ID and props.get("Name") == "Damage":
             props = _meteor_damage_props(uid, props)
         rendered, dmg, k = _render_nodes(area, slot, caster, [target] if target else [],
-                                         nodes, props, det_total, empower_mult, hits, allies)
+                                         nodes, props, det_total, empower_mult, hits, allies,
+                                         skill_id)
         out.extend(rendered)
         total += dmg
         killed += k
@@ -533,9 +545,24 @@ class _Cast:
         self.i = 0
         self.targets = [target] if target else []
         self.total = 0
-        self.det_total, empowered = _apply_determination(uid, slot, skill_id)
-        self.empower_mult, self.post, self.hits = _empower(skill_id, empowered)
-        self.empower_mult *= _conviction_mult(uid, skill_id)   # Paladin per-stack scaling
+        # Standalone AuraChange removals caused by Mage combo consumption are
+        # emitted immediately after the Attack batch that consumed the aura.
+        self.side_packets = []
+        # Resource mutation is deferred until the client validates the first
+        # input node. Disconnects/cancelled Range checks therefore spend nothing.
+        self.resource_applied = False
+        self.det_total = None
+        self.empower_mult, self.post, self.hits = 1.0, None, 1
+
+
+def _apply_cast_resource(cast):
+    if cast.resource_applied:
+        return
+    cast.det_total, empowered = _apply_determination(
+        cast.uid, cast.slot, cast.skill_id)
+    cast.empower_mult, cast.post, cast.hits = _empower(cast.skill_id, empowered)
+    cast.empower_mult *= _conviction_mult(cast.uid, cast.skill_id)
+    cast.resource_applied = True
 
 
 def _new_ctx(cast):
@@ -587,6 +614,8 @@ def _render_batch(cast, include_current):
     """Render nodes from cast.i: optionally the current (just-resolved input) node, then
     every following non-input node, stopping at the next input node. Advances cast.i.
     Returns (batch, killed)."""
+    if include_current:
+        _apply_cast_resource(cast)
     batch, killed = [], []
     first = True
     while cast.i < len(cast.order):
@@ -596,7 +625,7 @@ def _render_batch(cast, include_current):
         rendered, dmg, k = _render_nodes(cast.area, cast.slot, cast.caster,
                                          cast.targets, cast.nodes, cast.order[cast.i][1],
                                          cast.det_total, cast.empower_mult, cast.hits,
-                                         cast.allies)
+                                         cast.allies, cast.skill_id, cast.side_packets)
         batch.extend(rendered)
         cast.total += dmg
         killed += k
@@ -627,6 +656,11 @@ def off_cooldown(uid, slot, cd_ms):
         return False
     _cast_last[(uid, slot)] = now
     return True
+
+
+def release_cooldown(uid, slot):
+    """Undo admission for a cast the client explicitly rejected/cancelled."""
+    _cast_last.pop((uid, slot), None)
 
 
 def has_graph(data, forge):
@@ -661,19 +695,26 @@ def cast_skill_rules(area, uid, slot, target, data, forge, skill_id, cfg, allies
     try:
         from combat_engine import live
     except Exception as exc:                                    # pragma: no cover
-        print(f"  [rules] engine unavailable ({exc}) -> Python path")
+        print(f"  [rules] engine unavailable ({exc})")
+        if resource_model(uid) in ("heroic", "stacking"):
+            return [cast_failure(uid, slot, "Combat engine unavailable; please reconnect.")], [], 0
+        print("  [rules] using parity-tested Python fallback")
         set_class_rules(uid, None)
         return begin_cast(area, uid, slot, target, data, forge, skill_id, allies)
     try:
         return live.cast_skill_data(area, uid, slot, target, data, forge, skill_id, cfg,
                                     allies=allies, stats=_power.get(uid))
     except Exception as exc:
-        # A bad rule config must never brick a class mid-fight: drop this player back to the
-        # Python path for the session and let the normal machinery answer the cast.
+        # Conviction classes retain a parity-tested Python implementation. Pure-data
+        # Heroic/stacking classes do not: falling through would silently treat their
+        # pools as Determination and corrupt the fight, so those fail closed instead.
         import traceback
-        print(f"  [rules] cast failed for uid={uid} skill={skill_id}: {exc!r} "
-              f"-> falling back to the Python path")
+        print(f"  [rules] cast failed for uid={uid} skill={skill_id}: {exc!r}")
         traceback.print_exc()
+        if resource_model(uid) in ("heroic", "stacking"):
+            return [cast_failure(
+                uid, slot, "Combat skill configuration failed; please re-equip your class.")], [], 0
+        print("  [rules] using parity-tested Python fallback")
         set_class_rules(uid, None)
         return begin_cast(area, uid, slot, target, data, forge, skill_id, allies)
 
@@ -684,9 +725,25 @@ def resume_cast(ctx, gai_params):
     cast = _casts.pop(ctx, None)
     if cast is None:
         return [], [], 0
+    current_name = cast.order[cast.i][1].get("Name") if cast.i < len(cast.order) else ""
+    response_tokens = {str(x).strip().lower() for x in gai_params[3:]}
+    if current_name in ("Range", "ConditionalRange", "RangeMulti") and \
+            response_tokens.intersection({"false", "cancel", "cancelled", "canceled"}):
+        release_cooldown(cast.uid, cast.slot)
+        return [cast_failure(cast.uid, cast.slot)], [], 0
     ents = [x for x in gai_params[3:]
             if isinstance(x, str) and (x.startswith("m:") or x.startswith("p:"))]
-    if ents:
+    if current_name == "RangeMulti" and cast.skill_id == MAGE_EXPLOSION:
+        # NodeRangeMulti can report the caster when a targetless mobile cast
+        # starts before the client's selected-target field catches up. Explosion
+        # is hostile-only: retain the server-validated primary target and accept
+        # only registered living monsters from the returned set, capped at four.
+        hostile = []
+        for target in [cast.target] + ents:
+            if valid_combat_target(cast.area, target) and target not in hostile:
+                hostile.append(target)
+        cast.targets = hostile[:4]
+    elif ents:
         cast.targets = ents                     # the entities the client says were hit
     before = cast.total
     batch, killed = _render_batch(cast, include_current=True)
@@ -700,6 +757,9 @@ def resume_cast(ctx, gai_params):
         if ll is not None:
             batch.append(ll)
     packets = [_attack(cast, batch, NS_PENDING if pending else NS_SUCCESS)]
+    if cast.side_packets:
+        packets.extend(cast.side_packets)
+        cast.side_packets = []
     if pending:
         packets.append(_igai(cast, cast.order[cast.i][1], _new_ctx(cast)))
     return packets, killed, cast.total - before
@@ -715,7 +775,10 @@ def resume_cast(ctx, gai_params):
 # the caller revives them (playerRes).
 
 PLAYER_MAXHP = 1337         # from the statUpdate sample; per-char HP comes later
-MON_ATTACK_CD = 1.5         # seconds between a monster's swings
+# Every one of the 102 captured AE monster autos advertises a 2250 ms cooldown.
+# Matching that cadence also prevents the server from piling another hit onto a
+# monster whose previous attack animation is still playing.
+MON_ATTACK_CD = 2.25        # seconds between a monster's swings (capture: 2250 ms)
 MON_DMG = (12, 34)          # fallback hit range when a monster's level is unknown
 # Monster swing scales with LEVEL (P1-3). Capture: avg monster damage ~= 7 * level across 107
 # monsters (m:2027 lvl2 ~12, m:968 lvl8 ~56, m:1979 lvl12 ~71); per-hit range ~[5*lvl, 9*lvl].
@@ -769,7 +832,9 @@ def set_power(uid, sta, weapon=None):
     if sta:
         _power[uid] = {"ap": float(sta.get("ap") or 0), "sp": float(sta.get("sp") or 0),
                        "tcr": float(sta.get("tcr") or 0.05), "scm": float(sta.get("scm") or 1.5),
-                       "tha": float(sta.get("tha") or 1.0)}
+                       "tha": float(sta.get("tha") or 1.0),
+                       # Arcane Shield scales from the primary INT stat, not derived SP.
+                       "INT": float(sta.get("INT") or 0)}
         if weapon:
             _power[uid]["weapon"] = (float(weapon[0]), float(weapon[1]))
 
@@ -870,6 +935,14 @@ def _lifelink_node(skill_id, caster, total, allies):
 
 DET_GRANT = {105: 50}       # skills that GRANT a determination burst (Dragon's Bane: +50)
 AUTO_MANA_REGEN = 10        # mana an auto-attack restores for a mana class (Magic Missile)
+MAGE_MAGIC_MISSILE = 135
+MAGE_FIREBALL = 136
+MAGE_ICE_SHARD = 137
+MAGE_EXPLOSION = 138
+MAGE_ARCANE_SHIELD = 139
+MAGE_SKILLS = {MAGE_MAGIC_MISSILE, MAGE_FIREBALL, MAGE_ICE_SHARD,
+               MAGE_EXPLOSION, MAGE_ARCANE_SHIELD}
+WARRIOR_ON_GUARD = 118
 
 # Dragon's Bane (105), from its tooltip: "Passive: your skills deal 20% more damage to
 # Dragonkin." Casting it applies Dragonbane for 10s -> +50% vs Dragonkin AND doubles
@@ -904,6 +977,12 @@ def aura_remove_packet(uid, name):
             "casterTS": f"p:{uid}", "uniquenessType": 1, "Icon": ""}
 
 
+def aura_remove_target_packet(target, name):
+    """Generic AuraChange removal for non-player targets such as monsters."""
+    return {"Cmd": "AuraChange", "auraCmd": 1, "nam": name, "Target": target,
+            "casterTS": target, "uniquenessType": 1, "Icon": ""}
+
+
 def _dragon_bonus(caster, area, mon_ts):
     """Dragon's Bane damage bonus vs a target. A Dragonslayer (determination model — Bane is
     DS-only) deals +20% to Dragonkin-race monsters, +50% while Dragonbane is active; 1.0 else."""
@@ -929,17 +1008,18 @@ def _dragon_bonus(caster, area, mon_ts):
 #                   steadily to the 25 threshold across minutes of play with no drain, and
 #                   the whole build/spend is authored in the class's rule config rather than
 #                   keyed by skill_id here.
-_resource_model = {}        # uid -> "determination" | "mana" | "conviction" | "heroic"
+#   stacking      — generic data-authored pool (for example Chronomancer charges).
+_resource_model = {}        # uid -> mana | determination | conviction | heroic | stacking
 _class_mana = {}            # uid -> {skill_id: mana_cost} (for the mana model)
 _rp_max = {}                # uid -> the class's resource cap (updateClass MaxRP; default 100)
 
-STACK_MODELS = ("conviction", "heroic")     # pools that build and dump rather than spend
+STACK_MODELS = ("conviction", "heroic", "stacking")
 
 
 def set_resource_model(uid, model, max_rp=MAX_RP):
     """Record a player's class resource model so casts build/spend the right pool. A mana
-    class starts at full mana; a Determination/Conviction/Heroic class starts empty."""
-    model = model if model in ("mana", "determination", "conviction", "heroic") \
+    class starts full; every build/spend pool starts empty."""
+    model = model if model in ("mana", "determination", "conviction", "heroic", "stacking") \
         else "determination"
     _resource_model[uid] = model
     _rp_max[uid] = int(max_rp or MAX_RP)
@@ -1000,20 +1080,53 @@ def set_class_mana(uid, costs):
 
 
 def resource_model(uid):
-    """The player's resource model ('mana' | 'determination' | 'conviction' | None)."""
+    """The player's equipped resource model, or None before combat registration."""
     return _resource_model.get(uid)
 
 
+def resource_total(uid):
+    """Authoritative current RP/mana value used for change detection and resyncs."""
+    if uid in _rp:
+        return _rp[uid]
+    return _rp_max.get(uid, MAX_RP) if _resource_model.get(uid) == "mana" else 0
+
+
+def mana_cost(uid, skill_id):
+    """The positive mana requirement for a skill (zero for non-mana classes)."""
+    if _resource_model.get(uid) != "mana" or skill_id is None:
+        return 0
+    return max(0, int((_class_mana.get(uid) or {}).get(skill_id, 0) or 0))
+
+
+def can_pay_resource(uid, slot, skill_id=None):
+    """Return (allowed, required). Call before committing the cast cooldown."""
+    cost = 0 if int(slot) == 0 else mana_cost(uid, skill_id)
+    return resource_total(uid) >= cost, cost
+
+
+class InsufficientMana(RuntimeError):
+    def __init__(self, required, available):
+        self.required = int(required)
+        self.available = int(available)
+        super().__init__(f"not enough mana: need {self.required}, have {self.available}")
+
+
 def _apply_mana(uid, slot, skill_id=None):
-    """Mana model: a skill SPENDS its cost (floored at 0), the auto-attack RESTORES mana.
+    """Mana model: a skill SPENDS its cost, the auto-attack RESTORES mana.
     Returns (new_total, False) — mana classes have no generic Determined empower."""
     cap = _rp_max.get(uid, MAX_RP)
     cur = _rp.get(uid, cap)
     if slot == 0:                                   # auto-attack restores mana
-        cur = min(cap, cur + AUTO_MANA_REGEN)
+        # Mage's passive doubles Magic Missile's restoration while the caster is
+        # below 30 mana. Other mana-class autos retain the generic +10 model.
+        gain = AUTO_MANA_REGEN * 2 if skill_id == MAGE_MAGIC_MISSILE and cur < 30 \
+            else AUTO_MANA_REGEN
+        cur = min(cap, cur + gain)
     else:                                           # skill spends its authored cost
-        cost = (_class_mana.get(uid) or {}).get(skill_id, 0)
-        cur = max(0, cur - cost)
+        cost = mana_cost(uid, skill_id)
+        if cur < cost:
+            raise InsufficientMana(cost, cur)
+        cur -= cost
     _rp[uid] = cur
     return (cur, False)
 
@@ -1105,11 +1218,23 @@ def resource_packet(uid, name):
             "State": 1}
 
 
+def cast_failure(uid, slot, error=""):
+    """Terminal failed Attack response that releases the client's pending skill.
+
+    StatusCode 0 is ResponseAttack.NodeStatusCode.Fail. An empty error is used
+    for harmless duplicate/cooldown requests so no red combat message appears.
+    """
+    return {"Cmd": "Attack", "Caster": f"p:{uid}", "Slot": int(slot),
+            "StatusCode": 0, "Wait": False, "Error": str(error or ""), "Nodes": []}
+
+
 def _apply_determination(uid, slot, skill_id=None):
     """Resolve a player's resource for one cast (model-aware). For the mana model, spend/
     restore; for Determination, build until 50 then the next skill spends+empowers.
     Returns (total_after, empowered) — total_after is what the cast's Resource node reports."""
-    if uid is None:
+    if uid is None or slot not in (0, 1, 2, 3, 4):
+        # Slot 5/-1 are spellstones or external actions, not class skills;
+        # they must never build/spend the equipped class's RP or mana.
         return (None, False)
     if _resource_model.get(uid) == "mana":          # mana classes spend, don't build/empower
         return _apply_mana(uid, slot, skill_id)
@@ -1189,10 +1314,76 @@ def _empower_node(skill_id, uid, caster, area, targets):
     return None
 
 
+def _mage_prepare_node(area, caster, targets, props, skill_id, side_packets):
+    """Apply Mage tooltip interactions around one legacy graph node.
+
+    The captured graph describes presentation and node order, but not conditional
+    server logic. This hook keeps those conditions server-authoritative while
+    continuing to render the original graph through the normal combat path.
+    """
+    if skill_id not in MAGE_SKILLS:
+        return props, targets
+    props = dict(props)
+    targets = list(dict.fromkeys(targets or []))
+    monsters = [t for t in targets if valid_combat_target(area, t)]
+    name = props.get("Name")
+
+    def consume(target, aura_name):
+        if consume_aura(area, target, aura_name):
+            if side_packets is not None:
+                side_packets.append(aura_remove_target_packet(target, aura_name))
+            return True
+        return False
+
+    if name == "Damage":
+        if skill_id == MAGE_FIREBALL:
+            # Fireball consumes Frozen Blood for double damage. It is a
+            # single-target skill, so one multiplier applies to the whole node.
+            if monsters and aura_active(area, monsters[0], "Frozen Blood"):
+                props["Multiplier"] = float(props.get("Multiplier") or 1.0) * 2.0
+                consume(monsters[0], "Frozen Blood")
+        elif skill_id == MAGE_ICE_SHARD:
+            for target in monsters:
+                consume(target, "Scorched")
+        elif skill_id == MAGE_EXPLOSION:
+            for target in monsters:
+                if detonate_scorched(area, target, caster) and side_packets is not None:
+                    side_packets.append(aura_remove_target_packet(target, "Scorched"))
+
+    if name == "Aura":
+        aura_name = props.get("AuraName")
+        if skill_id == MAGE_ICE_SHARD and aura_name == "Stunned":
+            # Freeze Immune is a per-life marker: only the first Ice Shard
+            # against this monster applies the three-second stun.
+            targets = [t for t in monsters if not aura_active(area, t, "Freeze Immune")]
+        elif skill_id == MAGE_EXPLOSION and aura_name == "Shattered":
+            # Shattered is conditional and consumes Frozen Blood.
+            targets = [t for t in monsters if aura_active(area, t, "Frozen Blood")]
+            for target in targets:
+                consume(target, "Frozen Blood")
+        elif skill_id in (MAGE_FIREBALL, MAGE_ICE_SHARD, MAGE_EXPLOSION):
+            targets = monsters
+        if not targets:
+            return None, []
+    return props, targets
+
+
 def _render_nodes(area, slot, caster, targets, nodes, props, det_total, empower_mult, hits,
-                  allies=None):
+                  allies=None, skill_id=None, side_packets=None):
     """Wrap _render_node: a Damage node with hits>1 is emitted as that many SEPARATE hits
     (each rolls its own damage) so a triple-strike shows three numbers, not one big one."""
+    props, targets = _mage_prepare_node(
+        area, caster, targets, props, skill_id, side_packets)
+    if props is None:
+        return [], 0, []
+    if skill_id == WARRIOR_ON_GUARD and props.get("Name") == "Cooldown":
+        # NodeCooldown sets pendingCooldown=True when Animation is non-empty and waits for that
+        # exact animation callback before starting the ring. The shipped On Guard graph names a
+        # callback that does not fire on the current Warrior rig, leaving slot 4 pending forever
+        # until an area transition resets the UI. Start this cooldown immediately; the server's
+        # authoritative 14.799s gate still prevents early recasts.
+        props = dict(props)
+        props["Animation"] = ""
     node, dmg, killed = _render_node(area, slot, caster, targets, nodes, props,
                                      det_total, empower_mult, allies)
     if node is None:
@@ -1223,6 +1414,12 @@ WEAKEN_MULT = 0.90          # Weakened/Inhibition: the target deals 10% less (to
 AURA_FX = {
     "Bleeding":   {"kind": "dot", "secs": 3, "tick": 0.30, "magical": False},   # Impale
     "Scorched":   {"kind": "dot", "secs": 6, "tick": 0.25, "magical": True},    # Fireball
+    # Mage status chain. Freeze Immune is a per-monster-life marker and is
+    # cleared with the rest of that monster's auras on death/respawn.
+    "Frozen Blood": {"kind": "slow", "secs": 6, "speed": 0.90},
+    "Stunned":      {"kind": "stun", "secs": 3, "speed": 0.0},
+    "Freeze Immune": {"kind": "marker", "secs": 86400},
+    "Shattered":    {"kind": "physicaldebuff", "secs": 4, "mult": 0.90},
     "Radiance":   {"kind": "hot", "secs": 5, "tick": 0.20},                     # Healing Word
     "Weakened":   {"kind": "dmgdebuff", "secs": 5},                             # Incapacitate
     "Inhibition": {"kind": "dmgdebuff", "secs": 8},                             # Energy Flow
@@ -1236,6 +1433,14 @@ AURA_FX = {
     # the outgoing bonus scales with the caster's Conviction AT CAST (+0.2%/stack).
     "Paladin's Guard": {"kind": "guard", "secs": 6, "dr": 0.25,
                         "dmg_base": 0.10, "dmg_per_stack": 0.002},
+    # Tooltip formula: 20 percentage points plus 5% of the caster's INT
+    # contribution (INT 100 -> +5 percentage points). Each landed hit costs 5 mana.
+    "Arcane Shield": {"kind": "guard", "secs": 6, "dr": 0.20,
+                       "int_dr": 0.0005, "mana_per_hit": 5, "self_only": True,
+                       "dmg_base": 0.0, "dmg_per_stack": 0.0},
+    # Warrior On Guard: the shipped tooltip promises 50% Damage Resistance for five seconds.
+    "On Guard":      {"kind": "guard", "secs": 5, "dr": 0.50, "self_only": True,
+                       "dmg_base": 0.0, "dmg_per_stack": 0.0},
     # Voidwalker (class 2064, OURS): Hungering Maw's gnawing DoT + Event Horizon, the domain
     # buff (same guard machinery as Paladin's Guard, scaling on the caster's Hunger at cast).
     "Umbral Rot":    {"kind": "dot", "secs": 5, "tick": 0.25, "magical": True},
@@ -1252,8 +1457,53 @@ AURA_FX = {
     "Practice Frogzard Form": {"kind": "guard", "secs": 30, "dr": 0.0,
                                 "dmg_base": 0.0, "dmg_per_stack": 0.0,
                                 "transform": True},
+    # Chronomancer: server-authoritative monster pacing. `speed` is the share
+    # of normal attack/cast speed; the loader mirrors it on the target's
+    # Animators using metadata emitted by combat_engine.rules.
+    "Time Dilation":   {"kind": "slow", "secs": 6.0, "speed": 0.35},
+    "Temporal Stasis": {"kind": "stun", "secs": 2.5, "speed": 0.0},
 }
 _auras = {}                 # (area, ts) -> {name: {ends, next, amt, caster, kind}}
+
+
+def aura_entry(area, target, name):
+    """Active stored aura entry, or None when absent/expired."""
+    entry = (_auras.get((area, target)) or {}).get(name)
+    return entry if entry and time.time() < entry.get("ends", 0.0) else None
+
+
+def aura_active(area, target, name):
+    return aura_entry(area, target, name) is not None
+
+
+def consume_aura(area, target, name):
+    """Remove one server aura immediately; return its former entry when active."""
+    auras = _auras.get((area, target)) or {}
+    entry = auras.get(name)
+    if not entry or time.time() >= entry.get("ends", 0.0):
+        return None
+    del auras[name]
+    if name == "Stunned":
+        _stun.pop((area, target), None)
+    if not auras:
+        _auras.pop((area, target), None)
+    return entry
+
+
+def detonate_scorched(area, target, caster):
+    """Consume Scorched and compress its remaining DoT into two ticks over one second."""
+    scorched = consume_aura(area, target, "Scorched")
+    if not scorched:
+        return False
+    now = time.time()
+    remaining_ticks = max(1, math.ceil(max(0.0, scorched["ends"] - now) / DOT_INTERVAL))
+    total = max(1, int(scorched.get("amt", 0) or 0)) * remaining_ticks
+    _auras.setdefault((area, target), {})["Detonation"] = {
+        "ends": now + 1.01, "next": now + 0.5, "interval": 0.5,
+        "amt": max(1, math.ceil(total / 2)), "ticks_left": 2,
+        "caster": caster, "kind": "dot",
+    }
+    return True
 
 
 def apply_aura(area, name, targets, caster):
@@ -1276,12 +1526,24 @@ def apply_aura(area, name, targets, caster):
             continue                                    # DoT lands on monsters only
         if fx["kind"] in ("hot", "guard") and not t.startswith("p:"):
             continue                                    # HoT/Guard on players only
+        if fx["kind"] in ("slow", "stun", "marker", "physicaldebuff") \
+                and not t.startswith("m:"):
+            continue                                    # hostile Mage effects land on monsters only
         entry = {"ends": now + fx["secs"], "next": now + DOT_INTERVAL, "amt": amt,
                  "caster": caster, "kind": fx["kind"]}
+        if fx["kind"] in ("slow", "stun"):
+            entry["speed"] = float(fx.get("speed", 1.0))
+        if fx["kind"] == "stun":
+            _stun[(area, t)] = max(_stun.get((area, t), 0.0), entry["ends"])
+        if fx["kind"] == "physicaldebuff":
+            entry["mult"] = float(fx.get("mult", 1.0))
         if fx["kind"] == "guard":                       # snapshot the buff's strength at cast
             stacks = _rp.get(uid, 0) if _resource_model.get(uid) == "conviction" else 0
-            entry["dr"] = fx["dr"]
+            entry["dr"] = min(0.75, fx["dr"] + fx.get("int_dr", 0.0) *
+                              float((p or {}).get("INT", 0.0)))
             entry["dmg"] = fx["dmg_base"] + fx["dmg_per_stack"] * stacks
+            if fx.get("mana_per_hit"):
+                entry["mana_per_hit"] = int(fx["mana_per_hit"])
             if fx.get("transform"):
                 entry["transform"] = True               # expiry must send the detransform
         _auras.setdefault((area, t), {})[name] = entry
@@ -1294,11 +1556,55 @@ def is_dmg_debuffed(area, ts):
                for a in (_auras.get((area, ts)) or {}).values())
 
 
+def outgoing_damage_multiplier(area, ts, physical=True):
+    """Combined active outgoing-damage modifiers for an attacking monster."""
+    now = time.time()
+    mult = 1.0
+    for aura in (_auras.get((area, ts)) or {}).values():
+        if now >= aura["ends"]:
+            continue
+        if aura["kind"] == "dmgdebuff":
+            mult *= WEAKEN_MULT
+        elif physical and aura["kind"] == "physicaldebuff":
+            mult *= float(aura.get("mult", 1.0))
+    return mult
+
+
+def monster_speed_multiplier(area, mon_ts):
+    """Active share of normal monster action speed (1 normal, 0 frozen)."""
+    now = time.time()
+    speeds = [a.get("speed", 1.0) for a in (_auras.get((area, mon_ts)) or {}).values()
+              if a["kind"] in ("slow", "stun") and now < a["ends"]]
+    return max(0.0, min(speeds, default=1.0))
+
+
+def monster_attack_interval(area, mon_ts):
+    """Wall-clock delay between swings after active time-control effects."""
+    speed = monster_speed_multiplier(area, mon_ts)
+    return float("inf") if speed <= 0 else MON_ATTACK_CD / speed
+
+
 def _guard_reduction(area, ts):
     """Incoming-damage reduction (0..1) from an active guard aura on this target."""
     now = time.time()
     return max((a.get("dr", 0.0) for a in (_auras.get((area, ts)) or {}).values()
                 if a["kind"] == "guard" and now < a["ends"]), default=0.0)
+
+
+def _drain_arcane_shield(area, uid, damage):
+    """Charge Arcane Shield's five-mana landed-hit cost; expire it at zero mana."""
+    if damage <= 0 or _resource_model.get(uid) != "mana":
+        return False
+    entry = aura_entry(area, f"p:{uid}", "Arcane Shield")
+    if not entry:
+        return False
+    cost = int(entry.get("mana_per_hit", 0) or 0)
+    if cost <= 0:
+        return False
+    _rp[uid] = max(0, _rp.get(uid, _rp_max.get(uid, MAX_RP)) - cost)
+    if _rp[uid] == 0:
+        entry["ends"] = time.time()        # aura_ticks emits the visual removal
+    return True
 
 
 def _guard_dmg_bonus(ts):
@@ -1323,7 +1629,9 @@ def aura_ticks():
     for key, auras in list(_auras.items()):
         area, ts = key
         for name, a in list(auras.items()):
-            if now >= a["ends"]:
+            # A short detonation is allowed to finish both authored ticks even
+            # if one AI-loop pass arrives slightly after its one-second window.
+            if now >= a["ends"] and not (a["kind"] == "dot" and a.get("ticks_left", 0) > 0):
                 del auras[name]
                 if a["kind"] == "guard" and ts.startswith("p:"):
                     # like Dragonbane, a player buff's visual lingers without an explicit
@@ -1335,10 +1643,17 @@ def aura_ticks():
                                            "StatusCode": 1, "Wait": False, "Error": "",
                                            "Nodes": [{"Name": "MonTransform",
                                                       "detransform": True}]}, []))
+                elif a["kind"] in ("slow", "stun", "marker", "physicaldebuff") \
+                        and ts.startswith("m:"):
+                    out.append((area, aura_remove_target_packet(ts, name), []))
                 continue
             if a["kind"] not in ("dot", "hot") or now < a["next"] or a["amt"] <= 0:
                 continue
-            a["next"] = now + DOT_INTERVAL
+            a["next"] = now + float(a.get("interval", DOT_INTERVAL))
+            if a.get("ticks_left") is not None:
+                a["ticks_left"] = max(0, int(a["ticks_left"]) - 1)
+                if a["ticks_left"] == 0:
+                    a["ends"] = now
             if a["kind"] == "dot" and ts.startswith("m:"):
                 prev = _mon.get(key, DEFAULT_HP)
                 hp = max(0, prev - a["amt"])
@@ -1366,10 +1681,83 @@ def drop_auras_for(ts):
     for key in list(_auras.keys()):
         if key[1] == ts:
             _auras.pop(key, None)
+    for key in list(_stun.keys()):
+        if key[1] == ts:
+            _stun.pop(key, None)
 
 
 def monster_alive(area, mon_ts):
     return _mon.get((area, mon_ts), DEFAULT_HP) > 0
+
+
+def valid_combat_target(area, mon_ts):
+    """Whether a target is a registered, living monster in this exact area instance."""
+    return bool(mon_ts and str(mon_ts).startswith("m:")
+                and (area, str(mon_ts)) in _mon and _mon[(area, str(mon_ts))] > 0)
+
+
+def active_combat_target(uid, area):
+    """The player's current live monster, preferring their sustained-auto target."""
+    auto = _auto.get(uid)
+    if auto and auto.get("area") == area and valid_combat_target(area, auto.get("target")):
+        return auto["target"]
+    candidates = [(info.get("last", 0.0), mon)
+                  for (aggro_area, mon), info in _aggro.items()
+                  if aggro_area == area and info.get("uid") == uid
+                  and valid_combat_target(area, mon)]
+    return max(candidates, default=(0.0, None))[1]
+
+
+def _target_sort_key(target):
+    """Stable tie breaker for target strings, including summon IDs such as ``m:-1``."""
+    try:
+        return (0, int(str(target).split(":", 1)[1]))
+    except (IndexError, ValueError):
+        return (1, str(target))
+
+
+def nearest_combat_target(area, frame=None, x=None, y=None):
+    """Nearest living monster registered in a player's current cell.
+
+    A CellJoin supplies authored monster coordinates while player movement keeps the member's
+    current position. A monster without coordinates remains a valid fallback, but sorts after
+    positioned monsters and ties are deterministic. No target is ever chosen from another cell.
+    """
+    try:
+        px, py = float(x), float(y)
+    except (TypeError, ValueError):
+        px = py = None
+    candidates = []
+    for (candidate_area, target), hp in _mon.items():
+        if candidate_area != area or hp <= 0:
+            continue
+        info = _moninfo.get((candidate_area, target), {})
+        if frame is not None and info.get("frame") != frame:
+            continue
+        try:
+            distance_sq = ((info["x"] - px) ** 2 + (info["y"] - py) ** 2)
+            distance_key = (0, distance_sq)
+        except (KeyError, TypeError):
+            distance_key = (1, 0.0)
+        candidates.append((distance_key, _target_sort_key(target), target))
+    return min(candidates, default=(None, None, None))[2]
+
+
+def resolve_combat_target(area, uid, requested=None, frame=None, x=None, y=None):
+    """Prefer an explicit or active target; otherwise select the nearest living same-cell mob."""
+    if valid_combat_target(area, requested):
+        return str(requested)
+    active = active_combat_target(uid, area)
+    return active or nearest_combat_target(area, frame, x, y)
+
+
+def in_combat(uid, area=None):
+    """True while the player has a live target in the supplied (or any) area."""
+    if area is not None:
+        return active_combat_target(uid, area) is not None
+    areas = {a.get("area") for a in _auto.values() if a}
+    areas.update(a for a, _mon_ts in _aggro)
+    return any(a and active_combat_target(uid, a) is not None for a in areas)
 
 
 def register_player(uid, hp=None):
@@ -1389,6 +1777,7 @@ def set_maxhp(uid, maxhp):
 
 
 def forget_player(uid):
+    cancel_player_actions(uid, clear_cooldowns=True)
     _php.pop(uid, None)
     _pmax.pop(uid, None)
     _power.pop(uid, None)
@@ -1400,13 +1789,16 @@ def forget_player(uid):
     _conv_cast_stacks.pop(uid, None)
     _conv_last_cast.pop(uid, None)
     _conv_next_decay.pop(uid, None)
+    _class_rules.pop(uid, None)
     _dragonbane.pop(uid, None)
     _dragonbane_shown.discard(uid)
+    caster = f"p:{uid}"
+    try:
+        from combat_engine.state import drop_state
+        drop_state(caster)
+    except Exception:
+        pass
     drop_auras_for(f"p:{uid}")              # clear HoT/auras targeting this player
-    _auto.pop(uid, None)
-    for key, info in list(_aggro.items()):          # stop monsters chasing a ghost
-        if info.get("uid") == uid:
-            _aggro.pop(key, None)
 
 
 def player_hp(uid):
@@ -1424,9 +1816,7 @@ def kill_monster(area, target):
 
 def engage(area, mon_ts, uid):
     """A player attacked a monster -> it aggros them and will keep swinging."""
-    if not mon_ts or not mon_ts.startswith("m:"):
-        return
-    if _mon.get((area, mon_ts), 1) <= 0:
+    if not valid_combat_target(area, mon_ts):
         return
     _aggro[(area, mon_ts)] = {"uid": uid, "last": time.time()}
 
@@ -1463,11 +1853,13 @@ def monster_attack(area, mon_ts, uid):
         dmg, dtype = 0, DT_DODGE
     else:
         dmg, dtype = _monster_dmg(area, mon_ts), DT_NORMAL
-        if is_dmg_debuffed(area, mon_ts):               # Weakened/Inhibition -> -10% (P2-4)
-            dmg = max(1, round(dmg * WEAKEN_MULT))
+        out_mult = outgoing_damage_multiplier(area, mon_ts, physical=True)
+        if out_mult != 1.0:
+            dmg = max(1, round(dmg * out_mult))
         red = _guard_reduction(area, f"p:{uid}")        # Paladin's Guard: -25% incoming
         if red:
             dmg = max(1, round(dmg * (1.0 - red)))
+        _drain_arcane_shield(area, uid, dmg)
     hp = max(0, _php.get(uid, PLAYER_MAXHP) - dmg)
     _php[uid] = hp
     player = f"p:{uid}"
@@ -1477,8 +1869,14 @@ def monster_attack(area, mon_ts, uid):
               # the damage ticket NOW. Without it the ticket is queued, and NodeDispenseDamage only
               # runs for a main-player caster, so a monster's ticket never settles -> the player never
               # reaches `damageTickets==0` -> Entity.Die() (the 10s respawn screen) never fires.
+              # Captured monster autos always carry this full three-node shape.
+              # Damage alone changes HP but leaves the monster visually frozen.
               "Nodes": [{"Name": "Damage", "DamageTypes": [dtype], "Damages": [dmg],
-                         "Targets": [player], "TargetHPs": [hp], "Immediate": True}]}
+                         "Targets": [player], "TargetHPs": [hp], "Immediate": True},
+                        {"Name": "PlayerAnimation", "Animation": "Attack1,Attack2,Attack3",
+                         "Priority": "Low", "Speed": 1.0, "Targets": 1},
+                        {"Name": "Cooldown", "Animation": "", "Slot": 0,
+                         "CD": int(MON_ATTACK_CD * 1000)}]}
     return attack, hp, hp <= 0
 
 
@@ -1503,7 +1901,10 @@ def monster_skill_due(area, mon_ts, now):
     """Whether a monster's next tile skill is off cooldown. The cooldown is the one stored by the
     LAST cast (per-skill cadence); the first cast is always due."""
     st = _mon_skill.get((area, mon_ts))
-    return st is None or (now - st.get("last", 0.0)) >= st.get("cd", 5.0)
+    speed = monster_speed_multiplier(area, mon_ts)
+    if speed <= 0:
+        return False
+    return st is None or (now - st.get("last", 0.0)) >= st.get("cd", 5.0) / speed
 
 
 def monster_skill_index(area, mon_ts):
@@ -1536,12 +1937,15 @@ def monster_tile_hit(area, mon_ts, uid, hits=1):
     total = 0
     for _ in range(hits):
         d = _monster_dmg(area, mon_ts)
-        if is_dmg_debuffed(area, mon_ts):               # Weakened/Inhibition -> -10% (P2-4)
-            d = max(1, round(d * WEAKEN_MULT))
+        out_mult = outgoing_damage_multiplier(area, mon_ts, physical=True)
+        if out_mult != 1.0:
+            d = max(1, round(d * out_mult))
         red = _guard_reduction(area, f"p:{uid}")        # Paladin's Guard: -25% incoming
         if red:
             d = max(1, round(d * (1.0 - red)))
-        total += max(1, round(d * st["mult"]))
+        landed = max(1, round(d * st["mult"]))
+        total += landed
+        _drain_arcane_shield(area, uid, landed)
     hp = max(0, _php.get(uid, PLAYER_MAXHP) - total)
     _php[uid] = hp
     player = f"p:{uid}"
@@ -1591,6 +1995,7 @@ def add_summon(area, boss_ts, mon_id, hp, level, frame=None, race=None, element=
 
 def forget_summon(area, clone_ts):
     """Drop a dead add from combat state (no respawn for summons)."""
+    drop_auras_for(clone_ts)
     _mon.pop((area, clone_ts), None)
     _maxhp.pop((area, clone_ts), None)
     _moninfo.pop((area, clone_ts), None)
@@ -1653,6 +2058,7 @@ def drop_aggro_for(uid):
     for key, info in list(_aggro.items()):
         if info.get("uid") == uid:
             _aggro.pop(key, None)
+            _mon_skill.pop(key, None)
 
 
 # --- continuous auto-attack (server-driven, like the monster AI) -------------
@@ -1661,22 +2067,82 @@ def drop_aggro_for(uid):
 # player auto-attacks, we remember the (graph, target) and the AI loop re-fires it
 # on the auto cooldown until the target dies or the player leaves. Both the client's
 # gar[0] and the loop share off_cooldown(uid, 0, ...), so they can't double-fire.
-_auto = {}                  # uid -> {"area","target","data","forge","cd"}
+_auto = {}                  # uid -> {"area","target","data","forge","cd","skill_id"}
 
 
-def auto_engage(uid, area, target, data, forge, cd_ms):
-    if target and str(target).startswith("m:"):
+def auto_engage(uid, area, target, data, forge, cd_ms, skill_id=None):
+    """Remember an auto with every input needed to repeat the same execution path."""
+    if valid_combat_target(area, target):
         _auto[uid] = {"area": area, "target": target, "data": data,
-                      "forge": forge, "cd": cd_ms}
+                      "forge": forge, "cd": cd_ms, "skill_id": skill_id}
+        engage(area, target, uid)
 
 
 def auto_disengage(uid):
     _auto.pop(uid, None)
 
 
+def auto_engaged(uid, area=None, target=None):
+    """Whether this player already has a sustained auto on the requested combat target."""
+    active = _auto.get(uid)
+    if active is None:
+        return False
+    if area is not None and active.get("area") != area:
+        return False
+    if target is not None and active.get("target") != target:
+        return False
+    return True
+
+
+def cancel_player_actions(uid, clear_cooldowns=False):
+    """Cancel every in-flight/repeating action owned by one player.
+
+    Used on death, cell/map changes, and class swaps so an old graph, delayed
+    field, or sustained auto cannot execute in a new combat context.
+    """
+    auto_disengage(uid)
+    drop_aggro_for(uid)
+    for ctx, cast in list(_casts.items()):
+        if cast.uid == uid:
+            _casts.pop(ctx, None)
+    caster = f"p:{uid}"
+    _delayed[:] = [row for row in _delayed
+                   if not (isinstance(row[3], tuple) and row[3]
+                           and row[3][0] == caster)]
+    _conv_cast_stacks.pop(uid, None)
+    if clear_cooldowns:
+        for key in [key for key in _cast_last if key[0] == uid]:
+            _cast_last.pop(key, None)
+
+
 def auto_engagements():
-    return [(uid, a["area"], a["target"], a["data"], a["forge"], a["cd"])
+    return [(uid, a["area"], a["target"], a["data"], a["forge"], a["cd"],
+             a.get("skill_id"))
             for uid, a in list(_auto.items())]
+
+
+def execute_auto(area, uid, target, data, forge, skill_id=None, allies=None):
+    """Execute one manual or sustained auto through the same class-aware route.
+
+    Data-driven classes must retain their rule config and skill id on repeat;
+    legacy authored autos deliberately use the single-shot graph walker so an
+    autonomous server tick never opens an igai/gai client handshake.
+    """
+    if not valid_combat_target(area, target):
+        return [], [], 0
+    if data is not None and class_rules(uid, skill_id) is not None:
+        packets, killed, damage = begin_cast(
+            area, uid, 0, target, data, forge, skill_id, allies)
+    elif data is not None:
+        attack, killed, damage = cast_skill(
+            area, uid, 0, target, data, forge, skill_id, allies)
+        packets = [attack]
+    else:
+        attack, hit, damage = auto_attack(area, target, uid)
+        killed = [target] if hit else []
+        packets = [attack]
+    engage(area, target, uid)  # refresh the aggro lease while autos are landing
+    return packets, killed, damage
 
 
 def rest_player(uid, name):
@@ -1686,7 +2152,7 @@ def rest_player(uid, name):
     mx = _pmax.get(uid, PLAYER_MAXHP)
     _php[uid] = mx
     if _resource_model.get(uid) == "mana":
-        _rp[uid] = MAX_RP
+        _rp[uid] = _rp_max.get(uid, MAX_RP)
     # unm MUST be lowercase: the client resolves it via Entity.getPlayer(unm), and players are
     # registered under their lowercase name (the chat-bubble fix). Mixed case -> no match -> no-op.
     return {"Cmd": "hpmp", "unm": (name or "").lower(), "HP": mx, "RP": _rp.get(uid, 0), "State": 1}
@@ -1697,7 +2163,7 @@ def revive_player(uid, name):
     player NAME). Also drops aggro so they aren't re-killed at the respawn point."""
     mx = _pmax.get(uid, PLAYER_MAXHP)
     _php[uid] = mx
-    drop_aggro_for(uid)
+    cancel_player_actions(uid)
     return {"Cmd": "playerRes", "unm": (name or "").lower(), "HP": mx, "MaxHP": mx}  # lowercase: see rest_player
 
 
@@ -1728,6 +2194,7 @@ def death_packets(area, target, uid):
     respawn_packet re-spawns it; aggro on it is cleared."""
     _last.pop(uid, None)
     disengage(area, target)
+    drop_auras_for(target)                  # per-life effects (including Freeze Immune) reset
     caster = f"p:{uid}"
     return [
         {"Cmd": "entityDeath", "targetString": target, "efbTargetString": caster},
@@ -1739,6 +2206,7 @@ def respawn_packet(area, target):
     """Reset a dead monster to full HP and return the RespawnMon broadcast that makes
     it visually reappear (ResponseRespawnMon.Execute -> Monster.Respawn())."""
     key = (area, target)
+    drop_auras_for(target)
     _mon[key] = _maxhp.get(key, DEFAULT_HP)
     try:
         mon_map_id = int(target.split(":", 1)[1])

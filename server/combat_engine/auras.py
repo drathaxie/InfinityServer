@@ -79,6 +79,15 @@ AURA_REGISTRY = {
     # --- Branch, this aura is the visible marker) ----------------------------
     "Heroic Empowerment": {"secs": 2.5, "mods": {}, "max_stacks": 1,
                            "refresh": True, "hide": True},
+
+    # Chronomancer control effects. The combat host owns the actual pacing;
+    # these two extra fields are copied onto the ordinary Aura render node so
+    # InfinityLoader can mirror it by slowing only the affected monster's
+    # Animators. They do not add a new Skill Forge node type.
+    "Time Dilation": {"secs": 6.0, "mods": {}, "max_stacks": 1,
+                      "refresh": True, "animation_speed": 0.35},
+    "Temporal Stasis": {"secs": 2.5, "mods": {}, "max_stacks": 1,
+                        "refresh": True, "animation_speed": 0.0},
 }
 
 

@@ -1,0 +1,22 @@
+[Unit]
+Description=pgAdmin 4 web administration
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=pgadmin
+Group=pgadmin
+WorkingDirectory=/opt/pgadmin4/lib/python3.10/site-packages/pgadmin4
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/pgadmin4/bin/gunicorn --bind 127.0.0.1:5050 --workers 1 --threads 25 --timeout 120 pgAdmin4:app
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pgadmin4 /var/log/pgadmin4
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -83,7 +83,7 @@ class ReplayValueSource(ValueSource):
 _SELF = {"self"}
 _TARGET = {"target"}
 _ALLIES = {"allies", "allallies", "party", "allinrangeallies"}
-_ENEMIES = {"allenemies", "allinrange", "area"}
+_ENEMIES = {"enemies", "allenemies", "allinrange", "area"}
 
 
 class RenderContext:

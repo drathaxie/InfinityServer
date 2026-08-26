@@ -123,7 +123,8 @@ async def slash_cmd(session, writer, cmd, params, msg):   # slash commands: Para
         await guild_cmds.guild_hall(session, writer, params[1:])
         return
     if sub in ("tagcolor", "tagcolour", "tagcolors", "guildcolor", "gtagcolor"):
-        await guild_cmds.tag_color(session, writer, params[1:])
+        await send_obj(writer, {"Cmd": "chatm", "Name": "Server", "channel": "server",
+                                "ID": 0, "msg": "Custom guild nameplate tags are no longer available."})
         return
     if sub == "genderswap" and session.char is not None and session.member is not None:
         # Player gender swap (fired by an apop "chat" button, e.g. Bev). Flips M<->F, resets to

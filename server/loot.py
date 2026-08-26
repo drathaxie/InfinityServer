@@ -99,13 +99,36 @@ def reward_packet(monID, monMapID, gold_val, exp_val, exp_total, items_wire, cp_
             "autoDiscarded": [], "showDropWindow": bool(items_wire), "showGold": True}
 
 
+def _empty_add_items():
+    """ResponseAddOrUpdateItems with every client list initialized.
+
+    The client iterates both ``items`` and ``patternItems`` without null guards, so even a
+    response containing only one kind must send the other list as ``[]``.
+    """
+    return {"Cmd": "addItems", "items": [], "patternItems": [], "bankedItems": []}
+
+
 def _grant(conn, char_id, entry):
-    """Move one pending entry into the real inventory; return its addItems wire item (LootID -1)."""
-    cid = game._grant_item(conn, char_id, entry["raw"])
+    """Move one pending entry into owned storage.
+
+    ItemType 43 is a gem token, not equippable gear.  It must become a PatternItem in the
+    character's separate gem bag; putting it in ``char_items`` makes the generic inventory
+    preview show a permanently-disabled Equip button.  Ordinary items keep the existing
+    ``char_items`` path, including per-instance ItemPattern rolls on enhanceable gear.
+
+    Returns ``(kind, wire)`` where kind is ``items`` or ``patternItems``.
+    """
+    raw = entry["raw"]
+    if patterns.is_gem_item(raw):
+        pat = raw.get("ItemPattern") or patterns.gem_item_pattern(raw)
+        cpid = patterns.grant_gem(conn, char_id, pat)
+        return "patternItems", {"CharPatternID": cpid, "pattern": pat, "LootID": -1}
+
+    cid = game._grant_item(conn, char_id, raw)
     ci = conn.execute("SELECT * FROM char_items WHERE char_item_id=?", (cid,)).fetchone()
     item = game._wire_item(conn, ci)
     item["LootID"] = -1
-    return item
+    return "items", item
 
 
 def take(conn, char_id, uid, item_id, loot_id):
@@ -115,9 +138,12 @@ def take(conn, char_id, uid, item_id, loot_id):
     bag = _pending.get(uid, [])
     for i, e in enumerate(bag):
         if e["loot_id"] == loot_id and e["item_id"] == item_id:
-            wire = _grant(conn, char_id, e)
+            kind, wire = _grant(conn, char_id, e)
             bag.pop(i)
-            return ({"Cmd": "addItems", "items": [wire]},
+            add = _empty_add_items()
+            add[kind].append(wire)
+            conn.commit()
+            return (add,
                     {"Cmd": "getLoot", "bSuccess": True, "ItemID": item_id, "LootID": loot_id})
     return (None, {"Cmd": "getLoot", "bSuccess": False, "ItemID": item_id, "LootID": loot_id})
 
@@ -126,15 +152,17 @@ def take_all(conn, char_id, uid):
     """bulkOperation IsLootAll: keep every pending drop. Returns (addItems_pkt, bulkOperation_pkt
     with the consumedLoot list the client clears the window by)."""
     bag = _pending.get(uid, [])
-    items, consumed = [], []
+    add, consumed = _empty_add_items(), []
     for e in bag:
-        items.append(_grant(conn, char_id, e))
+        kind, wire = _grant(conn, char_id, e)
+        add[kind].append(wire)
         c = dict(e["raw"])
         c["LootID"] = e["loot_id"]
         c["Quantity"] = e["quantity"]
         consumed.append(c)
     _pending[uid] = []
-    return ({"Cmd": "addItems", "items": items},
+    conn.commit()
+    return (add,
             {"Cmd": "bulkOperation", "Success": True, "IsLootAll": True, "consumedLoot": consumed})
 
 
@@ -143,6 +171,23 @@ def discard_all(uid):
     captured, so this is best-effort (flagged)."""
     _pending[uid] = []
     return {"Cmd": "bulkOperation", "Success": True, "IsLootAll": False, "consumedLoot": []}
+
+
+def dust_pending_pattern(uid, loot_id):
+    """Consume one pending ItemType-43 gem by LootID and return ``(Pattern, ItemID)``.
+
+    RequestDustPattern uses LootID for a gem still in the loot window and CharPatternID for a
+    gem already in the owned bag. Only actual gem tokens are eligible here.
+    """
+    lid = int(loot_id)
+    bag = _pending.get(uid, [])
+    for i, entry in enumerate(bag):
+        if entry["loot_id"] != lid or not patterns.is_gem_item(entry["raw"]):
+            continue
+        pat = entry["raw"].get("ItemPattern") or patterns.gem_item_pattern(entry["raw"])
+        bag.pop(i)
+        return pat, entry["item_id"]
+    return None
 
 
 def clear(uid):

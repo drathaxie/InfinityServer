@@ -1013,6 +1013,7 @@ public static class InfinityLoaderMod
 
     public static void UILogin_GetLoginData_Postfix(UILogin __instance, WebCom wcom)
     {
+        EnsureTicker();
         if (!_selfUpdateTried) { _selfUpdateTried = true; CheckForSelfUpdate(); }
         if (__instance == null) return;
         try
@@ -1126,6 +1127,7 @@ public static class InfinityLoaderMod
         // later on the main thread (ResponseAreaJoin/AreaAdd.Execute -> createNameplate), by which
         // point the map is populated. Live colour changes refresh via SetUserData_Postfix.
         try { IngestGuildTags(raw); } catch { }
+        try { TemporalMonsterEffects.IngestPacket(raw); } catch { }
     }
 
     private static void IngestGuildTags(string rawPkt)
@@ -1316,6 +1318,7 @@ public class NameplateTicker : MonoBehaviour
     {
         try
         {
+            TemporalMonsterEffects.Tick();
             if (InfinityLoaderMod.TagShopDirty)
             {
                 InfinityLoaderMod.TagShopDirty = false;

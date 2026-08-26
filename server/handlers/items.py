@@ -104,6 +104,7 @@ async def equip_item(session, writer, cmd, params, msg):
                 # switch to the new class's resource model + send its real updateClass
                 # (DS white/orange-at-50; mana classes blue, no threshold)
                 uid = session.member.uid
+                combat.cancel_player_actions(uid, clear_cooldowns=True)
                 res = forge.resource_for_class(session.conn, new_class)
                 combat.set_resource_model(uid, res["model"], res.get("MaxRP") or 100)
                 combat.set_class_mana(uid, forge.class_mana_costs(session.conn, new_class))

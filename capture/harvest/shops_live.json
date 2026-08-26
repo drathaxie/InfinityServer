@@ -1505,5 +1505,77 @@
    "mergeShop": true,
    "items": []
   }
+ },
+ "2742": {
+  "Cmd": "loadShop",
+  "shop": {
+   "$type": "AQ2D_Server.Game_Engine.Shop.ItemShop, AQ2D_Server",
+   "shopID": 2742,
+   "Name": "Robber's Chest  - Golden Spears",
+   "items": [
+    {
+     "Quantity": 1,
+     "ID": 101330,
+     "Bundle": {
+      "ID": 78455,
+      "Name": "Gold and Ruby Paladin Spear",
+      "Filename": "items/polearms/78455_InfinityAlphaPaladinSpear2.unity3d",
+      "VersionStage": 1,
+      "VersionLive": 1
+     },
+     "PrefabName": "InfinityAlphaPaladinSpear2_weaponGO",
+     "EquipSpot": 2,
+     "ItemType": 20,
+     "Name": "Golden Ancient Ruby Palladion",
+     "Description": "An old Paladin's weapon of choice to face the Undead in the Graveyard. This Paladin met their faithful end at the hands of the Lich. \r\n\r\nThese weapons were then buried and locked away in chests to hide such a powerful instrument that could end the Undead horde.",
+     "DamageRange": 0.1,
+     "Filename": "items/polearms/78455_InfinityAlphaPaladinSpear2.unity3d",
+     "Linkage": "",
+     "Icon": "iwpolearm",
+     "Level": 1,
+     "StackSize": 1,
+     "Rarity": 67,
+     "Element": 1,
+     "Faction": 1,
+     "ReqQuests": [],
+     "strReqQuests": "",
+     "Coins": true,
+     "MetaString": "",
+     "boostValues": {},
+     "MobileCompatibility": 1
+    },
+    {
+     "Quantity": 1,
+     "ID": 101329,
+     "Bundle": {
+      "ID": 78454,
+      "Name": "Gold and Sapphire Paladin Spear",
+      "Filename": "items/polearms/78454_InfinityAlphaPaladinSpear1.unity3d",
+      "VersionStage": 1,
+      "VersionLive": 1
+     },
+     "PrefabName": "InfinityAlphaPaladinSpear1_weaponGO",
+     "EquipSpot": 2,
+     "ItemType": 20,
+     "Name": "Golden Ancient Sapphire Palladion Spear",
+     "Description": "An old Paladin's weapon of choice to face the Undead in the Graveyard. This Paladin met their faithful end at the hands of the Lich. \r\n\r\nThese weapons were then buried and locked away in chests to hide such a powerful instrument that could end the Undead horde.",
+     "DamageRange": 0.1,
+     "Filename": "items/polearms/78454_InfinityAlphaPaladinSpear1.unity3d",
+     "Linkage": "",
+     "Icon": "iwpolearm",
+     "Level": 1,
+     "StackSize": 1,
+     "Rarity": 67,
+     "Element": 1,
+     "Faction": 1,
+     "ReqQuests": [],
+     "strReqQuests": "",
+     "Coins": true,
+     "MetaString": "",
+     "boostValues": {},
+     "MobileCompatibility": 1
+    }
+   ]
+  }
  }
 }
