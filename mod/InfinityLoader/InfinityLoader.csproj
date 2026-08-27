@@ -97,6 +97,12 @@
       <HintPath>$(AqwiManaged)\UnityEngine.Physics2DModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.ParticleSystemModule">
+      <!-- TEMPORARY: ParticleSystem.isEmitting inspection for the sky-blade diagnostics
+           (ParticleDiagnostics.cs). Drop together with that file. -->
+      <HintPath>$(AqwiManaged)\UnityEngine.ParticleSystemModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
       <!-- OnGUI / GUILayout — the in-client cutscene editor's immediate-mode panel (CutsceneEditor.cs). -->
       <HintPath>$(AqwiManaged)\UnityEngine.IMGUIModule.dll</HintPath>

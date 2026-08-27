@@ -105,6 +105,20 @@ public static class InfinityLoaderMod
             AccessTools.Method(typeof(AEC), "WrapAndQueueResponse"),
             prefix: nameof(WrapResponsePrefix));
 
+        // 2b) TEMPORARY: the sky-blade (classInfinityHero_S1_P4) spawns then vanishes within
+        //     ~1 frame. The server packet is already verified correct against the live DB, so
+        //     the failure is in the CLIENT's particle lifecycle -- which no server-side log can
+        //     observe. These two traces record which NodeParticle branch the cue takes, and then
+        //     re-read the spawned GameObject over the following frames so we can see WHICH
+        //     property changes when it disappears (destroyed / deactivated / scaled to zero /
+        //     moved off-camera / finished emitting). Remove once the effect renders.
+        TryPatch(h, "particle diagnostics (Execute)",
+            AccessTools.Method(typeof(NodeParticle), "Execute"),
+            prefix: nameof(ParticleExecutePrefix));
+        TryPatch(h, "particle diagnostics (SpawnParticle)",
+            AccessTools.Method(typeof(NodeParticle), "SpawnParticle"),
+            postfix: nameof(ParticleSpawnPostfix));
+
         // 3) ALLOW our plain-HTTP API on Unity 6. UnityWebRequest blocks cleartext HTTP to any
         //    non-localhost host ("Insecure connection not allowed"), which kills login against a
         //    hosted http:// API. For http:// URLs we run the request through .NET WebClient (no
@@ -1114,6 +1128,18 @@ public static class InfinityLoaderMod
             WritePacket("c2s", json);
         }
         catch { }
+    }
+
+    // TEMPORARY sky-blade diagnostics -- see ParticleDiagnostics.cs. Both are wrapped so a
+    // trace failure can never disturb the cast itself.
+    public static void ParticleExecutePrefix(Entity caster, Newtonsoft.Json.Linq.JObject props)
+    {
+        try { ParticleDiagnostics.OnExecute(caster, props); } catch { }
+    }
+
+    public static void ParticleSpawnPostfix(string fx, UnityEngine.GameObject __result)
+    {
+        try { ParticleDiagnostics.OnSpawn(fx, __result); } catch { }
     }
 
     public static void WrapResponsePrefix(byte[] data)
