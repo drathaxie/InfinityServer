@@ -279,15 +279,18 @@ KNOWN_VARIANCES = [
     # reading under which the buff means anything — we follow those.
     ("Concealed Blade applied to nobody",
      lambda d: '"AuraName": "Concealed Blade"' in d and '"Targets": []' in d),
-    # The ult's classInfinityHero_S1_P4 node is DELIBERATELY not replayed verbatim.
-    # AE's captured shape (Lifetime 4000, Y 10.0, caster-anchored, AnimSpeed+No Follow,
-    # emitted before its PlayerAnimation) renders as a ~1-frame flash in our client,
-    # confirmed on-device across several attempts. The Paladin's Meteor finisher drives
-    # this SAME prefab and renders correctly, so _IH_ULT now mirrors that known-good
-    # node shape instead. See the comment block in seed.py's _IH_ULT for the four
-    # specific differences. Deliberate deviation, not a replication bug.
-    ("sky-blade particle rebuilt to the Paladin's working S1_P4 config",
-     lambda d: '"Particle": "classInfinityHero_S1_P4"' in d),
+    # The ult's PlayerAnimation Priority is DELIBERATELY "Low" where AE sends
+    # "Interrupt All" — the one node in this class we knowingly do not replay verbatim.
+    # Per the decompiled client: for the main player with no damage queue (this cast
+    # has none; its damage is the PlayerHitStream), "Interrupt All" is the single
+    # NodePlayerAnimation branch that does queuedAnimations.Enqueue(...) + return
+    # instead of animation.Play(...). Attack1_Auto therefore never entered, and since
+    # NodeParticle only drains animation.queuedParticles[<animation>] when the animator
+    # ENTERS that state, the sky-blade cue never spawned. "Low" is what this class's own
+    # working auto-attack uses with the same animation and queue key.
+    ("sky-blade PlayerAnimation Priority Low (AE's 'Interrupt All' never enters the state)",
+     lambda d: '"Name": "PlayerAnimation"' in d
+     and '"Priority": "Interrupt All"' in d and '"Priority": "Low"' in d),
 ]
 
 

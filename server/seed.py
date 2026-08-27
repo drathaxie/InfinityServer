@@ -1528,11 +1528,15 @@ def seed_void(conn):
 # timings, aura names/flags — is capture-verbatim and replay-tested by test_infinity_hero.py.
 INFINITY_HERO_CLASS_ID = 2022
 INFINITY_HERO_ARMOR_ITEM = 200022
-# v2: sky-blade particle Lifetime 4000 -> 6000ms (full reveal)
-# v3: sky-blade particle rebuilt to match the Paladin's working S1_P4 config --
-#     PlayerAnimation before Particle, ground level (Y 10 -> 0), target-anchored,
-#     no AnimSpeed/Follow overrides. See the comment in _IH_ULT.
-INFINITY_HERO_GRAPH_VERSION = 3
+# v2/v3: attempts at the sky-blade visual that changed the particle node (Lifetime,
+#        anchor, ordering). All reverted -- the decompiled client proves the node was
+#        never at fault: NodeParticle ignores Lifetime entirely, and the cue only ever
+#        spawns when its named animation actually plays.
+# v4: the real fix -- the ult's PlayerAnimation Priority "Interrupt All" is the single
+#     NodePlayerAnimation branch that enqueues instead of playing, so Attack1_Auto never
+#     entered and the queued particle never drained. "Low" (what this class's own
+#     working auto-attack uses) plays it. See the comment block in _IH_ULT.
+INFINITY_HERO_GRAPH_VERSION = 4
 CLASS_SHOP_ID = 2468                    # Gravelyn's Infinity — where classes are bought
 
 _IH_RESOURCE = {"model": "heroic", "ResourceColor": 16773977, "MaxRP": 50,
@@ -1876,29 +1880,35 @@ _IH_ULT = [
     {"Name": "Cooldown", "Slot": 0, "CD": 1979, "Animation": ""},
 ] + _ih_restrict("Attack1_Auto", 0.4, slots="1,2,3,4,5") + [
     _ih_sfx("Attack1_Auto", "sfx_hero_ultimate_cast"),
-    # --- the sky-blade visual: built to MATCH THE PALADIN'S WORKING CONFIG ------------
-    # Replaying AE's captured node verbatim renders as a ~1-frame flash in our client,
-    # confirmed repeatedly on-device. The Paladin's Meteor finisher drives this SAME
-    # classInfinityHero_S1_P4 prefab and renders correctly, so its node shape is the
-    # known-good reference (seed.py's PALADIN_GRAPH_VERSION v6 note). Four differences
-    # mattered, all corrected here:
-    #   * PlayerAnimation is emitted BEFORE the Particle (the client only spawns an
-    #     animation-cued particle while that cue is actually playing on the caster);
-    #   * Y 10.0 -> 0: AE spawns it ten units above the caster; the Paladin spawns it at
-    #     ground level, where the sword's drop-and-impact sequence is actually framed;
-    #   * anchored to the TARGET rather than the caster, exactly as the Paladin does;
-    #   * no AnimSpeed / Follow overrides -- the Paladin sets neither, and "No Follow"
-    #     detaches the effect from the entity it was spawned against.
-    # A 6000ms Lifetime (vs AE's 4000) lets the full composite sequence finish, which is
-    # the same value the Paladin needed. Deliberate deviation from the capture; see
-    # KNOWN_VARIANCES in test_infinity_hero.py.
-    {"Name": "PlayerAnimation", "Animation": "Attack1_Auto",
-     "Priority": "Interrupt All", "Speed": 1.0, "Targets": 1},
-    {"Name": "Particle", "Particle": "classInfinityHero_S1_P4",
-     "Animation": "Attack1_Auto", "Time": 0, "X": 0, "Y": 0,
-     "Lifetime": 6000, "Targets": "@target"},
+    # --- the sky-blade visual ---------------------------------------------------------
+    # The particle node itself is AE's verbatim (it was never the problem). Read the
+    # decompiled client to settle this instead of guessing:
+    #
+    #   NodeParticle.Execute -- a node carrying Animation+Time NEVER spawns immediately.
+    #   Unless the name is the caster's idle/combatIdle state it lands in
+    #   animation.queuedParticles[<animation>], and OnAnimationExit drains that queue
+    #   only when the animator actually ENTERS that state. So the particle appears if
+    #   and only if the named animation really plays.
+    #
+    #   NodePlayerAnimation.Execute -- for the main player with no damage queue (this
+    #   cast has no Damage node; its damage is the PlayerHitStream), Priority
+    #   "Interrupt All" is the ONE branch that does `queuedAnimations.Enqueue(...);
+    #   return;` instead of `animation.Play(...)`. Every other priority plays the state
+    #   directly. Enqueued behind an empty damage queue, Attack1_Auto was never entered,
+    #   so the queued S1_P4 cue was never drained -- stacks spent, no sword.
+    #
+    # "Low" is what this class's own working auto-attack uses with the same animation
+    # and the same queue key (the S1_P1 auto particle renders fine), so it is the
+    # proven-good value here rather than another guess.
+    #
+    # NOTE: "Lifetime" is dead weight -- NodeParticle never reads it; SpawnParticle
+    # hardcodes TimedKill = 3f. Kept only to stay byte-identical to AE's node.
+    _ih_particle("Attack1_Auto", "classInfinityHero_S1_P4", "0", -0.5, 10.0,
+                 speed=1.0, life=4000.0),
     {"Name": "PlayerHitStream", "X": 0.0, "Y": 0.0, "Width": 20.0, "Height": 10.0,
      "Duration": 2500, "Interval": 200, "Origin": "Self", "Slot": 0},
+    {"Name": "PlayerAnimation", "Animation": "Attack1_Auto",
+     "Priority": "Low", "Speed": 1.0, "Targets": 1},
     {"Name": "SetSkillIndex", "Slot": 0, "Index": 0, "Icon": _ICO + "AA1"},
     {"Name": "UpdateAnimation", "Tag": "combatIdle", "Value": "2H_Fight"},
 ]
