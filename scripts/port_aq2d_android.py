@@ -778,7 +778,12 @@ def clone_zip_info(source: zipfile.ZipInfo) -> zipfile.ZipInfo:
     return info
 
 
-def build(source_apk: Path, output_apk: Path) -> None:
+def build_patched_bytes(source_apk: Path) -> bytes:
+    """Validate + patch a source APK, returning the unsigned, unaligned result as
+    bytes (in-memory) rather than writing it to disk -- so a caller that also wants
+    to zipalign and sign (see apk_zipalign.py / apk_v2_sign.py) can pipe the result
+    straight through without an intermediate file."""
+    import io
     with zipfile.ZipFile(source_apk, "r") as source:
         names = set(source.namelist())
         for required in (ARM64_LIBRARY, METADATA_PATH, MANIFEST_PATH):
@@ -789,8 +794,8 @@ def build(source_apk: Path, output_apk: Path) -> None:
         validate_metadata(source.read(METADATA_PATH))
         patched_library = inject_hook(source.read(ARM64_LIBRARY))
 
-        output_apk.parent.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(output_apk, "w", allowZip64=True) as output:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", allowZip64=True) as output:
             for source_info in source.infolist():
                 if source_info.filename.startswith(ARMV7_PREFIX):
                     continue
@@ -798,6 +803,13 @@ def build(source_apk: Path, output_apk: Path) -> None:
                 if source_info.filename == ARM64_LIBRARY:
                     payload = patched_library
                 output.writestr(clone_zip_info(source_info), payload)
+        return buf.getvalue()
+
+
+def build(source_apk: Path, output_apk: Path) -> None:
+    patched = build_patched_bytes(source_apk)
+    output_apk.parent.mkdir(parents=True, exist_ok=True)
+    output_apk.write_bytes(patched)
 
 
 def main() -> int:
