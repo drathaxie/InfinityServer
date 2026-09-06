@@ -366,7 +366,7 @@ async def ai_loop():
                     print(f"  [death] {mem.name} slain by {mon} (10s respawn)")
 
             # players keep auto-attacking their target until it dies or they leave
-            for uid, area, target, data, fdata, cd in combat.auto_engagements():
+            for uid, area, target, data, fdata, cd, skill_id in combat.auto_engagements():
                 sess = _players.get(uid)
                 if sess is None or sess.member is None or \
                         not any(m.uid == uid for m in world.members(area)):
@@ -377,14 +377,24 @@ async def ai_loop():
                     continue
                 if not combat.off_cooldown(uid, 0, cd):
                     continue
-                if data is not None:
+                # data-driven classes (Infinity Hero, Void, Paladin, ...) must resolve through
+                # the same rule engine a manual gar[0] press uses -- otherwise a sustained auto
+                # re-fire can land mid-branch (e.g. the Infinity Hero's armed-at-25 Heroic
+                # Empowerment sky-blade) and stomp the special cast with a plain swing.
+                if data is not None and combat.class_rules(uid, skill_id) is not None:
+                    pkts, killed, _dmg = combat.begin_cast(area, uid, 0, target, data, fdata,
+                                                           skill_id)
+                elif data is not None:
                     attack, killed, _dmg = combat.cast_skill(area, uid, 0, target, data, fdata)
+                    pkts = [attack]
                 else:
                     attack, hit, _ = combat.auto_attack(area, target, uid)
                     killed = [target] if hit else []
-                await send_obj(sess.writer, attack)          # the attacker
-                world.broadcast(area, attack, exclude=uid)   # everyone else in the area
-                if combat.resource_model(uid) == "conviction" and sess.member is not None:
+                    pkts = [attack]
+                for pk in pkts:
+                    await send_obj(sess.writer, pk)          # the attacker
+                    world.broadcast(area, pk, exclude=uid)   # everyone else in the area
+                if combat.resource_model(uid) in combat.STACK_MODELS and sess.member is not None:
                     await send_obj(sess.writer, combat.resource_packet(uid, sess.member.name))
                 if killed:
                     await _handle_kills(sess, sess.writer, killed)

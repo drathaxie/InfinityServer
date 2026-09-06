@@ -1664,10 +1664,10 @@ def drop_aggro_for(uid):
 _auto = {}                  # uid -> {"area","target","data","forge","cd"}
 
 
-def auto_engage(uid, area, target, data, forge, cd_ms):
+def auto_engage(uid, area, target, data, forge, cd_ms, skill_id=None):
     if target and str(target).startswith("m:"):
         _auto[uid] = {"area": area, "target": target, "data": data,
-                      "forge": forge, "cd": cd_ms}
+                      "forge": forge, "cd": cd_ms, "skill_id": skill_id}
 
 
 def auto_disengage(uid):
@@ -1675,7 +1675,7 @@ def auto_disengage(uid):
 
 
 def auto_engagements():
-    return [(uid, a["area"], a["target"], a["data"], a["forge"], a["cd"])
+    return [(uid, a["area"], a["target"], a["data"], a["forge"], a["cd"], a.get("skill_id"))
             for uid, a in list(_auto.items())]
 
 

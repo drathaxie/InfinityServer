@@ -156,7 +156,8 @@ async def begin_cast(session, writer, cmd, params, msg):
             attack, hit, _ = combat.auto_attack(session.area, target, uid)
             killed = [target] if hit else []
             pkts = [attack]
-        combat.auto_engage(uid, session.area, target, data, forge_data, cd or 600)
+        combat.auto_engage(uid, session.area, target, data, forge_data, cd or 600,
+                          sk["skill_id"] if sk else None)
     elif has_graph:                     # authored skill: run its graph (handshake)
         pkts, killed, dmg = combat.begin_cast(session.area, uid, slot_i, target,
                                               data, forge_data, sk["skill_id"], allies)
