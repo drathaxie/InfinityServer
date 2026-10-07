@@ -84,7 +84,7 @@ One-shot SQLite→Postgres copy: `migrate_to_pg.py` (TRUNCATE+reload — don't r
 ## Client mod — `mod/InfinityLoader`
 
 Self-contained Doorstop loader bundling AE's own Harmony (no MelonLoader). Harmony patches
-(`docs/RedirectPatch.cs`, `LoginPatch.cs`, `ContentPatch.cs`) repoint the client and allow our
+(see `mod/InfinityLoader/`) repoint the client and allow our
 plain-HTTP/HTTPS API on Unity 6. An always-on packet logger writes captures for protocol work.
 
 ## Reference content — `data/`

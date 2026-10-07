@@ -38,7 +38,7 @@ from handlers.context import (Session, send_str, send_obj, _players, _is_staff, 
 # server.<name>; the handler modules themselves import handlers.context directly)
 
 HOST = "0.0.0.0"
-PORT = 5588  # must match docs/RedirectPatch.cs
+PORT = 5588  # must match mod/InfinityLoader
 
 # Client-side acks that need no s2c reply (movement confirms).
 NOOP_CMDS = {"MoveOK", "mv"}
