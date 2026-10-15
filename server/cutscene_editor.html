@@ -144,6 +144,7 @@
   <option>em_unsheath</option><option>em_punt</option><option>n</option>
 </datalist>
 
+<script src="/editor/workflows.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const el = (t,c) => { const e=document.createElement(t); if(c) e.className=c; return e; };
@@ -218,7 +219,8 @@ function category(o){
 }
 
 // ---- server I/O ----------------------------------------------------------
-async function loadList(){ LIST = await (await fetch("list")).json(); }
+let editVersion = '';
+async function loadList(){ LIST = await (await editorFetch("list")).json(); }
 function showResults(q){
   q=(q||"").trim().toLowerCase(); const box=$("#results"); box.innerHTML="";
   let arr = q ? LIST.filter(it => (it.name||"").toLowerCase().includes(q) || String(it.ID).includes(q)) : LIST;
@@ -228,10 +230,13 @@ function showResults(q){
   box.style.display = arr.length ? "block" : "none";
 }
 async function loadScene(id){
-  const txt = await (await fetch("load?ID="+encodeURIComponent(id))).text();
+  if(envelope && serialize() !== origRaw && !confirm('Discard unsaved cutscene changes?')) return;
+  const loaded = await (await editorFetch("load?ID="+encodeURIComponent(id))).json();
+  const txt = loaded.raw;
   if(!txt.trim()){ setStatus("cutscene "+id+" is empty", false); return; }
   try { envelope = JSON.parse(txt); } catch(e){ setStatus("stored JSON is unparseable", false); return; }
   adopt(txt, String(id));
+  editVersion = loaded.version;
   setStatus(`loaded cutscene ${id} — ${frames.length} page(s)`);
 }
 function adopt(txt, id){
@@ -245,6 +250,8 @@ function adopt(txt, id){
   renderAll();
 }
 function newScene(){
+  if(envelope && serialize() !== origRaw && !confirm('Discard unsaved cutscene changes?')) return;
+  editVersion = '';
   envelope = { ID:"", cutsceneName:"New Cutscene", cutsceneDescription:"", idCount:0, boxCount:0,
                trackCount:0, sfxCount:0, completeActions:[], frames:[[""]] };
   adopt("", "");
@@ -255,13 +262,17 @@ async function save(){
   envelope.cutsceneName = $("#scName").value;
   envelope.cutsceneDescription = $("#scDesc").value;
   const json = serialize();
-  const fd = new URLSearchParams(); fd.set("id", curId||""); fd.set("json", json);
+  const fd = new URLSearchParams(); fd.set("id", curId||""); fd.set("json", json); fd.set('version', editVersion);
   setStatus("saving…");
-  const r = await fetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).then(r=>r.json());
-  if(r.ok){ curId=String(r.ID); $("#scId").value=curId; origRaw=json; envDirty=false;
-            frames.forEach(f=>f.forEach(c=>c.dirty=false));
+  $('#btnSave').disabled = true;
+  try {
+  const r = await editorFetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).then(r=>r.json());
+  if(r.ok){ const unchanged = serialize() === json;
+            curId=String(r.ID); $("#scId").value=curId; editVersion=r.version; origRaw=json;
+            if(unchanged){envDirty=false; frames.forEach(f=>f.forEach(c=>c.dirty=false));}
             setStatus(`saved cutscene ${r.ID} (${json.length} bytes)`); await loadList(); }
   else setStatus(r.msg||"save failed", false);
+  } finally { $('#btnSave').disabled = false; }
 }
 
 // ---- rendering: object tree ----------------------------------------------
@@ -551,7 +562,7 @@ function picker(placeholder, endpoint, fmt, onPick){
   const wrap=el("div","pick"); const i=el("input"); i.type="text"; i.placeholder=placeholder;
   const res=el("div","pickres"); let t=null;
   i.oninput=()=>{ clearTimeout(t); t=setTimeout(async()=>{
-    const arr=await (await fetch(endpoint+"?q="+encodeURIComponent(i.value.trim()))).json();
+    const arr=await (await editorFetch(endpoint+"?q="+encodeURIComponent(i.value.trim()))).json();
     res.innerHTML=""; res.style.display=arr.length?"block":"none";
     for(const m of arr){ const d=el("div"); d.textContent=fmt(m); d.onmousedown=()=>{ onPick(m); res.style.display="none"; wrap.remove(); }; res.appendChild(d); } }, 180); };
   i.onblur=()=>setTimeout(()=>res.style.display="none",200);
@@ -621,6 +632,7 @@ $("#search").oninput=e=>showResults(e.target.value);
 $("#search").onfocus=e=>showResults(e.target.value);
 $("#search").onblur=()=>setTimeout(()=>$("#results").style.display="none",200);
 window.addEventListener("resize", resizeCanvas);
+window.addEventListener('beforeunload', e => { if(envelope && serialize() !== origRaw){e.preventDefault(); e.returnValue='';} });
 
 (async function(){
   try { await loadList(); } catch(e){ setStatus("could not load cutscene list", false); }

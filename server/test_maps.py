@@ -12,7 +12,10 @@ import maps
 # A minimal but valid map doc (same shape as the served JSON: area=AreaJoin, cells map).
 DOC = {"area": {"Cmd": "AreaJoin", "strMapName": "testtown", "DisplayName": "TestTown",
                 "monBranch": [], "uoBranch": [{"x": 1}]},
-       "cells": {"Enter": {"Cmd": "CellJoin", "Frame": "Enter", "entities": []}}}
+       "cells": {"Enter": {"Cmd": "CellJoin", "Frame": "Enter", "Pad": "Spawn",
+                            "entities": [{"targetString": "p:captured"},
+                                         {"targetString": "m:42", "HP": 100}],
+                            "monsterSpawns": [{"MonID": 42, "strFrame": "Enter"}]}}}
 
 
 def main():
@@ -49,8 +52,18 @@ def main():
     assert area["DisplayName"] == "TestTown" and area["uoBranch"] == [], "AreaJoin from the DB, ghosts stripped"
     cell = maps.cell_payload("testtown", "Enter", conn=conn)
     assert cell["Cmd"] == "CellJoin" and cell["Frame"] == "Enter", "CellJoin from the DB"
+    # A return route can land above the initial spawn, as on Asteroid's chest ledge.
+    ledge = maps.cell_payload("testtown", "Enter", "Left", conn)
+    assert ledge["Pad"] == "Left", "captured Spawn must not replace the requested destination pad"
+    assert ledge["entities"] == [{"targetString": "m:42", "HP": 100}], "keep NPCs and strip captured players"
+    assert ledge["monsterSpawns"] == DOC["cells"]["Enter"]["monsterSpawns"]
+    assert maps._get("testtown")["cells"]["Enter"]["Pad"] == "Spawn", "route must not mutate the cached capture"
+    assert maps.cell_payload("testtown", "Enter", "Right", conn)["Pad"] == "Right", "each arrival uses its own pad"
+    assert maps.cell_payload("testtown", "Enter", conn=conn)["Pad"] == "Spawn", "initial arrival retains Spawn"
+    assert maps.cell_payload("testtown", "Enter", "", conn)["Pad"] == "Spawn", "empty pad keeps the default"
     # an unknown frame synthesizes a minimal valid CellJoin
-    assert maps.cell_payload("testtown", "Nowhere", conn=conn)["Frame"] == "Nowhere"
+    uncaptured = maps.cell_payload("testtown", "Nowhere", "Left", conn)
+    assert uncaptured["Frame"] == "Nowhere" and uncaptured["Pad"] == "Left"
 
     print("maps OK: DB-backed (maps.doc), load() warms cache, lazy DB load, miss not cached, "
           "AreaJoin/CellJoin served from the doc")

@@ -24,10 +24,17 @@ def main():
     # point the dev allowlist at a temp file we control (don't touch the real config)
     devfile = pathlib.Path(tempfile.mkdtemp()) / "dev_users.txt"
     devfile.write_text("# test\n__staff__\n", encoding="utf-8")
-    game._DEV_USERS_FILE = devfile
-
     staff = game.login(conn, "__staff__", "pw")
-    assert staff["access_level"] == game.DEV_ACCESS_LEVEL, "listed account gets dev access on login"
+    original = game._DEV_USERS_FILE
+    game._DEV_USERS_FILE = devfile
+    try:
+        assert game.login(conn, "__staff__", "pw")["access_level"] == 0, "names do not grant roles"
+        conn.execute("UPDATE characters SET access_level=? WHERE id=?", (game.DEV_ACCESS_LEVEL, staff["id"]))
+        conn.commit()
+        staff = game.login(conn, "__staff__", "pw")
+        assert staff["access_level"] == game.DEV_ACCESS_LEVEL, "persisted role unlocks editor"
+    finally:
+        game._DEV_USERS_FILE = original
     player = game.login(conn, "__player__", "pw")
     assert int(player["access_level"] or 0) == 0, "an unlisted account stays a normal player"
 

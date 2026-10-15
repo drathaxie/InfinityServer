@@ -80,9 +80,9 @@ def test_config_loads_from_db():
             "SELECT cost, coins FROM shop_items WHERE shop_id=? AND item_id=?",
             (seed.CLASS_SHOP_ID, seed.INFINITY_HERO_ARMOR_ITEM)).fetchone()
         assert sold, "Infinity Hero is not sold at the class shop — unreachable in game"
-        armor = conn.execute("SELECT meta_string, item_type FROM items WHERE item_id=?",
+        armor = conn.execute("SELECT Meta, item_type FROM items WHERE id=?",
                              (seed.INFINITY_HERO_ARMOR_ITEM,)).fetchone()
-        assert armor and armor["meta_string"] == str(seed.INFINITY_HERO_CLASS_ID), \
+        assert armor and armor["Meta"] == str(seed.INFINITY_HERO_CLASS_ID), \
             "the armor does not point at class 2022"
         assert forge.class_for_armor_item(conn, seed.INFINITY_HERO_ARMOR_ITEM) \
             == seed.INFINITY_HERO_CLASS_ID, "equipping the armor won't switch class"

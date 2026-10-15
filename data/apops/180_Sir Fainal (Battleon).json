@@ -1,6 +1,6 @@
 {
   "ID": 180,
-  "nextElementId": 36,
+  "nextElementId": 37,
   "name": "Sir Fainal (Battleon)",
   "bgImage": "",
   "bgImageScale": 1,
@@ -43,7 +43,7 @@
           "changeBoxColor": "#FFFFFF",
           "nameplateTextColor": "#FFFFFF",
           "nameplateBoxColor": "#000000",
-          "text": "@name ! I'm so glad to find you in town. The Undead are rising once again! A new Lich has risen a horde of Undead that is threatening to invade town.\n\nI could use your help putting these Undead in place.\n\nJoin me in this re-imagined adventure and expansion on the Graveyard! ",
+          "text": "@name ! I'm so glad to find you in town. A once-in-a-lifetime asteroid is on its way to our world. Rumor has it you can can forge the first ever <b>Infinity Star Sword</b> there!\n\nAlso, a Lich is creating horde of Undead that is threatening to invade town. Join me in the graveyard to stop them! ",
           "hideLead": false,
           "borderless": false,
           "addNameplate": false,
@@ -53,13 +53,40 @@
           "requirements": []
         },
         {
+          "ID": 36,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "Join",
+          "label": "Goto J6's Space Ship (Star Sword)",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "asteroid,Enter,Spawn",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false,
+          "sfxString": "",
+          "musicID": -1,
+          "staffed": false
+        },
+        {
           "ID": 33,
           "type": "Button",
           "targets": [],
           "acceptQuests": [],
           "turninQuests": [],
           "action": "Join",
-          "label": "The Return of the Living Undead!",
+          "label": "Goto Graveyard",
           "subtitle": "",
           "intMin": 0,
           "intMax": 0,
@@ -92,14 +119,15 @@
           "link": "",
           "text": "",
           "icon": "",
-          "reqCondition": "AND"
+          "reqCondition": "AND",
+          "iconOverride": "none"
         }
       ]
     }
   ],
   "actors": [
     {
-      "npcid": 381,
+      "npcid": 521,
       "name": "Sir Fainal",
       "subtitle": "Paladin in Training",
       "targetNode": 0,

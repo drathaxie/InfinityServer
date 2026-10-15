@@ -39,7 +39,8 @@ from combat_engine.rules import run_skill
 from combat_engine.state import CombatState, _states as _engine_states
 
 FIX = pathlib.Path(__file__).resolve().parent.parent / "docs" / "combat-engine" / "fixtures"
-REPORT = FIX.parent / "infinity_hero_report.md"
+from test_reports import report_path
+REPORT = report_path("infinity_hero_report.md")
 
 ASPECTS = {"Warrior Aspect", "Mage Aspect", "Healer Aspect", "Rogue Aspect"}
 SLOT_SKILL = {0: 168, 1: 169, 2: 170, 3: 171, 4: 172}

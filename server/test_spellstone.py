@@ -6,6 +6,7 @@ import time
 import combat
 import db
 import forge
+import montemplates
 import seed
 import world
 from handlers.items import use_spellstone
@@ -37,6 +38,7 @@ def run():
     db.init()
     with db.connect() as conn:
         seed.seed_practice_spellstone(conn)
+        montemplates.seed_db(conn)
         conn.execute("INSERT INTO accounts(id,username,password) VALUES(1,'stone','x')")
         conn.execute("INSERT INTO characters(id,account_id,name) VALUES(1,1,'Stone Tester')")
         conn.execute("INSERT INTO char_items(char_item_id,char_id,item_id,quantity) VALUES(1,1,?,1)",
@@ -70,7 +72,7 @@ def run():
         assert len(cast_packets) == 1
         assert any(n["Name"] == "MonTransform" for n in cast_packets[0]["Nodes"])
 
-        aura = combat._auras[("battleon", "p:777")]["Practice Frogzard Form"]
+        aura = combat._auras[("battleon", "p:777")]["Monster Transformation"]
         aura["ends"] = time.time() - 1
         expired = combat.aura_ticks()
         assert any(any(n.get("detransform") for n in p["Nodes"])
@@ -78,5 +80,9 @@ def run():
     print("spellstone OK: equip -> slot 5 -> MetaString Skill Forge graph -> Frogzard -> timed revert")
 
 
-if __name__ == "__main__":
+def main():
     run()
+
+
+if __name__ == "__main__":
+    main()

@@ -24,6 +24,7 @@ Usage:
     python harvest_catalog.py preflight              # validate endpoints + show shape
     python harvest_catalog.py classes                # GetBaseClasses across all 3 envs + diff
     python harvest_catalog.py bundles --max-id 60000 # sweep the bundle catalog
+    python harvest_catalog.py bundles --min-id 78800 --max-id 79200 # bounded release delta
     python harvest_catalog.py all --max-id 60000
 """
 import argparse, json, pathlib, time
@@ -139,8 +140,8 @@ def harvest_classes():
 
 
 # --------------------------------------------------------------------------------------
-def harvest_bundles(env, max_id, batch, delay):
-    """Sweep data/GetAssetBundlesByIDs over 1..max_id; save full catalog + unreleased subset.
+def harvest_bundles(env, min_id, max_id, batch, delay):
+    """Sweep data/GetAssetBundlesByIDs over min_id..max_id; save catalog + unreleased subset.
 
     The version fields are env-independent (each response carries all three), so a single
     host gives us enough to compute the released/unreleased flag.
@@ -169,11 +170,11 @@ def harvest_bundles(env, max_id, batch, delay):
         # singleton 404 (absent) or hard error — drop it
         time.sleep(delay)
 
-    print(f"# sweeping bundles 1..{max_id} via {env} in batches of {batch} "
+    print(f"# sweeping bundles {min_id}..{max_id} via {env} in batches of {batch} "
           f"(delay {delay}s, bisecting on 404)")
     # No early-stop: the ID space has large gaps (armors ~15k, class particles ~78k),
     # so a run of empty batches does NOT mean the end. Sweep the full range.
-    for start in range(1, max_id + 1, batch):
+    for start in range(min_id, max_id + 1, batch):
         ids = list(range(start, min(start + batch, max_id + 1)))
         before = len(found)
         fetch(ids)
@@ -181,7 +182,10 @@ def harvest_bundles(env, max_id, batch, delay):
               f"(total {len(found)})")
 
     catalog = sorted(found.values(), key=lambda r: r.get("ID", 0))
-    (OUT / "bundles_catalog.json").write_text(json.dumps(catalog, indent=2), encoding="utf-8")
+    suffix = "" if min_id == 1 else f"_{min_id}_{max_id}"
+    catalog_name = f"bundles_catalog{suffix}.json"
+    unreleased_name = f"bundles_unreleased{suffix}.json"
+    (OUT / catalog_name).write_text(json.dumps(catalog, indent=2), encoding="utf-8")
 
     def vint(r, k):
         try:
@@ -196,11 +200,11 @@ def harvest_bundles(env, max_id, batch, delay):
     unreleased = [r for r in catalog
                   if vint(r, "VersionLive") == 0
                   and (vint(r, "VersionStage") > 0 or vint(r, "VersionContent") > 0)]
-    (OUT / "bundles_unreleased.json").write_text(json.dumps(unreleased, indent=2), encoding="utf-8")
+    (OUT / unreleased_name).write_text(json.dumps(unreleased, indent=2), encoding="utf-8")
 
-    print(f"\n# wrote {len(catalog)} bundles -> capture/harvest/bundles_catalog.json")
+    print(f"\n# wrote {len(catalog)} bundles -> capture/harvest/{catalog_name}")
     print(f"# {len(unreleased)} look UNRELEASED (Live==0, Stage/Content>0) "
-          f"-> capture/harvest/bundles_unreleased.json")
+          f"-> capture/harvest/{unreleased_name}")
 
     # Tally unreleased by Type so the class/skill content jumps out.
     bytype = {}
@@ -225,21 +229,24 @@ def main():
     ap.add_argument("mode", choices=["preflight", "classes", "bundles", "all"])
     ap.add_argument("--env", choices=list(ENVS), default=DEFAULT_ENV,
                     help="environment host for the bundle sweep (default: live)")
+    ap.add_argument("--min-id", type=int, default=1, help="lowest bundle ID to probe")
     ap.add_argument("--max-id", type=int, default=60000, help="highest bundle ID to probe")
     ap.add_argument("--batch", type=int, default=200, help="IDs per request")
     ap.add_argument("--delay", type=float, default=0.4, help="seconds between batches (be polite)")
     args = ap.parse_args()
+    if args.min_id < 1 or args.max_id < args.min_id:
+        ap.error("require 1 <= --min-id <= --max-id")
 
     if args.mode == "preflight":
         preflight(args.env)
     elif args.mode == "classes":
         harvest_classes()
     elif args.mode == "bundles":
-        harvest_bundles(args.env, args.max_id, args.batch, args.delay)
+        harvest_bundles(args.env, args.min_id, args.max_id, args.batch, args.delay)
     elif args.mode == "all":
         harvest_classes()
         print()
-        harvest_bundles(args.env, args.max_id, args.batch, args.delay)
+        harvest_bundles(args.env, args.min_id, args.max_id, args.batch, args.delay)
 
 
 if __name__ == "__main__":

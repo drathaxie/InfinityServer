@@ -47,6 +47,8 @@ mod/doorstop_extract/
 dist/
 tmp/
 outputs/
+build/
+*.apk
 .claude/
 .career-profile-worktree/
 
@@ -62,3 +64,7 @@ capture/harvest/aqw_wiki_item_matches*.jsonl
 
 capture/harvest/*.out.log
 capture/harvest/*.err.log
+.codex-remote-attachments/
+.tmp-tests/
+*.rar
+capture/harvest/bundles_catalog_before_*.json

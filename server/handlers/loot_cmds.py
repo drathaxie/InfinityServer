@@ -33,3 +33,21 @@ async def bulk_operation(session, writer, cmd, params, msg):
             await send_obj(writer, loot.discard_all(session.member.uid))
             print("  [s2c] bulkOperation discard-all")
     return
+
+
+@register("getMonDrops")
+async def get_mon_drops(session, writer, cmd, params, msg):
+    # RequestGetMonDrops Params=[monID] -> {Cmd:getMonDrops, monID, ItemDrops:[MonDropItem]}.
+    # Sent from the chat/dev drop-inspection action against the currently targeted monster, so
+    # monID is the CATALOG id (Monster.ID), not the map instance id. Answering with an empty
+    # ItemDrops is meaningful — it says "this monster drops nothing" — so reply either way.
+    if session.char is None or not params:
+        return
+    try:
+        mon_id = int(params[0])
+    except (TypeError, ValueError):
+        return
+    drops = loot.drop_table(session.conn, mon_id)
+    await send_obj(writer, {"Cmd": "getMonDrops", "monID": mon_id, "ItemDrops": drops})
+    print(f"  [s2c] getMonDrops mon={mon_id} -> {len(drops)} rows")
+    return

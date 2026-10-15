@@ -1,0 +1,80 @@
+{
+  "monsters": [
+    {
+      "monster_id": 314,
+      "name": "Frogzard Tower"
+    },
+    {
+      "monster_id": 151,
+      "name": "FrostZard"
+    },
+    {
+      "monster_id": 152,
+      "name": "FrogzardDC"
+    },
+    {
+      "monster_id": 153,
+      "name": "BaconCatZard"
+    },
+    {
+      "monster_id": 154,
+      "name": "Chinzard1"
+    },
+    {
+      "monster_id": 155,
+      "name": "Chinzard2"
+    },
+    {
+      "monster_id": 156,
+      "name": "ChinzardChaos"
+    },
+    {
+      "monster_id": 157,
+      "name": "Mozard"
+    },
+    {
+      "monster_id": 158,
+      "name": "FrogzardBalloon"
+    },
+    {
+      "monster_id": 159,
+      "name": "Zardrider Twig"
+    },
+    {
+      "monster_id": 160,
+      "name": "FrogzardEC"
+    },
+    {
+      "monster_id": 161,
+      "name": "Firezard"
+    },
+    {
+      "monster_id": 162,
+      "name": "LavaZard"
+    },
+    {
+      "monster_id": 163,
+      "name": "Sketchy Zard"
+    },
+    {
+      "monster_id": 164,
+      "name": "FrogzardXmas"
+    },
+    {
+      "monster_id": 165,
+      "name": "Frogzard Purple"
+    },
+    {
+      "monster_id": 388,
+      "name": "Frogzard"
+    },
+    {
+      "monster_id": 415,
+      "name": "FrogzardLucky"
+    },
+    {
+      "monster_id": 416,
+      "name": "PizzaCatZard"
+    }
+  ]
+}

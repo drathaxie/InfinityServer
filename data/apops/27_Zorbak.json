@@ -1,0 +1,120 @@
+{
+  "ID": 27,
+  "nextElementId": 18,
+  "name": "Zorbak",
+  "bgImage": "",
+  "bgImageScale": 1.3,
+  "startingPanels": [
+    2
+  ],
+  "panels": [
+    {
+      "PID": 2,
+      "name": "Introduction",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 12,
+          "type": "Header",
+          "text": "Zorbak",
+          "subtitle": "100% Ebil Blue Moglin",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "requirements": []
+        },
+        {
+          "text": "Meh heh heh. I'm just here to break things. ",
+          "color": "#1d075a",
+          "changeBoxColor": "#f6eaea",
+          "nameplateTextColor": "#ecf74a",
+          "nameplateBoxColor": "#2321ba",
+          "hideLead": false,
+          "borderless": true,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "ID": 5,
+          "type": "Bubble",
+          "requirements": []
+        },
+        {
+          "ID": 8,
+          "type": "Button",
+          "targets": [],
+          "action": "CloseApop",
+          "label": "Close",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "PID": 3,
+      "name": "New Panel",
+      "panelPosition": 1,
+      "hidePanelBG": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "changeApopBG": "",
+      "changeApopBGScale": 1,
+      "restoreBGOnClose": false,
+      "elements": [
+        {
+          "ID": 14,
+          "type": "Header",
+          "text": "Header Title",
+          "subtitle": "",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "requirements": []
+        },
+        {
+          "ID": 15,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Hello World",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": []
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 57,
+      "name": "Zorbak",
+      "subtitle": "100% Ebil Blue Moglin",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": -3,
+      "yOffset": -12,
+      "scale": 2,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 1,
+  "IsSingleAction": false
+}

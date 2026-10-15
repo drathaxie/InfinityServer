@@ -1,0 +1,236 @@
+[
+  {
+    "theme": "chaos",
+    "asset": "menu",
+    "path": "mod\\InfinityLoader\\Assets\\UIThemes\\chaos\\menu.png",
+    "source": "C:\\Users\\jesse\\.codex\\generated_images\\01a11696-d41e-72d2-abaf-867c5a7b68dc\\exec-93804bf0-be5d-4c38-91cd-a10a0e11bd47.png",
+    "sha256": "8d040d875c0d525ab896d8ab5e8e3d589c92cde0d1f01dbd1b171e05446493bc",
+    "size": [
+      1305,
+      1205
+    ],
+    "alpha_bbox": [
+      0,
+      29,
+      1261,
+      1205
+    ],
+    "opaque_bounds": [
+      77,
+      62,
+      1229,
+      1138
+    ],
+    "center_alpha": 253,
+    "corner_alpha": 0,
+    "revision": 2
+  },
+  {
+    "theme": "chaos",
+    "asset": "skill",
+    "path": "mod\\InfinityLoader\\Assets\\UIThemes\\chaos\\skill.png",
+    "source": "C:\\Users\\jesse\\.codex\\generated_images\\01a11696-d41e-72d2-abaf-867c5a7b68dc\\exec-20ad6b23-f3cf-4700-88f5-64ea7a6b1ee8.png",
+    "sha256": "d537bca8f24f65804b49649129dfab25bbeed7e46c0173137c041e1b15036ee0",
+    "size": [
+      1254,
+      1254
+    ],
+    "alpha_bbox": [
+      0,
+      19,
+      1222,
+      1220
+    ],
+    "opaque_bounds": [
+      33,
+      26,
+      1218,
+      1195
+    ],
+    "center_alpha": 0,
+    "corner_alpha": 0,
+    "revision": 2
+  },
+  {
+    "theme": "chaos",
+    "asset": "window",
+    "path": "mod\\InfinityLoader\\Assets\\UIThemes\\chaos\\window.png",
+    "source": "C:\\Users\\jesse\\.codex\\generated_images\\01a11696-d41e-72d2-abaf-867c5a7b68dc\\exec-41f53382-5dff-42d4-b54a-6faaf8942ed5.png",
+    "sha256": "bf63f54035a5b52f236ff396ee1d458c24bdb0469194282f1481d3dd7f1d94af",
+    "size": [
+      1254,
+      1254
+    ],
+    "alpha_bbox": [
+      0,
+      0,
+      1254,
+      1254
+    ],
+    "opaque_bounds": [
+      9,
+      10,
+      1246,
+      1240
+    ],
+    "center_alpha": 254,
+    "corner_alpha": 0,
+    "revision": 2
+  },
+  {
+    "theme": "doomknight",
+    "asset": "menu",
+    "path": "mod\\InfinityLoader\\Assets\\UIThemes\\doomknight\\menu.png",
+    "source": "C:\\Users\\jesse\\.codex\\generated_images\\01a11696-d41e-72d2-abaf-867c5a7b68dc\\exec-efb516ce-042f-4c12-a69e-e86859fd5868.png",
+    "sha256": "3bcea65c80f273145ce237d8f317a97a6318bf6f61da0495f388681880d5e09e",
+    "size": [
+      1306,
+      1205
+    ],
+    "alpha_bbox": [
+      0,
+      6,
+      1290,
+      1205
+    ],
+    "opaque_bounds": [
+      84,
+      59,
+      1221,
+      1131
+    ],
+    "center_alpha": 253,
+    "corner_alpha": 0,
+    "revision": 2
+  },
+  {
+    "theme": "doomknight",
+    "asset": "skill",
+    "path": "mod\\InfinityLoader\\Assets\\UIThemes\\doomknight\\skill.png",
+    "source": "C:\\Users\\jesse\\.codex\\generated_images\\01a11696-d41e-72d2-abaf-867c5a7b68dc\\exec-871dbaa9-d378-4d3b-b0f1-903fabea0912.png",
+    "sha256": "cf22826953e8f834924a03f306a7e39b70b715e64968fe0a1112526a06fecfe8",
+    "size": [
+      1254,
+      1254
+    ],
+    "alpha_bbox": [
+      0,
+      9,
+      1222,
+      1254
+    ],
+    "opaque_bounds": [
+      36,
+      12,
+      1218,
+      1231
+    ],
+    "center_alpha": 0,
+    "corner_alpha": 0,
+    "revision": 2
+  },
+  {
+    "theme": "doomknight",
+    "asset": "window",
+    "path": "mod\\InfinityLoader\\Assets\\UIThemes\\doomknight\\window.png",
+    "source": "C:\\Users\\jesse\\.codex\\generated_images\\01a11696-d41e-72d2-abaf-867c5a7b68dc\\exec-cfbc82de-749f-42c0-b1b6-b3112fed3954.png",
+    "sha256": "dd3d6dede04dea657296d427e27f358a4a18324c67b0faee83f95a1c32d9fd82",
+    "size": [
+      1254,
+      1254
+    ],
+    "alpha_bbox": [
+      0,
+      9,
+      1254,
+      1222
+    ],
+    "opaque_bounds": [
+      0,
+      11,
+      1254,
+      1209
+    ],
+    "center_alpha": 254,
+    "corner_alpha": 0,
+    "revision": 2
+  },
+  {
+    "theme": "blod",
+    "asset": "menu",
+    "path": "mod\\InfinityLoader\\Assets\\UIThemes\\blod\\menu.png",
+    "source": "C:\\Users\\jesse\\.codex\\generated_images\\01a11696-d41e-72d2-abaf-867c5a7b68dc\\exec-41563f95-224d-4058-a5ff-85968ce9be11.png",
+    "sha256": "94f1ad8062bf79f8cb2bf5a4f67c61ce8bf8983b16caea4eea72617f2713a230",
+    "size": [
+      1306,
+      1205
+    ],
+    "alpha_bbox": [
+      41,
+      15,
+      1288,
+      1173
+    ],
+    "opaque_bounds": [
+      57,
+      18,
+      1249,
+      1170
+    ],
+    "center_alpha": 253,
+    "corner_alpha": 0,
+    "revision": 2
+  },
+  {
+    "theme": "blod",
+    "asset": "skill",
+    "path": "mod\\InfinityLoader\\Assets\\UIThemes\\blod\\skill.png",
+    "source": "C:\\Users\\jesse\\.codex\\generated_images\\01a11696-d41e-72d2-abaf-867c5a7b68dc\\exec-d46f7b2b-0d56-4081-b47c-1b6cc6dcf354.png",
+    "sha256": "899604ac336ddde4165415d7a8d84a7608c04ee803b15c3fb11ad42e4a8d7756",
+    "size": [
+      1254,
+      1254
+    ],
+    "alpha_bbox": [
+      30,
+      15,
+      1224,
+      1232
+    ],
+    "opaque_bounds": [
+      33,
+      18,
+      1221,
+      1201
+    ],
+    "center_alpha": 0,
+    "corner_alpha": 0,
+    "revision": 2
+  },
+  {
+    "theme": "blod",
+    "asset": "window",
+    "path": "mod\\InfinityLoader\\Assets\\UIThemes\\blod\\window.png",
+    "source": "C:\\Users\\jesse\\.codex\\generated_images\\01a11696-d41e-72d2-abaf-867c5a7b68dc\\exec-4b426a13-02a1-4173-9b4b-ad23751f1392.png",
+    "sha256": "acd1c0e8dedee73e21c82018ba45fb8d644cace230618d3199519aa134443fcd",
+    "size": [
+      1254,
+      1254
+    ],
+    "alpha_bbox": [
+      12,
+      8,
+      1242,
+      1234
+    ],
+    "opaque_bounds": [
+      16,
+      11,
+      1239,
+      1228
+    ],
+    "center_alpha": 254,
+    "corner_alpha": 0,
+    "revision": 2
+  }
+]

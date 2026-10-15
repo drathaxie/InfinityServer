@@ -5,3 +5,10 @@
 # pulls a prebuilt libpq wheel (incl. aarch64, matching the OCI ARM VM) so there's no
 # system libpq/build toolchain requirement.
 psycopg[binary]>=3.1
+
+# MariaDB (INFINITY_DB=mysql) is the SHARED database: SwordShine's schema, with our tables
+# namespaced and our accounts/characters/char_items mapped onto its users/users_items. That
+# path needs a driver, and bcrypt because the shared `Hash` column is read by SwordShine's
+# PHP login (password_verify), which understands bcrypt and nothing else.
+PyMySQL>=1.1
+bcrypt>=4.0

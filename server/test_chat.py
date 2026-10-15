@@ -39,12 +39,15 @@ def main():
 
     wa = FakeWriter()
     sa = server.Session(wa)
+    import game
+    sa.char = game.login(sa.conn, "chat_alice", "pw")
     sa.member = world.Member(101, "alice", {}, wa)
     sa.area = area
     world.join(sa.member, area)
 
     wb = FakeWriter()
     sb = server.Session(wb)
+    sb.char = game.login(sb.conn, "chat_bob", "pw")
     sb.member = world.Member(102, "bob", {}, wb)
     sb.area = area
     world.join(sb.member, area)

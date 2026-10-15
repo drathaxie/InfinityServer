@@ -1,0 +1,92 @@
+{
+  "ID": 513,
+  "Name": "Artix",
+  "Subtitle": "Paladin",
+  "Level": 3,
+  "strLinkage": "Mr Guy",
+  "strElement": "Unknown",
+  "sRace": "None",
+  "Class": 33,
+  "Bundle": {
+    "ID": 42356,
+    "Name": "Mr Guy",
+    "Filename": "npcs/42356_mrguy.unity3d",
+    "VersionContent": 0,
+    "VersionStage": 0,
+    "VersionLive": 0
+  },
+  "HairBundle": {
+    "ID": 45970,
+    "Name": "Default",
+    "Filename": "hair/M/45970_Default_M.unity3d",
+    "VersionContent": 0,
+    "VersionStage": 6,
+    "VersionLive": 6
+  },
+  "bRed": 0,
+  "intRSS": 0,
+  "x": 0.0,
+  "y": 0.0,
+  "scale": 1.0,
+  "scaleMin": 1.0,
+  "scaleMax": 1.0,
+  "nameOverride": "",
+  "Gender": "M",
+  "apopID": -1,
+  "levelOverride": -1,
+  "SkinColor": 9130640,
+  "HairColor": 8413982,
+  "EyeColor": 30850,
+  "BaseColor": 0,
+  "TrimColor": 0,
+  "AccessoryColor": 0,
+  "HairID": 52,
+  "HairFilename": "hair/M/Default.swf",
+  "HairName": "Default",
+  "HPScale": 1.0,
+  "MPMax": 2,
+  "equippedItems": {
+    "3": {
+      "ID": 10152,
+      "Bundle": {
+        "ID": 13211,
+        "Name": "Artix's Helm",
+        "Filename": "items/helms/13211_ArtixHelm.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 3,
+        "VersionLive": 3
+      },
+      "PrefabName": "ArmorSlots",
+      "EquipSpot": 3,
+      "ItemType": 12
+    },
+    "2": {
+      "ID": 14467,
+      "Bundle": {
+        "ID": 14340,
+        "Name": "Blinding Light of Destiny",
+        "Filename": "items/axes/14340_BLoD3_r1.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 2,
+        "VersionLive": 2
+      },
+      "PrefabName": "BLoD3_r1_weaponSlots",
+      "EquipSpot": 2,
+      "ItemType": 8
+    },
+    "7": {
+      "ID": 37044,
+      "Bundle": {
+        "ID": 26339,
+        "Name": "ArchPaladin",
+        "Filename": "armors/26339_PalidanRevamp.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 4,
+        "VersionLive": 4
+      },
+      "PrefabName": "ArmorSlots",
+      "EquipSpot": 7,
+      "ItemType": 22
+    }
+  }
+}

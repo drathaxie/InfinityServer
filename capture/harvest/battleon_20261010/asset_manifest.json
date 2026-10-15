@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "version": 12,
+    "relative": "windows/maps/greenguard/battleon/1_map-battleon/12/1_map-battleon.unity3d",
+    "url": "https://infinity.aq.com/game/assetbundles/windows/maps/greenguard/battleon/1_map-battleon/12/1_map-battleon.unity3d",
+    "bytes": 8774564,
+    "sha256": "f8af0f116fdb8f974cd707780d2caa7d0d46e60b785a0b6765b989008908aeb2"
+  },
+  {
+    "id": 78899,
+    "version": 1,
+    "relative": "windows/npcs/78899_captainrhubarb-new/1/78899_captainrhubarb-new.unity3d",
+    "url": "https://infinity.aq.com/game/assetbundles/windows/npcs/78899_captainrhubarb-new/1/78899_captainrhubarb-new.unity3d",
+    "bytes": 65474,
+    "sha256": "6687ceb4eac901c3f0e23547ae3b339e88b5ed1d22d084a5d1bd3c2a70bbc692"
+  }
+]

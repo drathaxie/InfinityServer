@@ -1,6 +1,6 @@
 {
   "ID": 181,
-  "nextElementId": 33,
+  "nextElementId": 34,
   "name": "Bev",
   "bgImage": "",
   "bgImageScale": 1,
@@ -51,6 +51,30 @@
           "changeSubtitle": "",
           "compactMode": false,
           "requirements": []
+        },
+        {
+          "ID": 33,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "HairShop",
+          "label": "Character Customize",
+          "subtitle": "",
+          "intMin": 1,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
         },
         {
           "ID": 31,

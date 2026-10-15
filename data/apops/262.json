@@ -1,0 +1,120 @@
+{
+  "ID": 262,
+  "nextElementId": 37,
+  "name": "Test Daily/Weekly Shop",
+  "bgImage": "",
+  "bgImageScale": 1,
+  "startingPanels": [
+    1,
+    2
+  ],
+  "panels": [
+    {
+      "PID": 2,
+      "name": "Right Panel Start",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": []
+    },
+    {
+      "PID": 1,
+      "name": "Middle Panel Start",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 32,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Hello. Here you can exchange your effort tokens for cool prizes!",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedMode": "Hide"
+        },
+        {
+          "ID": 36,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "ItemShop",
+          "label": "Shop",
+          "subtitle": "",
+          "intMin": 2778,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "ItemShop",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false,
+          "sfxString": "",
+          "musicID": -1,
+          "staffed": false
+        },
+        {
+          "ID": 31,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": "",
+          "icon": "",
+          "reqCondition": "AND"
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 518,
+      "name": "Dai-Lee",
+      "subtitle": "Vendor",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 1,
+  "IsSingleAction": false
+}

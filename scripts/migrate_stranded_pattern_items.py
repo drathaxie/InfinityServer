@@ -23,7 +23,7 @@ def stranded_rows(conn):
     return conn.execute(
         "SELECT ci.*, ch.name AS character_name, it.name AS item_name "
         "FROM char_items ci JOIN characters ch ON ch.id=ci.char_id "
-        "JOIN items it ON it.item_id=ci.item_id "
+        "JOIN items it ON it.id=ci.item_id "
         "WHERE it.item_type=? ORDER BY ci.char_id, ci.char_item_id",
         (patterns.ITEMTYPE_GEM,),
     ).fetchall()
@@ -92,7 +92,7 @@ def apply_migration(conn, data):
             conn.execute("DELETE FROM char_items WHERE char_item_id=?", (entry["char_item_id"],))
 
         remaining = int(conn.execute(
-            "SELECT COUNT(*) AS n FROM char_items ci JOIN items it ON it.item_id=ci.item_id "
+            "SELECT COUNT(*) AS n FROM char_items ci JOIN items it ON it.id=ci.item_id "
             "WHERE it.item_type=?", (patterns.ITEMTYPE_GEM,)).fetchone()["n"])
         after = int(conn.execute("SELECT COUNT(*) AS n FROM char_patterns").fetchone()["n"])
         if remaining != 0 or after - before != made:

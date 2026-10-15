@@ -32,7 +32,7 @@ def main():
     catalog = __import__("json").loads(seed.ITEMS_FILE.read_text(encoding="utf-8"))
     for item_id in (978712, 978718, 978719):
         db.store_item(conn, catalog[str(item_id)])
-    assert seed.seed_redeem_codes(conn) == 3
+    assert seed.seed_redeem_codes(conn) == 4
     before_coins = int(conn.execute("SELECT coins FROM characters WHERE id=?",
                                     (char["id"],)).fetchone()["coins"])
     result = game.redeem_code(conn, char, "dshark")
@@ -73,6 +73,22 @@ def main():
     assert int(achievements.get("ip25", 0)) & (1 << 4)
     again = game.redeem_code(conn, char, "UNDEADFOUNDER")
     assert not again["success"] and "already" in again["message"].lower()
+    # The cosmetic achievement is per character, preserves founder flags, and is
+    # visible in the exact initPlayer payload consumed by the theme picker.
+    result = game.redeem_code(conn, char, " BORDER\u200b ")
+    assert result["success"] and "Border Collector" in result["rewardDesc"]
+    fresh = conn.execute("SELECT * FROM characters WHERE id=?", (char["id"],)).fetchone()
+    achievements = __import__("json").loads(fresh["achievements"])
+    assert achievements.get("cosmetics26") == 1
+    assert int(achievements.get("ip25", 0)) & (1 << 4)
+    init = game.build_init_player(conn, fresh)
+    assert init["playerInfo"]["achievements"]["cosmetics26"] == 1
+    assert init["playerInfo"]["CharID"] == char["id"]
+    again = game.redeem_code(conn, fresh, "border")
+    assert not again["success"] and "already" in again["message"].lower()
+    other = conn.execute("SELECT * FROM characters WHERE id=?", (second_char["id"],)).fetchone()
+    assert "cosmetics26" not in game.build_init_player(conn, other)["playerInfo"]["achievements"]
+    assert game.redeem_code(conn, other, "border")["success"]  # No global redemption cap.
     conn.close()
     print("redeem code OK: grants items and achievements, seeds exclusive art, enforces account/global limits")
 

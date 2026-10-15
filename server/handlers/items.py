@@ -51,7 +51,7 @@ async def use_spellstone(session, writer, cmd, params, msg):
     else:
         session.conn.execute(
             "UPDATE char_items SET equipped=0 WHERE char_id=? AND item_id IN "
-            "(SELECT item_id FROM items WHERE item_type=44)", (session.char["id"],))
+            "(SELECT id FROM items WHERE item_type=44)", (session.char["id"],))
         session.conn.execute(
             "UPDATE char_items SET equipped=1 WHERE char_id=? AND item_id=? AND banked=0",
             (session.char["id"], item_id))
@@ -245,4 +245,29 @@ async def change_color(session, writer, cmd, params, msg):
             cust[jk] = char[col]
         cust["HairID"] = char["hair_id"]
         print(f"  [s2c] changeColor (charedit) uid={session.member.uid} {applied}")
+    return
+
+
+@register("getClassSkills")
+async def get_class_skills(session, writer, cmd, params, msg):
+    # RequestGetClassSkills Params=[ItemID] -> {Cmd:classSkills, ItemID, skillList}.
+    #
+    # initPlayer.classSkills already ships a skill-bar preview for every class the character
+    # OWNS. UIClassPreview asks for this one only when the item is missing from that cache —
+    # i.e. a class the player does not own yet (a shop/preview panel) — and blocks on the
+    # reply, so an unanswered request leaves the preview empty. Same shape as sEAct.skillList,
+    # keyed by the class-ARMOR item id exactly like the initPlayer map.
+    if not params:
+        return
+    try:
+        item_id = int(params[0])
+    except (TypeError, ValueError):
+        return
+    cls_id = forge.class_for_armor_item(session.conn, item_id)
+    # An armor with no mapped class answers with an empty list rather than staying silent —
+    # that is what initPlayer already does for unmatched class armor, and it lets the panel
+    # settle instead of spinning.
+    skill_list = forge.build_seact(session.conn, cls_id)["skillList"] if cls_id is not None else {}
+    await send_obj(writer, {"Cmd": "classSkills", "ItemID": item_id, "skillList": skill_list})
+    print(f"  [s2c] classSkills item={item_id} class={cls_id} slots={sorted(skill_list)}")
     return

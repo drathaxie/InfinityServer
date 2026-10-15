@@ -32,6 +32,8 @@ def change_username(conn, account_id, current_password, new_username):
     new_username = (new_username or "").strip()
     if not USERNAME_RE.fullmatch(new_username):
         return False, "Use 3-24 characters; start with a letter and use letters, numbers, spaces, _ or -."
+    if new_username.lower() in game._dev_users():
+        return False, "That username is reserved."
     acc = conn.execute("SELECT * FROM accounts WHERE id=?", (int(account_id),)).fetchone()
     if acc is None or not game.verify_password(current_password or "", acc["password"] or "")[0]:
         return False, "Current password is incorrect."
@@ -39,7 +41,7 @@ def change_username(conn, account_id, current_password, new_username):
                          (new_username, int(account_id))).fetchone()
     if taken:
         return False, "That username is already taken."
-    conn.execute("UPDATE accounts SET username=?,session_token=NULL WHERE id=?",
+    conn.execute("UPDATE accounts SET username=?,session_token=NULL,session_version=session_version+1 WHERE id=?",
                  (new_username, int(account_id)))
     conn.execute("UPDATE characters SET name=? WHERE account_id=?",
                  (new_username, int(account_id)))
@@ -53,7 +55,7 @@ def change_password(conn, account_id, current_password, new_password):
     acc = conn.execute("SELECT password FROM accounts WHERE id=?", (int(account_id),)).fetchone()
     if acc is None or not game.verify_password(current_password or "", acc["password"] or "")[0]:
         return False, "Current password is incorrect."
-    conn.execute("UPDATE accounts SET password=?,session_token=NULL WHERE id=?",
+    conn.execute("UPDATE accounts SET password=?,session_token=NULL,session_version=session_version+1 WHERE id=?",
                  (game.hash_password(new_password), int(account_id)))
     conn.commit()
     return True, "Password changed. Sign in to the game again."
@@ -66,22 +68,22 @@ def catalog(conn, query="", limit=5000):
     q = (query or "").strip()
     if q.isdigit():
         rows = conn.execute(
-            "SELECT i.item_id,i.name,i.item_type,i.equip_spot,i.rarity,i.cost,i.coins,i.upgrade_only,"
-            "(SELECT COUNT(*) FROM token_redemptions tr WHERE tr.item_id=i.item_id) AS popularity "
-            "FROM items i WHERE i.item_id=? OR LOWER(i.name) LIKE LOWER(?) "
-            "ORDER BY popularity DESC,i.name,i.item_id LIMIT ?",
+            "SELECT i.id,i.name,i.item_type,i.equip_spot,i.rarity,i.cost,i.coins,i.Upgrade,"
+            "(SELECT COUNT(*) FROM token_redemptions tr WHERE tr.item_id=i.id) AS popularity "
+            "FROM items i WHERE i.id=? OR LOWER(i.name) LIKE LOWER(?) "
+            "ORDER BY popularity DESC,i.name,i.id LIMIT ?",
             (int(q), f"%{q}%", limit)).fetchall()
     else:
         rows = conn.execute(
-            "SELECT i.item_id,i.name,i.item_type,i.equip_spot,i.rarity,i.cost,i.coins,i.upgrade_only,"
-            "(SELECT COUNT(*) FROM token_redemptions tr WHERE tr.item_id=i.item_id) AS popularity "
+            "SELECT i.id,i.name,i.item_type,i.equip_spot,i.rarity,i.cost,i.coins,i.Upgrade,"
+            "(SELECT COUNT(*) FROM token_redemptions tr WHERE tr.item_id=i.id) AS popularity "
             "FROM items i WHERE LOWER(i.name) LIKE LOWER(?) "
-            "ORDER BY popularity DESC,i.name,i.item_id LIMIT ?",
+            "ORDER BY popularity DESC,i.name,i.id LIMIT ?",
             (f"%{q}%", limit)).fetchall()
-    return [{"id": int(r["item_id"]), "name": r["name"] or f"Item {r['item_id']}",
+    return [{"id": int(r["id"]), "name": r["name"] or f"Item {r['id']}",
              "type": int(r["item_type"] or 0), "equipSpot": int(r["equip_spot"] or 0),
              "rarity": int(r["rarity"] or 0), "price": int(r["cost"] or 0),
-             "ac": bool(r["coins"]), "member": bool(r["upgrade_only"]),
+             "ac": bool(r["coins"]), "member": bool(r["Upgrade"]),
              "kbOnly": False, "popularity": int(r["popularity"] or 0)} for r in rows]
 
 
@@ -98,7 +100,7 @@ def token_inventory(conn, char_id):
     marks = ",".join("?" for _ in TOKEN_ITEM_IDS)
     rows = conn.execute(
         "SELECT ci.item_id,i.name,COALESCE(SUM(ci.quantity),0) AS n FROM char_items ci "
-        "JOIN items i ON i.item_id=ci.item_id WHERE ci.char_id=? "
+        "JOIN items i ON i.id=ci.item_id WHERE ci.char_id=? "
         f"AND ci.item_id IN ({marks}) AND ci.banked=0 AND ci.equipped=0 "
         "GROUP BY ci.item_id,i.name ORDER BY ci.item_id",
         (int(char_id), *TOKEN_ITEM_IDS)).fetchall()
@@ -110,7 +112,7 @@ def inventory(conn, char_id):
     rows = conn.execute(
         "SELECT ci.item_id,i.name,i.item_type,i.equip_spot,i.rarity,"
         "SUM(ci.quantity) AS quantity,MAX(ci.equipped) AS equipped,MAX(ci.banked) AS banked "
-        "FROM char_items ci JOIN items i ON i.item_id=ci.item_id WHERE ci.char_id=? "
+        "FROM char_items ci JOIN items i ON i.id=ci.item_id WHERE ci.char_id=? "
         "GROUP BY ci.item_id,i.name,i.item_type,i.equip_spot,i.rarity ORDER BY i.name,ci.item_id",
         (int(char_id),)).fetchall()
     return [{"itemId": int(r["item_id"]), "name": r["name"] or f"Item {r['item_id']}",
@@ -122,7 +124,7 @@ def inventory(conn, char_id):
 def buyback_history(conn, account_id):
     rows = conn.execute(
         "SELECT b.id,b.item_id,i.name,i.item_type,b.remaining_quantity,b.unit_price,b.sold_at "
-        "FROM ac_item_buybacks b JOIN items i ON i.item_id=b.item_id "
+        "FROM ac_item_buybacks b JOIN items i ON i.id=b.item_id "
         "WHERE b.account_id=? AND b.remaining_quantity>0 ORDER BY b.sold_at DESC,b.id DESC",
         (int(account_id),)).fetchall()
     return [{"id": int(r["id"]), "itemId": int(r["item_id"]),
@@ -150,11 +152,22 @@ def buy_back(conn, account_id, buyback_id, quantity=1):
     if item is None:
         return False, "That item is no longer in the catalog.", None
     try:
-        conn.execute("UPDATE characters SET coins=coins-? WHERE id=?", (cost, account["char_id"]))
+        if cost < 0:
+            return False, "Invalid buyback price.", None
+        claimed = conn.execute(
+            "UPDATE ac_item_buybacks SET remaining_quantity=remaining_quantity-? "
+            "WHERE id=? AND account_id=? AND remaining_quantity>=?",
+            (quantity, buyback_id, int(account_id), quantity))
+        if claimed.rowcount != 1:
+            conn.rollback()
+            return False, "That item is no longer available for buyback.", None
+        paid = conn.execute("UPDATE characters SET coins=coins-? WHERE id=? AND coins>=?",
+                            (cost, account["char_id"], cost))
+        if paid.rowcount != 1:
+            conn.rollback()
+            return False, "You do not have enough AdventureCoins.", None
         for _ in range(quantity):
             game._grant_item(conn, int(account["char_id"]), item)
-        conn.execute("UPDATE ac_item_buybacks SET remaining_quantity=remaining_quantity-? WHERE id=?",
-                     (quantity, buyback_id))
         support_manager.audit(conn, account_id, account["char_id"], "player", "self", "buyback",
                               item_id=int(row["item_id"]), quantity=quantity,
                               currency="coins", amount=-cost)
@@ -232,8 +245,8 @@ def equip_house(conn, account, item_id):
 def redemption_history(conn, account_id, limit=50):
     rows = conn.execute(
         "SELECT tr.item_id,i.name,i.item_type,tr.token_item_id,ti.name AS token_name,tr.redeemed "
-        "FROM token_redemptions tr JOIN items i ON i.item_id=tr.item_id "
-        "LEFT JOIN items ti ON ti.item_id=tr.token_item_id WHERE tr.account_id=? "
+        "FROM token_redemptions tr JOIN items i ON i.id=tr.item_id "
+        "LEFT JOIN items ti ON ti.id=tr.token_item_id WHERE tr.account_id=? "
         "ORDER BY tr.redeemed DESC LIMIT ?", (int(account_id), int(limit))).fetchall()
     return [{"itemId": int(r["item_id"]), "name": r["name"] or f"Item {r['item_id']}",
              "type": int(r["item_type"] or 0), "tokenItemId": int(r["token_item_id"]),

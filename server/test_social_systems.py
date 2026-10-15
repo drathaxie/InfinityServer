@@ -205,6 +205,29 @@ def main():
         await server.dispatch(sa, wa, _pkt("savePlayerTitle", ""))
         assert titlesvc.selected(_reload(alice_c)) == "", "title cleared"
 
+        # --- item sponsors: the reply must echo the requested ItemID (2026-09-17 client keys
+        # its sponsor cache, its in-flight set and the panel match on it) ---
+        sponsored = conn.execute(
+            "SELECT item_id FROM item_sponsors ORDER BY item_id LIMIT 1").fetchone()["item_id"]
+        unsponsored = conn.execute(
+            "SELECT id AS item_id FROM items WHERE id NOT IN (SELECT item_id FROM item_sponsors) "
+            "ORDER BY id LIMIT 1").fetchone()["item_id"]
+
+        wa.data.clear()
+        await server.dispatch(sa, wa, _pkt("getItemSponsors", sponsored))
+        sponsors = next(p for p in _packets(wa) if p["Cmd"] == "getItemSponsors")
+        assert sponsors["ItemID"] == sponsored, "reply echoes the requested item id"
+        assert sponsors["Sponsors"] == db.item_sponsors(conn, sponsored), \
+            "reply carries the seeded sponsor credits"
+        assert sponsors["Sponsors"], "the seeded item actually has sponsors"
+
+        # an item with no sponsors still answers, so the client clears it from in-flight
+        wa.data.clear()
+        await server.dispatch(sa, wa, _pkt("getItemSponsors", unsponsored))
+        sponsors = next(p for p in _packets(wa) if p["Cmd"] == "getItemSponsors")
+        assert sponsors["ItemID"] == unsponsored and sponsors["Sponsors"] == [], \
+            "unsponsored item answers with its own id and an empty list"
+
         print("ALL SOCIAL SYSTEM TESTS PASSED")
 
     asyncio.run(run())

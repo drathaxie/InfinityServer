@@ -1,0 +1,84 @@
+{
+  "ID": 6007,
+  "nextElementId": 11,
+  "name": "Redux (Monster)",
+  "bgImage": "",
+  "bgImageScale": 1,
+  "startingPanels": [
+    1
+  ],
+  "panels": [
+    {
+      "PID": 1,
+      "name": "Redux",
+      "autoButton": -1,
+      "panelPosition": 1,
+      "hidePanelBG": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "changeApopBG": "",
+      "changeApopBGScale": 1,
+      "restoreBGOnClose": false,
+      "elements": [
+        {
+          "ID": 1,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Hello @name. You've come to challenge me. So be it. ",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "InfinityServer Dev",
+          "compactMode": false,
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedMode": "Hide"
+        },
+        {
+          "ID": 10,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "ShowQuests",
+          "label": "Challenge Redux",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 100000,
+      "name": "Redux (Monster)",
+      "subtitle": "",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 0,
+  "IsSingleAction": false
+}

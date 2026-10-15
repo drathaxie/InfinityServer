@@ -1,0 +1,65 @@
+{
+  "timestamp_utc": "2026-10-09T21:55:26.579914+00:00",
+  "quest_ids": [
+    283,
+    301,
+    302,
+    303,
+    304,
+    305,
+    307
+  ],
+  "apop_ids": [
+    256,
+    257,
+    258,
+    259,
+    260,
+    261,
+    262,
+    263,
+    264
+  ],
+  "shops": {
+    "2783": {
+      "name": "Star Sword Shop",
+      "items": 1
+    },
+    "2778": {
+      "name": "Dai-lee's Shop",
+      "items": 1
+    },
+    "2781": {
+      "name": "Oct 23th Shop",
+      "items": 0
+    },
+    "2782": {
+      "name": "Oct 30th Shop",
+      "items": 0
+    },
+    "2784": {
+      "name": "Space Chest",
+      "items": 2
+    }
+  },
+  "dialog_ids": [
+    94,
+    95,
+    96
+  ],
+  "maps": [
+    "asteroid"
+  ],
+  "events": [
+    {
+      "cmd": "AreaJoin",
+      "name": "infinityportal",
+      "bundle": 46587
+    },
+    {
+      "cmd": "AreaJoin",
+      "name": "asteroid",
+      "bundle": 79075
+    }
+  ]
+}

@@ -23,13 +23,14 @@ import json
 import random
 
 import db
+import gem_balance
 
 # EquipSpots enum (decomp): Weapon=2, Head=3, Back=4, Armor=7
 WEAPON, HEAD, BACK, ARMOR = 2, 3, 4, 7
 ENHANCEABLE = {WEAPON, HEAD, BACK, ARMOR}
 
 # The captured default "Common Weapon" gem (live-AE UpdatePattern, packets.jsonl line 61958):
-# a Lvl-5 Common (Quality 5) weapon gem. This is exactly what "Power Up" mints. Base/Wild give
+# a Lvl-5 Common (Quality 5) weapon gem. V2 retains this anchor at level 5. Base/Wild give
 # the 27-34 damage range (31*0.9..31*1.1, matching the in-game "27-34 DAMAGE" tooltip); the six
 # stats feed the secondary stats. Only the Lvl-5 point is captured, so scaling Base/stats to
 # other levels is OUR model (flagged) — the L5 shape itself is 1=1.
@@ -40,35 +41,17 @@ COMMON_WEAPON_L5 = {"ID": 1, "Quality": 5, "Level": 5,
 # Helm (Head) gems grant flat HEALTH instead of a damage Base (capture tooltip: "17 HEALTH").
 HELM_HP = 17
 
-# --- Random-rarity drop gems (the AE loot model) ------------------------------------------
-# Captured rewardPlayer drops (packets.jsonl) each carry an ItemPattern rolled at a RANDOM
-# Quality (the rarity) with Base/Power scaling by quality and randomised stats:
-#   Q5 Common   Fighter Helm  Base 31  Power 26   (STR4/END7/DEX4/INT1/WIS4/LUK6)
-#   Q6 Uncommon Wizard Armor  Base 68  Power 30   (STR1/END4/DEX5/INT5/WIS10/LUK5)
-#   Q7 Rare     Thief Armor   Base 76  Power 35   (STR5/END4/DEX10/INT2/WIS8/LUK6)
-# so a good drop = a high-Quality gem = a much bigger weapon Base + stats. Q5-6 Base/Power are
-# capture-anchored; Q7 real drop was Base 76 (kept a touch higher for a clean ladder), Q8-10 are
-# OUR extrapolation (flagged) since the capture only reached Rare. Weights make rarity climb rare.
-QUALITY_NAME = {5: "Common", 6: "Uncommon", 7: "Rare", 8: "Epic", 9: "Legendary", 10: "Mythic"}
+# --- Authored v2 drop balance (see gem_balance.py and docs/GEM_BALANCE.md) -----------------
+# Rarity chances remain the existing server policy; they are not verified official odds.
+QUALITY_NAME = gem_balance.QUALITY_NAME
 _QUALITY_WEIGHTS = [(5, 0.55), (6, 0.25), (7, 0.12), (8, 0.05), (9, 0.025), (10, 0.005)]
-_BASE_BY_QUALITY = {5: 31, 6: 68, 7: 95, 8: 130, 9: 175, 10: 230}
-_POWER_BY_QUALITY = {5: 26, 6: 32, 7: 40, 8: 50, 9: 63, 10: 80}
 # The client treats Dust as server-authored Pattern data and only displays the authoritative
 # Gained/Total values returned by ResponseDust. The captured catalog patterns predate that field,
 # so InfinityServer uses a simple rarity ladder for both old and newly rolled gems.
 _DUST_BY_QUALITY = {5: 5, 6: 10, 7: 20, 8: 40, 9: 80, 10: 160}
 
-# Gems are CLASS-BASED: the archetype decides which primary stat the gem pumps (a Warrior gem
-# raises STR, a Wizard gem INT, ...). The archetype's primary stat gets the big rarity-scaled
-# roll; the other five roll a small "spread". Archetype names match AQW's enhancement families
-# (and the captured gem Names: Fighter/Wizard/Thief/Healer). `default` = a balanced gem.
-_ARCHETYPE_PRIMARY = {
-    "warrior": "STR", "fighter": "STR", "brute": "STR",
-    "wizard": "INT", "mage": "INT", "sorcerer": "INT",
-    "rogue": "DEX", "thief": "DEX", "assassin": "DEX",
-    "healer": "WIS", "cleric": "WIS",
-    "lucky": "LUK", "hybrid": "END",
-}
+# Family labels share six favored stats, but have deliberate supporting-stat profiles.
+_ARCHETYPE_PRIMARY = {family: profile[0] for family, profile in gem_balance.PROFILES.items()}
 ARCHETYPES = ("warrior", "wizard", "rogue", "healer", "lucky", "hybrid")
 
 ITEMTYPE_GEM = 43                               # enhancement gem items (Fighter Helm Gem, ...)
@@ -82,14 +65,15 @@ def is_gem_item(item):
     return int((item or {}).get("ItemType", item.get("item_type", 0) or 0) or 0) == ITEMTYPE_GEM
 
 
-def gem_item_pattern(item, quality=None):
+def gem_item_pattern(item, quality=None, level=None):
     """Roll a bag gem from a gem ITEM: the archetype + target slot come from its name
     ('Wizard Armor Gem' -> a wizard gem for the Armor slot), the rarity is rolled (or forced)."""
     name = (item or {}).get("Name") or (item or {}).get("name") or ""
     arch = archetype_of(name) or random.choice(ARCHETYPES)
     low = name.lower()
     spot = next((s for w, s in _SLOT_WORDS.items() if w in low), WEAPON)
-    return roll_pattern({"EquipSpot": spot, "Name": name}, archetype=arch, quality=quality)
+    return roll_pattern({"EquipSpot": spot, "Name": name, "Level": item.get('Level', 1)},
+                        archetype=arch, quality=quality, level=level)
 
 
 def archetype_of(name):
@@ -113,53 +97,25 @@ def roll_quality():
     return 5
 
 
-def roll_pattern(item, archetype=None, quality=None, level=5):
-    """Roll a class-based, rarity-scaled gem (ItemPattern) for an enhanceable item — the AE drop
-    model. Rarity (Quality) drives the weapon Base/Power and the overall stat magnitude; the
-    ARCHETYPE decides which primary stat gets the big roll (Warrior->STR, Wizard->INT, ...), the
-    rest get a small spread. `archetype`/`quality` force a family/tier (drops/dev); otherwise
-    both are rolled. Returns None for a non-enhanceable item (materials/class items never gem)."""
+def roll_pattern(item, archetype=None, quality=None, level=None):
+    """Generate a v2 budgeted gem. Explicit encounter/owner level overrides item level."""
     if not is_enhanceable(item):
         return None
     spot = int(item.get("EquipSpot", 0) or 0)
     q = max(5, min(10, int(quality))) if quality else roll_quality()
     arch = (archetype or "").lower() if archetype else random.choice(ARCHETYPES)
-    primary = _ARCHETYPE_PRIMARY.get(arch, "STR")
-    stats = {"STR": 0, "END": 0, "DEX": 0, "INT": 0, "WIS": 0, "LUK": 0}
-    for k in stats:                                      # small spread on every stat
-        stats[k] = random.randint(0, q // 2)
-    stats[primary] = random.randint(q, 3 * q)            # the archetype stat: the big rarity roll
-    pat = {"ID": 1, "Quality": q, "Level": int(level or 5),
-           "Wild": 0.1, "EquipSpot": spot,
-           "Base": _BASE_BY_QUALITY[q], "Power": _POWER_BY_QUALITY[q],
-           "Dust": _DUST_BY_QUALITY[q],
-           "Name": f"{QUALITY_NAME[q]} {arch.capitalize()}"}
-    pat.update(stats)
-    if spot == HEAD:                                      # helms also carry flat HP, scaled by rarity
-        pat["HP"] = round(HELM_HP * q / 5)
-    return pat
+    return gem_balance.roll(item.get('Level', 1) if level is None else level,
+                            spot, q, arch, rng=random)
 
 
 def is_enhanceable(item):
     return int(item.get("EquipSpot", 0) or 0) in ENHANCEABLE
 
 
-def default_pattern(item):
-    """The default Common gem that 'Power Up' mints. The capture is unambiguous: itemdefaultpattern
-    for items 300, 17873 AND 51605 — three DIFFERENT weapons — ALL returned the SAME Lvl-5 Common
-    Weapon gem (Base 31). So Power Up mints a FIXED Common gem, NOT one scaled to the item's level
-    (an earlier level-scaling was wrong — a Lvl-1 item like Blade of Awe got Base 6 -> ~7 damage).
-    Weapons get the captured Common Weapon shape; a Helm grants flat HEALTH; other gear gets a
-    Common gear gem (no weapon Base — gear-gem Power Up wasn't captured, so its stats are flagged)."""
+def default_pattern(item, level=None):
+    """Deterministic free Common gem using the same slot/level budget as random gems."""
     spot = int(item.get("EquipSpot", 0) or 0)
-    if spot == WEAPON:
-        return dict(COMMON_WEAPON_L5)
-    pat = {"ID": 1, "Level": 5, "Quality": 5, "EquipSpot": spot,
-           "STR": 3, "END": 3, "DEX": 0, "INT": 0, "WIS": 0, "LUK": 0,
-           "Wild": 0.0, "Base": 0, "Power": 15, "Name": "Standard", "HP": 0}
-    if spot == HEAD:
-        pat["HP"] = HELM_HP
-    return pat
+    return gem_balance.default(item.get('Level', 1) if level is None else level, spot)
 
 
 def weapon_range(pat):
@@ -217,15 +173,27 @@ def item_default_pattern(conn, char_id, item_id):
     item = _item_def(conn, item_id)
     if item is None:
         return _update_pattern(item_id, None, ok=False, err="Unknown item.")
-    pat = default_pattern(item)
+    if not is_enhanceable(item):
+        return _update_pattern(item_id, None, ok=False, err="This item cannot hold a gem.")
     ci = conn.execute(
-        "SELECT char_item_id FROM char_items WHERE char_id=? AND item_id=? AND banked=0 "
+        "SELECT char_item_id,pattern_json FROM char_items WHERE char_id=? AND item_id=? AND banked=0 "
         "ORDER BY char_item_id LIMIT 1", (char_id, item_id)).fetchone()
-    if ci is not None:
-        conn.execute(
-            "UPDATE char_items SET pattern_json=?, char_pattern_id=char_item_id "
-            "WHERE char_item_id=?", (json.dumps(pat), ci["char_item_id"]))
-        conn.commit()
+    if ci is None:
+        return _update_pattern(item_id, None, ok=False, err="Item not found.")
+    existing = _parse_pattern(ci['pattern_json'])
+    if existing is not None:
+        return _update_pattern(item_id, existing)
+    if ci['pattern_json'] is not None:
+        return _update_pattern(item_id, None, ok=False, err="Existing gem data needs repair.")
+    owner = conn.execute('SELECT level FROM characters WHERE id=?', (char_id,)).fetchone()
+    pat = default_pattern(item, level=owner['level'])
+    conn.execute(
+        "UPDATE char_items SET pattern_json=?, char_pattern_id=char_item_id "
+        "WHERE char_item_id=? AND pattern_json IS NULL", (json.dumps(pat), ci["char_item_id"]))
+    # A concurrent power-up/equip wins without being overwritten.
+    current = conn.execute('SELECT pattern_json FROM char_items WHERE char_item_id=?', (ci['char_item_id'],)).fetchone()
+    pat = _parse_pattern(current['pattern_json'])
+    conn.commit()
     return _update_pattern(item_id, pat)
 
 
@@ -234,9 +202,8 @@ def item_default_pattern(conn, char_id, item_id):
 def _next_pattern_id(conn):
     """Allocate a globally-unique instance id (shared with char_items so a CharPatternID never
     collides with a CharItemID)."""
-    cur = int(db.kv_get(conn, "next_char_item_id", "1"))
-    db.kv_set(conn, "next_char_item_id", cur + 1)
-    return cur
+    import game
+    return game._next_char_item_id(conn)
 
 
 def grant_gem(conn, char_id, pattern):
@@ -273,9 +240,12 @@ def equip_pattern(conn, char_id, item_id, char_pattern_id, loot_id=-1):
     pat = _parse_pattern(gem["pattern_json"])
     if pat is None:
         return _update_pattern(item_id, None, ok=False, err="Bad gem.")
+    owner = conn.execute('SELECT level FROM characters WHERE id=?', (char_id,)).fetchone()
+    if pat.get('BalanceVersion') == gem_balance.VERSION and (owner is None or int(pat['Level']) > int(owner['level'] or 1)):
+        return _update_pattern(item_id, None, ok=False, err="Your level is too low for this gem.")
     ci = conn.execute(
         "SELECT ci.char_item_id, ci.pattern_json, it.equip_spot AS spot "
-        "FROM char_items ci JOIN items it ON it.item_id=ci.item_id "
+        "FROM char_items ci JOIN items it ON it.id=ci.item_id "
         "WHERE ci.char_id=? AND ci.item_id=? AND ci.banked=0 "
         "ORDER BY ci.equipped DESC, ci.char_item_id LIMIT 1", (char_id, int(item_id))).fetchone()
     if ci is None:
@@ -317,10 +287,181 @@ def remove_pattern(conn, char_id, char_pattern_id):
     return {"Cmd": "removePattern", "CharPatternID": int(char_pattern_id)}
 
 
+# --- Gem traits (2026-09-17 client) -------------------------------------------------------
+# A trait is a catalog item of type iType.Trait, sold from a trait shop and applied INTO a gem's
+# slot budget: Pattern.MaxSlots is the budget, each trait's Cost is what it spends, and
+# Pattern.Traits carries the applied TraitData the client renders ("Traits (2/3): ...").
+# The client pays for a trait with a token item (ShopItem.TokID/TokQty), not gold -- ShopItem
+# .hasRequirement() skips its money check for a trait. shop_items has no token columns yet, so
+# no trait can carry a price here; a priced trait needs that schema before it can be authored.
+TRAIT_ITEM_TYPE = 45
+DEFAULT_TRAIT_SLOTS = 3
+
+
+def trait_list(pattern):
+    """The TraitData already applied to a gem."""
+    return list((pattern or {}).get("Traits") or [])
+
+
+def slots_used(pattern):
+    """Slots the applied traits spend. Derived rather than trusted: SlotsUsed rides the wire, so
+    recomputing keeps a hand-edited or stale pattern from over-spending its budget."""
+    return sum(max(0, int(t.get("Cost") or 0)) for t in trait_list(pattern))
+
+
+def max_slots(pattern):
+    return int((pattern or {}).get("MaxSlots") or DEFAULT_TRAIT_SLOTS)
+
+
+def _sync_trait_counts(pattern):
+    """Keep the two wire fields the client reads consistent with Traits."""
+    pattern["Traits"] = trait_list(pattern)
+    pattern["MaxSlots"] = max_slots(pattern)
+    pattern["SlotsUsed"] = slots_used(pattern)
+    return pattern
+
+
+def trait_data(item, slot_cost):
+    """A catalog trait item + its shop slot cost -> the TraitData the client stores on the gem."""
+    return {"ID": int(item.get("ID") or 0), "Name": item.get("Name") or "",
+            "Cost": max(1, int(slot_cost or 1)), "Desc": item.get("Description") or "",
+            "Lvl": int(item.get("Level") or 0)}
+
+
+def _locate_gem(conn, char_id, gear_item_id, char_pattern_id):
+    """Resolve the gem a trait request targets -> (kind, key, pattern) or (None, None, None).
+
+    PatternPreview sends exactly one of the two and -1 for the other: a loose bag gem as its
+    CharPatternID, or a gear item as its CATALOG id (the same convention equipPattern uses).
+    Both are accepted from either field so a CharPatternID that arrives in the gear slot still
+    resolves."""
+    try:
+        gear_item_id = int(gear_item_id)
+    except (TypeError, ValueError):
+        gear_item_id = -1
+    try:
+        char_pattern_id = int(char_pattern_id)
+    except (TypeError, ValueError):
+        char_pattern_id = -1
+
+    for cpid in (char_pattern_id, gear_item_id):
+        if cpid is None or cpid <= 0:
+            continue
+        bag = conn.execute(
+            "SELECT pattern_json FROM char_patterns WHERE char_pattern_id=? AND char_id=?",
+            (cpid, char_id)).fetchone()
+        if bag is not None:
+            pat = _parse_pattern(bag["pattern_json"])
+            if pat is not None:
+                return "bag", cpid, pat
+        worn = conn.execute(
+            "SELECT char_item_id, item_id, pattern_json FROM char_items "
+            "WHERE char_id=? AND char_pattern_id=? AND banked=0", (char_id, cpid)).fetchone()
+        if worn is not None and worn["pattern_json"]:
+            pat = _parse_pattern(worn["pattern_json"])
+            if pat is not None:
+                return "gear", worn, pat
+
+    if gear_item_id > 0:
+        ci = conn.execute(
+            "SELECT char_item_id, item_id, pattern_json FROM char_items "
+            "WHERE char_id=? AND item_id=? AND banked=0 "
+            "ORDER BY equipped DESC, char_item_id LIMIT 1", (char_id, gear_item_id)).fetchone()
+        if ci is not None and ci["pattern_json"]:
+            pat = _parse_pattern(ci["pattern_json"])
+            if pat is not None:
+                return "gear", ci, pat
+    return None, None, None
+
+
+def _persist_gem(conn, kind, key, pattern):
+    if kind == "bag":
+        conn.execute("UPDATE char_patterns SET pattern_json=? WHERE char_pattern_id=?",
+                     (json.dumps(pattern), int(key)))
+    else:
+        conn.execute("UPDATE char_items SET pattern_json=? WHERE char_item_id=?",
+                     (json.dumps(pattern), int(key["char_item_id"])))
+    conn.commit()
+
+
+def _trait_response(kind, key, pattern, ok=True, err=""):
+    """UpdatePattern for a gear target. A loose bag gem has no s2c refresh of its own -- the
+    client's Inventory.UpdatePattern only looks items up by gear/bank id -- so the handler
+    mirrors a bag change with addItems.patternItems instead."""
+    item_id = int(key["item_id"]) if (ok and kind == "gear") else 0
+    resp = _update_pattern(item_id, pattern if ok else None, ok=ok, err=err)
+    resp["silent"] = True          # the panel already closed itself; do not re-open a preview
+    if ok:
+        resp["_target"] = kind
+        resp["_key"] = key if kind == "bag" else int(key["char_item_id"])
+    return resp
+
+
+def apply_trait(conn, char_id, shop_id, shop_item_id, gear_item_id, char_pattern_id):
+    """c2s applyTrait[ShopID, ShopItemID, CharItemID, CharPatternID]: spend part of a gem's slot
+    budget on a trait bought from a trait shop. Server-authoritative: the trait must really be
+    sold by that shop, must be a trait item, must not already be on the gem, and must fit."""
+    try:
+        shop_id, shop_item_id = int(shop_id), int(shop_item_id)
+    except (TypeError, ValueError):
+        return _trait_response(None, None, None, ok=False, err="Bad trait.")
+    row = conn.execute(
+        "SELECT item_id, cost FROM shop_items WHERE shop_id=? AND shop_item_id=?",
+        (shop_id, shop_item_id)).fetchone()
+    if row is None:
+        return _trait_response(None, None, None, ok=False, err="That trait is not sold here.")
+    item = _item_def(conn, row["item_id"])
+    if item is None or int(item.get("ItemType") or 0) != TRAIT_ITEM_TYPE:
+        return _trait_response(None, None, None, ok=False, err="That is not a trait.")
+
+    kind, key, pat = _locate_gem(conn, char_id, gear_item_id, char_pattern_id)
+    if pat is None:
+        return _trait_response(None, None, None, ok=False, err="Gem not found.")
+
+    trait = trait_data(item, row["cost"])
+    if any(int(t.get("ID") or 0) == trait["ID"] for t in trait_list(pat)):
+        return _trait_response(None, None, None, ok=False,
+                               err="This gem already has this trait.")
+    used, budget = slots_used(pat), max_slots(pat)
+    if budget - used < trait["Cost"]:
+        return _trait_response(
+            None, None, None, ok=False,
+            err="This gem needs %d open slots (%d/%d used)." % (trait["Cost"], used, budget))
+
+    pat["Traits"] = trait_list(pat) + [trait]
+    _sync_trait_counts(pat)
+    _persist_gem(conn, kind, key, pat)
+    return _trait_response(kind, key, pat)
+
+
+def remove_trait(conn, char_id, trait_item_id, gear_item_id, char_pattern_id):
+    """c2s removeTrait[TraitItemID, CharItemID, CharPatternID]: strip one trait and give its
+    slots back. The trait is consumed rather than refunded, matching the client confirmation,
+    which promises the slots back and not the trait."""
+    try:
+        trait_item_id = int(trait_item_id)
+    except (TypeError, ValueError):
+        return _trait_response(None, None, None, ok=False, err="Bad trait.")
+    kind, key, pat = _locate_gem(conn, char_id, gear_item_id, char_pattern_id)
+    if pat is None:
+        return _trait_response(None, None, None, ok=False, err="Gem not found.")
+    before = trait_list(pat)
+    kept = [t for t in before if int(t.get("ID") or 0) != trait_item_id]
+    if len(kept) == len(before):
+        return _trait_response(None, None, None, ok=False,
+                               err="That trait is not on this gem.")
+    pat["Traits"] = kept
+    _sync_trait_counts(pat)
+    _persist_gem(conn, kind, key, pat)
+    return _trait_response(kind, key, pat)
+
+
 def dust_value(pattern):
     """Dust awarded for destroying a gem. Prefer server/catalog-authored Dust, while giving
     older persisted gems (created before Dust was stored) the same rarity-based value."""
     pat = pattern or {}
+    if pat.get('BalanceVersion') == gem_balance.VERSION and 'Dust' in pat:
+        return max(0, int(pat['Dust']))
     explicit = int(pat.get("Dust", 0) or 0)
     if explicit > 0:
         return explicit

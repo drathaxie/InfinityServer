@@ -52,16 +52,22 @@ async def item_query(session, writer, cmd, params, msg):
 
 @register("getItemSponsors")
 async def get_item_sponsors(session, writer, cmd, params, msg):
-    # Params=[itemID]. Reply {Cmd:getItemSponsors, Sponsors:[name | "name:false"]}. The client's
-    # ItemPreviewNew panel fires this whenever an item is shown and reveals a Sponsors button/list
-    # when the list is non-empty (AE's Benevolent Founder item credit). RequestItemSponsors
+    # Params=[itemID]. Reply {Cmd:getItemSponsors, ItemID, Sponsors:[name | "name:false"]}. The
+    # client's ItemPreviewNew panel fires this whenever an item is shown and reveals a Sponsors
+    # button/list when the list is non-empty (AE's Benevolent Founder item credit).
+    # RequestItemSponsors
+    #
+    # ItemID must be echoed back: the 2026-09-17 client keys its sponsor cache and its in-flight
+    # set on resp.ItemID and only paints the panel when it matches the shown item, so omitting it
+    # (it then deserializes as 0) silently disables the feature for the rest of the session.
     if not params:
         return
     try:
-        sponsors = db.item_sponsors(session.conn, int(params[0]))
+        item_id = int(params[0])
     except (ValueError, TypeError):
         return
-    await send_obj(writer, {"Cmd": "getItemSponsors", "Sponsors": sponsors})
+    sponsors = db.item_sponsors(session.conn, item_id)
+    await send_obj(writer, {"Cmd": "getItemSponsors", "ItemID": item_id, "Sponsors": sponsors})
     return
 
 
@@ -241,4 +247,33 @@ async def upgrade_sync(session, writer, cmd, params, msg):
     await send_obj(writer, {"Cmd": "upgradeSync", "Coins": session.char["coins"],
                             "UpgradeDays": game.membership_days(session.char),
                             "UpgradeExpires": game.membership_expires(session.char)})
+    return
+
+
+@register("getRandomStatues")
+async def get_random_statues(session, writer, cmd, params, msg):
+    # RequestRandomStatues Params=[gen, specCount, spec x specCount, excludeCid...] ->
+    # {Cmd:getRandomStatues, Gen, Cids, Names}.
+    #
+    # RandomStatueClient batches every pedestal that came on screen this frame (up to 32) into
+    # one request and matches the reply POSITIONALLY, so Cids/Names must stay in spec order and
+    # be the same length. `Gen` is the client's batch generation: it drops any reply whose Gen
+    # is not the one still in flight, so echo it back unchanged. A pedestal we cannot fill gets
+    # cid 0 and the client draws its own fallback sprite.
+    if session.char is None or len(params) < 2:
+        return
+    try:
+        gen = int(params[0])
+        count = int(params[1])
+    except (TypeError, ValueError):
+        return
+    count = max(0, min(count, statues.MAX_RANDOM_STATUES))
+    specs = [str(p) for p in params[2:2 + count]]
+    exclude = params[2 + count:]
+    cids, names = statues.assign_random(session.conn, specs, exclude=exclude,
+                                        viewer_char_id=session.char["id"])
+    await send_obj(writer, {"Cmd": "getRandomStatues", "Gen": gen,
+                            "Cids": cids, "Names": names})
+    print(f"  [s2c] getRandomStatues gen={gen} pedestals={len(specs)} "
+          f"-> filled {sum(1 for c in cids if c)}")
     return

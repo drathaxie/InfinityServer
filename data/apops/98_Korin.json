@@ -1,6 +1,6 @@
 {
   "ID": 98,
-  "nextElementId": 31,
+  "nextElementId": 34,
   "name": "Korin",
   "bgImage": "",
   "bgImageScale": 1,
@@ -51,6 +51,58 @@
           "changeSubtitle": "",
           "compactMode": false,
           "requirements": []
+        },
+        {
+          "ID": 33,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "Link",
+          "label": "AdventureQuest 3D",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "https://aq3d.com/",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false,
+          "sfxString": "",
+          "musicID": -1
+        },
+        {
+          "ID": 31,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false,
+          "sfxString": "",
+          "musicID": -1
         }
       ]
     },
@@ -107,5 +159,6 @@
       "animation": ""
     }
   ],
-  "freezeClient": 1
+  "freezeClient": 1,
+  "IsSingleAction": false
 }

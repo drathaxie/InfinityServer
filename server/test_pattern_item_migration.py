@@ -17,7 +17,7 @@ def main():
     conn = db.connect()
     char = game.login(conn, "__pattern_migration__", "pw")
     gem = next(db.item(conn, r["item_id"]) for r in conn.execute(
-        "SELECT item_id FROM items WHERE item_type=43 ORDER BY item_id"))
+        "SELECT id AS item_id FROM items WHERE item_type=43 ORDER BY id"))
 
     # Reproduce the production bug: an ItemType 43 token persisted in char_items, with a
     # quantity greater than one and its Pattern incorrectly stored as an applied item pattern.

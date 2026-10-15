@@ -25,8 +25,8 @@ import forge
 import seed
 from combat_engine.state import _states as _engine_states
 
-REPORT = pathlib.Path(__file__).resolve().parent.parent / "docs" / "combat-engine" \
-    / "port_parity_report.md"
+from test_reports import report_path
+REPORT = report_path("port_parity_report.md")
 
 UID, ALLY1, ALLY2 = 11, 12, 13
 STATS = {"ap": 31.0, "sp": 28.0, "tcr": 0.05, "scm": 1.5, "tha": 0.99}

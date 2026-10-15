@@ -6,6 +6,7 @@ import montemplates
 import placements
 import combat
 import world
+import battlepets
 
 from .registry import register
 from .context import send_obj, _base_area
@@ -16,6 +17,12 @@ from .context import send_obj, _base_area
 async def sf_init(session, writer, cmd, params, msg):
     # FORGE opened: send palette + classes + skills
     init = forge.build_init(session.conn)
+    if getattr(session.member, 'battlepet_v1', False):
+        init['nodes']['PetAnimation'] = battlepets.PALETTE
+    else:
+        hidden = {sid for sid,skill in init['skills'].items() if any(p.get('Name')=='PetAnimation' for p in skill['Data'][1].values())}
+        init['skills'] = {sid:sk for sid,sk in init['skills'].items() if sid not in hidden}
+        init['classes'] = {name:c for name,c in init['classes'].items() if not any(str(sid) in hidden for sid in c['Skills'].values())}
     await send_obj(writer, init)
     print(f"  [s2c] sfInit (classes={len(init['classes'])} "
           f"skills={len(init['skills'])} "

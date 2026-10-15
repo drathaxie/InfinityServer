@@ -118,6 +118,10 @@ def cell_payload(map_name, frame, pad="Spawn", conn=None):
             "Cmd": "CellJoin", "Frame": frame or "Enter", "Pad": pad or "Spawn",
             "entities": [], "monsterSpawns": [],
         }
+    # A capture records one arrival, not every route into this cell. The client's
+    # destination pad controls where it lands (e.g. Asteroid's upper chest ledge).
+    cell["Frame"] = frame or "Enter"
+    cell["Pad"] = pad or "Spawn"
     if conn is not None and placements.is_authored(conn, map_name):
         # monsterSpawns is what the client spawns NPCs from (ResponseCellJoin), so
         # it MUST be the authored set — replacing entities alone left them spawning.

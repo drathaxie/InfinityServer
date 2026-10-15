@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\InfinityLoader\BattlepetForge.cs" Link="BattlepetForge.cs" />
+    <Compile Include="..\InfinityLoader\FlashPetPlayback.cs" Link="FlashPetPlayback.cs" />
+    <Reference Include="Newtonsoft.Json"><HintPath>C:\Program Files (x86)\Steam\steamapps\common\AdventureQuest Worlds Unity Playtest\AdventureQuest Worlds Infinity_Data\Managed\Newtonsoft.Json.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

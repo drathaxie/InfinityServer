@@ -76,6 +76,8 @@ public static class InfinityLoaderMod
         catch (Exception ex) { SafeLog("[InfinityLoader] TLS1.2 enable failed: " + ex.Message); }
 
         var h = new Harmony("infinity.local.loader");
+        try { UnityRotationCompatibility.Install(h, SafeLog); }
+        catch (Exception ex) { SafeLog("[unity-rotation] compatibility probe failed: " + ex); }
 
         // 1) ESSENTIAL: route the entire web API (login/nowinfinity, server list, monster data,
         //    dev tools) at our local server, so the client never reaches AE's API.
@@ -243,6 +245,22 @@ public static class InfinityLoaderMod
         //    dead -> black screen. So the editor is spawned lazily from UIChat.SetText (below), which
         //    only ever runs well after the game is up.
 
+        // Skins are private-server decoration only; Unity objects initialize later
+        // in HUDCanvas.Start, never at the Doorstop entrypoint.
+        if (ReadWebApiUrl() != null)
+        {
+            try { NativeUIThemes.Install(h); }
+            catch (Exception ex) { SafeLog("[ui-skins] hook installation failed: " + ex.Message); }
+            try { FlashRigPreviewColors.Install(h); }
+            catch (Exception ex) { SafeLog("[flash-rig] preview hook installation failed: " + ex.Message); }
+            try { FlashRigWeaponColors.Install(h); }
+            catch (Exception ex) { SafeLog("[flash-rig] weapon color hook installation failed: " + ex.Message); }
+            {
+                try { FlashBattlePet.Install(h); BattlepetForge.Install(h); SafeLog("[battlepet-forge] enabled"); }
+                catch (Exception ex) { SafeLog("[battlepet-forge] prototype installation failed: " + ex.Message); }
+            }
+        }
+
         SafeLog("[InfinityLoader] booted; WebApiURL -> " + (ReadWebApiUrl() ?? "(live AE, no marker)")
             + "; BaseURL -> " + (ReadContentUrl() ?? "(live AE, no marker)")
             + "; UserData=" + _beyondDir);
@@ -251,11 +269,10 @@ public static class InfinityLoaderMod
     // ---- self-update --------------------------------------------------------
     // Compare this DLL's hash with the server-published build. A running assembly cannot replace
     // itself, so a verified download is staged and a detached batch file swaps it after game exit.
-    private static void CheckForSelfUpdate()
+    private static void CheckForSelfUpdate(string api)
     {
         try
         {
-            string api = ReadWebApiUrl();
             if (string.IsNullOrEmpty(api)) return;
             string selfPath = Assembly.GetExecutingAssembly().Location;
             if (string.IsNullOrEmpty(selfPath) || !File.Exists(selfPath)) return;
@@ -284,7 +301,7 @@ public static class InfinityLoaderMod
             }
             string updatePath = selfPath + ".update";
             File.WriteAllBytes(updatePath, newDll);
-            ScheduleSelfUpdate(updatePath, selfPath);
+            ScheduleSelfUpdate(updatePath, selfPath, remoteHash);
             SafeLog("[self-update] staged " + localHash.Substring(0, 8) + " -> "
                 + remoteHash.Substring(0, 8) + "; applies after this session closes");
         }
@@ -302,29 +319,32 @@ public static class InfinityLoaderMod
         }
     }
 
-    private static void ScheduleSelfUpdate(string updatePath, string targetPath)
+    private static void ScheduleSelfUpdate(string updatePath, string targetPath, string expectedHash)
     {
         try
         {
-            string bat = Path.Combine(Path.GetTempPath(),
-                "infinity_loader_update_" + Guid.NewGuid().ToString("N") + ".bat");
-            string script =
-                "@echo off\r\n" +
-                "for /L %%i in (1,1,30) do (\r\n" +
-                "  move /Y \"" + updatePath + "\" \"" + targetPath + "\" >nul 2>&1\r\n" +
-                "  if not exist \"" + updatePath + "\" goto :done\r\n" +
-                "  timeout /T 1 /NOBREAK >nul\r\n" +
-                ")\r\n:done\r\ndel \"%~f0\"\r\n";
-            File.WriteAllText(bat, script);
+            string helper = Path.Combine(Path.GetTempPath(),
+                "infinity_loader_update_" + Guid.NewGuid().ToString("N") + ".ps1");
+            string script;
+            using (var input = Assembly.GetExecutingAssembly().GetManifestResourceStream("InfinityLoader.LoaderUpdate.ps1"))
+            using (var reader = new StreamReader(input)) script = reader.ReadToEnd();
+            using (var process = System.Diagnostics.Process.GetCurrentProcess())
+                script = script.Replace("__PID__", process.Id.ToString())
+                    .Replace("__START_TICKS__", process.StartTime.ToUniversalTime().Ticks.ToString());
+            script = script.Replace("__TARGET__", Convert.ToBase64String(Encoding.UTF8.GetBytes(targetPath)))
+                .Replace("__STAGED__", Convert.ToBase64String(Encoding.UTF8.GetBytes(updatePath)))
+                .Replace("__HASH__", expectedHash);
+            File.WriteAllText(helper, script);
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = "/C \"" + bat + "\"",
+                FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
+                    "WindowsPowerShell", "v1.0", "powershell.exe"),
+                Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + helper + "\"",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
             });
-            SafeLog("[self-update] swap scheduled via " + bat);
+            SafeLog("[self-update] swap scheduled via " + helper);
         }
         catch (Exception ex) { SafeLog("[self-update] schedule failed: " + ex.Message); }
     }
@@ -525,6 +545,8 @@ public static class InfinityLoaderMod
             if (string.IsNullOrEmpty(api)) return;
             const string ae = "https://account.aq.com/webapi/Heromart/";
             string url = __instance.url;
+            string editorAuth = EditorAuthorization(url);
+            if (editorAuth != null) __instance.SetRequestHeader("Authorization", editorAuth);
             if (!string.IsNullOrEmpty(url) && url.StartsWith(ae, StringComparison.OrdinalIgnoreCase))
             {
                 __instance.url = api + "webapi/Heromart/" + url.Substring(ae.Length);
@@ -532,6 +554,17 @@ public static class InfinityLoaderMod
             }
         }
         catch (Exception ex) { SafeLog("[heromart] redirect failed: " + ex.Message); }
+    }
+
+    public static string EditorAuthorization(string url)
+    {
+        string api = ReadWebApiUrl();
+        if (string.IsNullOrEmpty(api) || string.IsNullOrEmpty(url) ||
+            !url.StartsWith(api + "tweak/", StringComparison.OrdinalIgnoreCase)) return null;
+        PlayerInfo info = Entity.myPlayerData == null ? null : Entity.myPlayerData.Info;
+        Account account = SessionState.LoginData == null ? null : SessionState.LoginData.account;
+        return info == null || account == null || string.IsNullOrEmpty(account.sToken)
+            ? null : "Bearer " + info.CharID + ":" + account.sToken;
     }
 
     // A successful private-server response starts the real assembled-avatar capture.
@@ -761,6 +794,8 @@ public static class InfinityLoaderMod
             using (var wc = new System.Net.WebClient())
             {
                 wc.Headers[System.Net.HttpRequestHeader.ContentType] = ctype;
+                string editorAuth = EditorAuthorization(wd.URI);
+                if (editorAuth != null) wc.Headers[System.Net.HttpRequestHeader.Authorization] = editorAuth;
                 byte[] resp = wc.UploadData(wd.URI, "POST", body);
                 __instance.receivedText = Encoding.UTF8.GetString(resp);
             }
@@ -1028,7 +1063,12 @@ public static class InfinityLoaderMod
     public static void UILogin_GetLoginData_Postfix(UILogin __instance, WebCom wcom)
     {
         EnsureTicker();
-        if (!_selfUpdateTried) { _selfUpdateTried = true; CheckForSelfUpdate(); }
+        if (!_selfUpdateTried)
+        {
+            _selfUpdateTried = true;
+            string api = ReadWebApiUrl(); // read Unity/config state on the main thread
+            System.Threading.Tasks.Task.Run(() => CheckForSelfUpdate(api));
+        }
         if (__instance == null) return;
         try
         {
@@ -1154,6 +1194,7 @@ public static class InfinityLoaderMod
         // point the map is populated. Live colour changes refresh via SetUserData_Postfix.
         try { IngestGuildTags(raw); } catch { }
         try { TemporalMonsterEffects.IngestPacket(raw); } catch { }
+        try { BattlepetForge.IngestPacket(raw); } catch { }
     }
 
     private static void IngestGuildTags(string rawPkt)
@@ -1490,15 +1531,17 @@ public static class InfinityAchievementsPanel
     private sealed class Entry
     {
         public readonly int bit;
+        public readonly string field;
         public readonly string name;
         public readonly string description;
-        public Entry(int bit, string name, string description)
+        public Entry(int bit, string name, string description, string field = "ip25")
         {
             this.bit = bit; this.name = name; this.description = description;
+            this.field = field;
         }
     }
 
-    private static readonly Entry[] FounderAchievements =
+    private static readonly Entry[] Achievements =
     {
         new Entry(0, "Infinity: Day One", "Backed AdventureQuest Worlds: Infinity on its first day."),
         new Entry(1, "Infinity: 100% Funded", "Helped the Infinity Kickstarter reach its funding goal."),
@@ -1510,7 +1553,9 @@ public static class InfinityAchievementsPanel
         new Entry(7, "Infinity: Benevolent", "Supported Infinity at the Benevolent Founder tier."),
         new Entry(8, "Infinity: Weapon Designer", "Earned the Infinity Weapon Designer founder reward."),
         new Entry(9, "Infinity: Armor Designer", "Earned the Infinity Armor Designer founder reward."),
-        new Entry(10, "Infinity: Mysterious Offer", "Accepted the Mysterious Stranger's Infinity offer.")
+        new Entry(10, "Infinity: Mysterious Offer", "Accepted the Mysterious Stranger's Infinity offer."),
+        new Entry(NativeUIThemeAccess.AchievementBit, NativeUIThemeAccess.AchievementName,
+            NativeUIThemeAccess.AchievementDescription, NativeUIThemeAccess.AchievementField)
     };
 
     private const string PanelName = "InfinityAchievementsPanel";
@@ -1561,7 +1606,7 @@ public static class InfinityAchievementsPanel
             headerRect.offsetMin = new Vector2(22f, 0f);
             headerRect.offsetMax = new Vector2(-22f, -8f);
             TMP_Text title = AddText(header, canvas, 27f, FontStyles.Bold);
-            title.text = "INFINITY FOUNDER COLLECTION";
+            title.text = "INFINITY ACHIEVEMENTS";
             title.alignment = TextAlignmentOptions.MidlineLeft;
             title.color = new Color(0.96f, 0.76f, 0.34f);
 
@@ -1569,10 +1614,10 @@ public static class InfinityAchievementsPanel
                 || UICharacterCanvas.myPlayer == Entity.mainPlayer;
             int unlocked = 0;
             if (ownCharacter && Entity.myPlayerData != null && Entity.myPlayerData.Info != null)
-                for (int i = 0; i < FounderAchievements.Length; i++)
-                    if (Entity.myPlayerData.Info.hasAchievement("ip25", FounderAchievements[i].bit)) unlocked++;
+                for (int i = 0; i < Achievements.Length; i++)
+                    if (Entity.myPlayerData.Info.achievements != null && Entity.myPlayerData.Info.hasAchievement(Achievements[i].field, Achievements[i].bit)) unlocked++;
             title.text += "  <size=60%><color=#C9D2E3>" + unlocked + "/"
-                + FounderAchievements.Length + "</color></size>";
+                + Achievements.Length + "</color></size>";
 
             GameObject content = MakeUI("Content", panel.transform);
             RectTransform contentRect = content.GetComponent<RectTransform>();
@@ -1597,10 +1642,11 @@ public static class InfinityAchievementsPanel
             }
             else
             {
-                foreach (Entry entry in FounderAchievements)
+                foreach (Entry entry in Achievements)
                 {
                     bool earned = Entity.myPlayerData != null && Entity.myPlayerData.Info != null
-                        && Entity.myPlayerData.Info.hasAchievement("ip25", entry.bit);
+                        && Entity.myPlayerData.Info.achievements != null
+                        && Entity.myPlayerData.Info.hasAchievement(entry.field, entry.bit);
                     AddAchievement(content.transform, canvas, entry, earned);
                 }
             }
@@ -1622,7 +1668,7 @@ public static class InfinityAchievementsPanel
 
     private static void AddAchievement(Transform parent, UICharacterCanvas canvas, Entry entry, bool earned)
     {
-        GameObject row = MakeUI("Achievement_ip25_" + entry.bit, parent);
+        GameObject row = MakeUI("Achievement_" + entry.field + "_" + entry.bit, parent);
         LayoutElement size = row.AddComponent<LayoutElement>();
         size.preferredHeight = 82f;
         Image bg = row.AddComponent<Image>();

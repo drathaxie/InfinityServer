@@ -76,7 +76,7 @@ def _snapshot(conn, char):
     equipped = []
     for row in conn.execute(
             "SELECT ci.item_id, i.name, i.item_type, i.equip_spot "
-            "FROM char_items ci JOIN items i ON i.item_id=ci.item_id "
+            "FROM char_items ci JOIN items i ON i.id=ci.item_id "
             "WHERE ci.char_id=? AND ci.equipped=1 ORDER BY i.equip_spot",
             (char["id"],)):
         equipped.append({
@@ -172,6 +172,56 @@ def version_push(char_id, version):
     mirroring AE's real ResponseStatueVersion -> DynamicStatue.SetVersion live-refresh. cid is an
     int on the wire (ResponseStatueVersion.cid is int, not string, per the decompiled client)."""
     return {"Cmd": "statueVersion", "cid": int(char_id), "version": int(version)}
+
+
+MAX_RANDOM_STATUES = 32      # RandomStatueClient.MaxPerRequest — one batch per flush
+
+
+def _statue_owners(conn):
+    """Every character that has generated a statue, newest first, as (cid, name)."""
+    return [(int(r["char_id"]), r["name"] or "")
+            for r in conn.execute(
+                "SELECT s.char_id, c.name FROM statues s JOIN characters c ON c.id=s.char_id "
+                "ORDER BY s.generated_at DESC").fetchall()]
+
+
+def assign_random(conn, specs, exclude=(), viewer_char_id=None):
+    """Resolve one RequestRandomStatues batch to (cids, names), positionally per pedestal.
+
+    A spec is what RandomStatueClient.Spec() encodes for that pedestal:
+      "me"      -> the viewer's own statue (PickStatueFrom.PlayerOnly)
+      "<cid>"   -> that character's statue, if they have one
+      "0"/other -> any statue the server picks (AnyRandomStatue)
+
+    `exclude` is the set of cids the client already has on screen, so a pedestal is not given a
+    statue that is already standing on another one. Picks within this batch are also kept
+    distinct. A pedestal with nothing to show gets cid 0, which is the client's documented
+    signal to draw its fallback sprite instead of a statue."""
+    owners = _statue_owners(conn)
+    by_cid = dict(owners)
+    taken = {int(c) for c in exclude if str(c).lstrip("-").isdigit()}
+    pool = [cid for cid, _ in owners if cid not in taken]
+    cids, names = [], []
+    for spec in specs:
+        spec = (spec or "").strip()
+        cid = 0
+        if spec.lower() == "me":
+            if viewer_char_id is not None and int(viewer_char_id) in by_cid:
+                cid = int(viewer_char_id)
+        elif spec.isdigit() and int(spec) > 0:
+            if int(spec) in by_cid:
+                cid = int(spec)
+        else:
+            while pool:
+                candidate = pool.pop(0)
+                if candidate not in taken:
+                    cid = candidate
+                    break
+        if cid:
+            taken.add(cid)
+        cids.append(cid)
+        names.append(by_cid.get(cid, "") if cid else "")
+    return cids, names
 
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"

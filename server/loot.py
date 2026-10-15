@@ -36,7 +36,7 @@ def _catalog(conn, item_id):
     return db.item(conn, item_id)
 
 
-def roll_drops(conn, mon_id=None):
+def roll_drops(conn, mon_id=None, player_level=None):
     """Roll this kill's drops -> a list of catalog item dicts (possibly []).
 
     Two independent sources, each row rolling INDEPENDENTLY (random() < rate -> that item drops,
@@ -52,6 +52,10 @@ def roll_drops(conn, mon_id=None):
     if mid is not None:
         rows = list(conn.execute(
             "SELECT item_id, rate, quantity FROM monster_drops WHERE mon_id=?", (mid,)).fetchall())
+    monster = conn.execute('SELECT level FROM monsters WHERE mon_id=?', (mid,)).fetchone() if mid is not None else None
+    encounter_level = max(1, int(monster['level'] or 1)) if monster else None
+    if player_level is not None:
+        encounter_level = min(encounter_level or 1, max(1, int(player_level)))
     rows += list(conn.execute("SELECT item_id, rate, quantity FROM global_drops").fetchall())
     out = []
     for r in rows:
@@ -64,10 +68,38 @@ def roll_drops(conn, mon_id=None):
                 item["Quantity"] = random.randint(1, max(1, int(r["quantity"] or 1)))
                 # Enhanceable gear drops with a random-rarity gem already rolled in (the AE model:
                 # the ItemPattern IS the drop's strength). Persisted per-instance on grant.
-                pat = patterns.roll_pattern(item)
+                pat = (patterns.gem_item_pattern(item, level=encounter_level) if patterns.is_gem_item(item)
+                       else patterns.roll_pattern(item, level=encounter_level))
                 if pat is not None:
                     item["ItemPattern"] = pat
                 out.append(item)
+    return out
+
+
+def drop_table(conn, mon_id):
+    """The drop list the client's MonDrops panel shows for one monster (RequestGetMonDrops ->
+    ResponseGetMonDrops.ItemDrops), as MonDropItem dicts.
+
+    Deliberately the SAME two sources roll_drops() rolls — the monster's authored rows plus the
+    global table every monster rolls — so the panel shows what can actually drop rather than
+    only the authored half. `quantity` is the MAX of the 1..quantity roll a drop yields, so it
+    maps to QtyMax with Quantity as the floor. An item id with no catalog row is skipped: the
+    client dereferences ItemData to draw the row."""
+    try:
+        mid = int(mon_id)
+    except (TypeError, ValueError):
+        return []
+    rows = list(conn.execute(
+        "SELECT item_id, rate, quantity FROM monster_drops WHERE mon_id=?", (mid,)).fetchall())
+    rows += list(conn.execute("SELECT item_id, rate, quantity FROM global_drops").fetchall())
+    out = []
+    for r in rows:
+        item = _catalog(conn, r["item_id"])
+        if not item:
+            continue
+        qty_max = max(1, int(r["quantity"] or 1))
+        out.append({"itemID": int(r["item_id"]), "Quantity": 1, "QtyMax": qty_max,
+                    "Rate": float(r["rate"] or 0), "ItemData": item, "Hide": False})
     return out
 
 
@@ -77,6 +109,9 @@ def add_pending(uid, items):
     bag = _pending.setdefault(uid, [])
     wire = []
     for item in items:
+        if patterns.is_gem_item(item) and not item.get('ItemPattern'):
+            # Roll once before preview; claiming or dusting must use this exact result.
+            item = {**item, 'ItemPattern': patterns.gem_item_pattern(item)}
         lid = _lid()
         qty = int(item.get("Quantity", 1) or 1)
         bag.append({"loot_id": lid, "item_id": int(item.get("ID", 0) or 0),

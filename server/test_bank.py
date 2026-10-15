@@ -19,7 +19,7 @@ def _side(conn, cid, item_id, banked):
 def _nonclass_items(conn, n):
     """n distinct non-class catalog item ids to play with."""
     out = []
-    for r in conn.execute("SELECT item_id FROM items ORDER BY item_id"):
+    for r in conn.execute("SELECT id AS item_id FROM items ORDER BY id"):
         if not game._is_class_item(conn, r["item_id"]) and r["item_id"] != game.STARTER_WEAPON_ITEM:
             out.append(r["item_id"])
             if len(out) == n:

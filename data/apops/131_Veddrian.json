@@ -1,6 +1,6 @@
 {
   "ID": 131,
-  "nextElementId": 55,
+  "nextElementId": 56,
   "name": "Veddrian",
   "bgImage": "",
   "bgImageScale": 1,
@@ -196,6 +196,32 @@
           "lockedMsg": "",
           "lockedMode": "Hide",
           "closePanels": false
+        },
+        {
+          "ID": 55,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false,
+          "sfxString": "",
+          "musicID": -1
         }
       ]
     },
@@ -285,5 +311,6 @@
       "animation": "Idle"
     }
   ],
-  "freezeClient": "1"
+  "freezeClient": "1",
+  "IsSingleAction": false
 }

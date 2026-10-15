@@ -39,3 +39,35 @@ jobs:
         env:
           INFINITY_DB: sqlite
         run: python -m pytest -q
+
+  postgres-regressions:
+    name: PostgreSQL transactions and migration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: infinity_test
+          POSTGRES_USER: infinity_test
+          POSTGRES_PASSWORD: local-ci-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U infinity_test -d infinity_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install -r server/requirements.txt pytest
+      - name: Exercise disposable schemas
+        working-directory: server
+        env:
+          INFINITY_DB: postgres
+          INFINITY_PG_HOST: 127.0.0.1
+          INFINITY_PG_DB: infinity_test
+          INFINITY_PG_USER: infinity_test
+          INFINITY_PG_PASSWORD: local-ci-test-only
+        run: python -m pytest -q test_review_regressions.py test_migration_regressions.py test_editor_workflows.py

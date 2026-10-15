@@ -7,6 +7,7 @@ Handler modules import THIS module — never server.py — which is what keeps t
 package free of circular imports (server.py imports handlers, not the reverse).
 """
 import asyncio
+import assetwire
 import json
 import pathlib
 
@@ -15,6 +16,8 @@ import game
 import maps
 import world
 import combat
+import datawarnings
+import monstermove
 import placements
 import forge
 import loot
@@ -31,7 +34,10 @@ UNHANDLED = object()
 class Session:
     """Per-connection state: DB handle, logged-in character, world membership."""
     def __init__(self, writer):
-        self.conn = db.connect()
+        self._conn = None
+        self.online_lease = None
+        self.token = None
+        self.username = None
         self.writer = writer
         self.char = None
         self.area = "infinityportal"   # current map (home on first join)
@@ -40,11 +46,27 @@ class Session:
         self.equipped_class = forge.EQUIPPED_CLASS_ID   # whose skills are live (sEAct/combat)
         self.guildhall_gid = None      # guild id if currently inside a guild hall (routes housesave)
 
+    @property
+    def conn(self):
+        if self._conn is None:
+            self._conn = db.connect()
+        return self._conn
+
+    @conn.setter
+    def conn(self, value):
+        self._conn = value
+
     def close(self):
         try:
-            self.conn.close()
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
         except Exception:
             pass
+        finally:
+            if self.online_lease is not None:
+                self.online_lease.close()
+                self.online_lease = None
 
 
 _players = {}               # uid -> Session (so the AI loop can reach a player's conn/writer)
@@ -58,7 +80,7 @@ async def send_str(writer, payload_str):
 async def send_obj(writer, obj):
     if obj is None:
         return
-    await send_str(writer, json.dumps(obj, separators=(",", ":")))
+    await send_str(writer, json.dumps(assetwire.normalize(obj), separators=(",", ":")))
 
 
 def log_unhandled(cmd, msg):
@@ -156,7 +178,8 @@ def load_shop(conn, params, is_staff=False):
     if shop_id is None:
         return None
     item_filter = params[1] if len(params) > 1 else 0
-    resp = game.load_shop(conn, shop_id, item_filter)
+    resp = (game.load_shop(conn, shop_id, item_filter)
+            if game.shop_access_allowed(shop_id, is_staff) else None)
     if resp is not None:
         return resp
     return {"Cmd": "loadShop",
@@ -195,8 +218,11 @@ async def _enter_area(session, writer, base, room, house_data=None):
     `house_data` (mapHouseData dict) makes the join a HOUSE: Area.isHouse keys on it."""
     area_name = f"{base}-{room}"
     session.guildhall_gid = None       # any area entry leaves a guild hall; the /guildhall handler re-sets it
-    area = (maps.area_payload(base, session.conn)
-            or maps.area_payload("infinityportal", session.conn))
+    area = maps.area_payload(base, session.conn)
+    served_map = base
+    if area is None:                     # no data for this map -> the portal is the fallback
+        area = maps.area_payload("infinityportal", session.conn)
+        served_map = "infinityportal"
     area["areaName"] = area_name               # tell the client which room it's in
     if house_data is not None:
         area["houseData"] = house_data         # placements + furniture + owner (Area.isHouse)
@@ -208,6 +234,8 @@ async def _enter_area(session, writer, base, room, house_data=None):
     # learn this map's MonMapID -> (catalog MonID, name), keyed by the INSTANCE so each room
     # has its own monster set (the captured entities carry only the m:<MonMapID> instance id).
     combat.register_area_monsters(area_name, area.get("monBranch"))
+    # ...and their spawn points + NoMove flags, which is what monWalk/monLeash move them from.
+    monstermove.register_area(area_name, area.get("monBranch"))
     if session.member is not None:
         combat.cancel_player_actions(session.member.uid)  # no old-map casts/fields survive
         old = world.leave(session.member)            # leave old room, announce departure
@@ -222,6 +250,15 @@ async def _enter_area(session, writer, base, room, house_data=None):
     if session.member is not None:
         world.broadcast(area_name, {"Cmd": "AreaAdd", "userData": session.member.user_obj},
                         exclude=session.member.uid)
+    # Staff get the map's content problems in-client instead of only in the server log. The
+    # client queues them and shows one box after the next cell change completes, so this rides
+    # along with the join rather than needing its own trigger.
+    if _is_staff(session):
+        warn = datawarnings.packet(
+            datawarnings.for_area(session.conn, served_map, area, requested_map=base))
+        if warn is not None:
+            await send_obj(writer, warn)
+            print(f"  [s2c] dataWarnings ({base}) -> {len(warn['warnings'])}")
     print(f"  [s2c] AreaJoin ({area_name})  pop={len(world.members(area_name))}  "
           f"monBranch={len(area.get('monBranch') or [])}"
           f"{' [authored]' if placements.is_authored(session.conn, base) else ''}")
@@ -258,7 +295,7 @@ async def _handle_kills(session, writer, killed):
         # roll THIS monster's drop table, keyed by its CATALOG MonID — NOT the m:<MonMapID>
         # instance id in the target string (monster_drops.mon_id is the catalog id).
         cat_id, _ = combat.monster_identity(session.area, target)
-        drops = loot.roll_drops(session.conn, cat_id)
+        drops = loot.roll_drops(session.conn, cat_id, player_level=session.char['level'])
         items_wire += loot.add_pending(session.member.uid, drops)
     first_target = unique[0]
     mon_id, _ = combat.monster_identity(session.area, first_target)

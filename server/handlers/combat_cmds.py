@@ -4,6 +4,8 @@ charge-state no-ops."""
 import combat
 import forge
 import world
+import spellstones
+import battlepets
 
 from .registry import register
 from .context import (send_obj, attack_summary, _area_allies, _gmah_hits,
@@ -42,11 +44,15 @@ async def rest_revive(session, writer, cmd, params, msg):
             await send_obj(writer, {"Cmd": "rNotify", "msg": "You cannot rest while in combat."})
             return
         pk = combat.rest_player(session.member.uid, session.char["name"])
+        if pk is None:
+            return
         await send_obj(writer, pk)
         world.broadcast(session.area, pk, exclude=session.member.uid)
         print(f"  [s2c] hpmp (rest) uid={session.member.uid}")
     elif cmd == "resPlayerTimed":           # revive a downed player -> playerRes (+respawn)
         pk = combat.revive_player(session.member.uid, session.char["name"])
+        if pk is None:
+            return
         await send_obj(writer, pk)
         world.broadcast(session.area, pk, exclude=session.member.uid)
         print(f"  [s2c] playerRes (revive) uid={session.member.uid}")
@@ -92,7 +98,7 @@ async def player_hitstream_hit(session, writer, cmd, params, msg):
     if session.char is None or session.member is None or not params:
         return
     header = str(params[0])
-    if ":" not in header:
+    if not header.startswith("PlayerHitStream:"):
         return
     _, _, slot_s = header.partition(":")
     try:
@@ -100,7 +106,8 @@ async def player_hitstream_hit(session, writer, cmd, params, msg):
     except ValueError:
         return
     targets = [str(p) for p in params[1:]]
-    attack, killed = combat.player_hitstream_hit(session.member.uid, slot, targets)
+    attack, killed = combat.player_hitstream_hit(session.member.uid, slot, targets,
+                                                current_area=session.area, frame=session.member.frame)
     if attack is None:                  # no active window for this slot (stale report)
         return
     await send_obj(writer, attack)
@@ -121,15 +128,25 @@ async def mon_req_continue(session, writer, cmd, params, msg):
 @register("gai")
 async def continue_cast(session, writer, cmd, params, msg):
     # client resolved an input node -> continue cast
-    if session.member is None:
+    if session.member is None or session.char is None:
         return
     ctx = params[1] if len(params) > 1 else ""
     node_name = params[2] if len(params) > 2 else "?"
     resource_before = combat.resource_total(session.member.uid)
-    pkts, killed, dmg = combat.resume_cast(ctx, params)
+    pending = combat._casts.get(ctx)
+    if pending is not None and pending.uid == session.member.uid:
+        pet_error = battlepets.check_skill(session, {}, pending.target, order=pending.order)
+        if pet_error:
+            combat._casts.pop(ctx, None)
+            combat.release_cooldown(session.member.uid, pending.slot)
+            await send_obj(writer, combat.cast_failure(session.member.uid, pending.slot, pet_error))
+            return
+    pkts, killed, dmg = combat.resume_cast(ctx, params, uid=session.member.uid,
+                                          area=session.area, frame=session.member.frame)
     for pk in pkts:
         await send_obj(writer, pk)
-        world.broadcast(session.area, pk, exclude=session.member.uid)
+        if pk.get("Cmd") != "igai":
+            world.broadcast(session.area, pk, exclude=session.member.uid)
         if pk.get("Cmd") == "Attack":
             summ = attack_summary(pk)
             if summ:
@@ -153,7 +170,7 @@ async def charge_state(session, writer, cmd, params, msg):
 @register("gar")
 async def begin_cast(session, writer, cmd, params, msg):
     # begin a skill/auto-attack on a target
-    if session.member is None:
+    if session.member is None or session.char is None:
         return
     slot = params[0] if params else "0"
     requested_target = combat.target_from_params(params)
@@ -177,12 +194,24 @@ async def begin_cast(session, writer, cmd, params, msg):
     if sk is None:
         await send_obj(writer, combat.cast_failure(uid, slot_i, "Skill is unavailable."))
         return
+    if slot_i == 5:
+        if combat.in_combat(uid, session.area):
+            await send_obj(writer, combat.cast_failure(uid, slot_i, "You cannot use Spellstones while in combat."))
+            return
+        if sk['skill_id'] == spellstones.CHEER_SKILL_ID and not spellstones.cheer_ready(session.member):
+            await send_obj(writer, combat.cast_failure(uid, slot_i, "Your room just cheered. Please wait a moment."))
+            return
+        try:
+            sk = spellstones.prepare_skill(session.conn, sk)
+        except ValueError as exc:
+            await send_obj(writer, combat.cast_failure(uid, slot_i, str(exc)))
+            return
     # Class skills are combat actions. A selected living monster always wins;
     # otherwise a running engagement wins, then the nearest living monster in
     # this cell. This lets a mobile player start combat by tapping a skill while
     # retaining explicit desktop target selection. Slot 5 remains usable out of
     # combat (potions, practice transformations, and other self-directed spellstones).
-    target = requested_target
+    target = None if slot_i == 5 else requested_target
     if slot_i <= 4:
         target = combat.resolve_combat_target(
             session.area, uid, requested_target,
@@ -195,6 +224,10 @@ async def begin_cast(session, writer, cmd, params, msg):
             return
     data = sk["data"] if sk else None
     forge_data = sk["forge"] if sk else None
+    pet_error = battlepets.check_skill(session, sk, target)
+    if pet_error:
+        await send_obj(writer, combat.cast_failure(uid, slot_i, pet_error))
+        return
     has_graph = sk is not None and combat.has_graph(data, forge_data)
     allowed, mana_required = combat.can_pay_resource(uid, slot_i, sk["skill_id"])
     if not allowed:
@@ -255,9 +288,14 @@ async def begin_cast(session, writer, cmd, params, msg):
             combat.off_cooldown(uid, 0, auto_cd)
             combat.auto_engage(uid, session.area, target, repeat_data, repeat_forge,
                                auto_cd, repeat_skill_id)
+    # Reserve the room cooldown before yielding to network I/O, so simultaneous
+    # casters cannot both be charged for the same cheer.
+    if slot_i == 5 and sk['skill_id'] == spellstones.CHEER_SKILL_ID and cast_accepted:
+        spellstones.group_cheer(session.member)
     for pk in pkts:
         await send_obj(writer, pk)
-        world.broadcast(session.area, pk, exclude=session.member.uid)
+        if pk.get("Cmd") != "igai":
+            world.broadcast(session.area, pk, exclude=session.member.uid)
         if pk.get("Cmd") == "Attack":
             summ = attack_summary(pk)
             if summ:
@@ -267,6 +305,7 @@ async def begin_cast(session, writer, cmd, params, msg):
     # model whenever the authoritative value changed (mana, determination, all stacks).
     if combat.resource_total(uid) != resource_before:
         await send_obj(writer, combat.resource_packet(uid, session.member.name))
-    combat.engage(session.area, target, session.member.uid)   # monster now aggros
+    if slot_i <= 4:
+        combat.engage(session.area, target, session.member.uid)   # monster now aggros
     await _handle_kills(session, writer, killed)
     return

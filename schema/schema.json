@@ -35,7 +35,9 @@
       "fields": {
         "items": "List<InventoryItem>",
         "patternItems": "List<PatternItem>",
-        "bankedItems": "List<InventoryItem>"
+        "bankedItems": "List<InventoryItem>",
+        "houseItems": "List<HouseItem>",
+        "classItems": "List<InventoryItem>"
       }
     },
     "AFK": {
@@ -109,7 +111,9 @@
         "CasterEntity": "Entity",
         "Response": "JObject",
         "ReturnType": "ReturnTypes",
-        "ContextId": "string"
+        "ContextId": "string",
+        "El": "int",
+        "HoldMove": "bool"
       }
     },
     "AuraChange": {
@@ -154,7 +158,8 @@
       "cmd": "buyItem",
       "fields": {
         "item": "InventoryItem",
-        "houseItem": "houseItem",
+        "houseItem": "HouseItem",
+        "classItem": "InventoryItem",
         "IsDrop": "bool",
         "Cost": "int",
         "Success": "bool",
@@ -235,6 +240,20 @@
         "ThresholdColor": "int"
       }
     },
+    "classSkills": {
+      "type": "ResponseClassSkills",
+      "cmd": "classSkills",
+      "fields": {
+        "ItemID": "int"
+      }
+    },
+    "dataWarnings": {
+      "type": "ResponseDataWarnings",
+      "cmd": "dataWarnings",
+      "fields": {
+        "warnings": "List<string>"
+      }
+    },
     "defaultclasses": {
       "type": "ResponseDefaultClasses",
       "cmd": "defaultclasses",
@@ -253,6 +272,17 @@
         "message": "string",
         "ItemID": "int",
         "LootID": "int"
+      }
+    },
+    "dust": {
+      "type": "ResponseDust",
+      "cmd": "dust",
+      "fields": {
+        "bSuccess": "bool",
+        "Gained": "int",
+        "Total": "int",
+        "CharPatternID": "int",
+        "message": "string"
       }
     },
     "emotea": {
@@ -369,6 +399,21 @@
         "LootID": "int"
       }
     },
+    "getMonDrops": {
+      "type": "ResponseGetMonDrops",
+      "cmd": "getMonDrops",
+      "fields": {
+        "monID": "int",
+        "ItemDrops": "List<MonDropItem>"
+      }
+    },
+    "getPlayerTitles": {
+      "type": "ResponseGetPlayerTitles",
+      "cmd": "getPlayerTitles",
+      "fields": {
+        "Titles": "List<string>"
+      }
+    },
     "getQuests": {
       "type": "ResponseGetQuests",
       "cmd": "getQuests",
@@ -475,7 +520,8 @@
         "items": "List<InventoryItem>",
         "loot": "List<InventoryItem>",
         "patterns": "List<PatternItem>",
-        "houseItems": "List<houseItem>",
+        "houseItems": "List<HouseItem>",
+        "classItems": "List<InventoryItem>",
         "friends": "List<FriendObject>",
         "Actions": "ResponseEquipActions"
       }
@@ -499,6 +545,14 @@
       "cmd": "itemQuery",
       "fields": {
         "item": "Item"
+      }
+    },
+    "getItemSponsors": {
+      "type": "ResponseItemSponsors",
+      "cmd": "getItemSponsors",
+      "fields": {
+        "Sponsors": "List<string>",
+        "ItemID": "int"
       }
     },
     "joinGuild": {
@@ -635,6 +689,23 @@
         "Response": "JObject"
       }
     },
+    "monLeash": {
+      "type": "ResponseMonsterLeash",
+      "cmd": "monLeash",
+      "fields": {
+        "monMapID": "int"
+      }
+    },
+    "monWalk": {
+      "type": "ResponseMonsterWalk",
+      "cmd": "monWalk",
+      "fields": {
+        "monMapID": "int",
+        "x": "float",
+        "y": "float",
+        "speed": "float"
+      }
+    },
     "movement": {
       "type": "ResponseMovement",
       "cmd": "movement",
@@ -717,14 +788,17 @@
     "pickupClear": {
       "type": "ResponsePickupClear",
       "cmd": "pickupClear",
-      "fields": {}
+      "fields": {
+        "PickupId": "int?"
+      }
     },
     "pickupCollect": {
       "type": "ResponsePickupCollect",
       "cmd": "pickupCollect",
       "fields": {
         "PickupId": "int",
-        "Auras": "List<string>"
+        "Auras": "List<string>",
+        "Collector": "string"
       }
     },
     "PlayerDeath": {
@@ -748,7 +822,8 @@
       "type": "ResponseQuestAccept",
       "cmd": "QuestAccept",
       "fields": {
-        "QuestID": "int"
+        "QuestID": "int",
+        "quest": "QuestData"
       }
     },
     "QComp": {
@@ -788,6 +863,15 @@
       "cmd": "QuestRemove",
       "fields": {
         "ID": "int"
+      }
+    },
+    "getRandomStatues": {
+      "type": "ResponseRandomStatues",
+      "cmd": "getRandomStatues",
+      "fields": {
+        "Gen": "int",
+        "Cids": "List<int>",
+        "Names": "List<string>"
       }
     },
     "removePattern": {
@@ -838,6 +922,14 @@
         "Gold": "Gold",
         "items": "InventoryItem[]",
         "autoDiscarded": "List<InventoryItem>"
+      }
+    },
+    "savePlayerTitle": {
+      "type": "ResponseSavePlayerTitle",
+      "cmd": "savePlayerTitle",
+      "fields": {
+        "CharID": "int",
+        "Title": "string"
       }
     },
     "sellItem": {
@@ -966,6 +1058,14 @@
         "reload": "bool"
       }
     },
+    "statueVersion": {
+      "type": "ResponseStatueVersion",
+      "cmd": "statueVersion",
+      "fields": {
+        "cid": "int",
+        "version": "long"
+      }
+    },
     "statUpdate": {
       "type": "ResponseStatUpdate",
       "cmd": "statUpdate",
@@ -1017,7 +1117,8 @@
         "errorMessage": "string",
         "ItemID": "int",
         "pattern": "Pattern",
-        "stats": "TotalStats"
+        "stats": "TotalStats",
+        "silent": "bool"
       }
     },
     "upgradeSync": {
@@ -1053,6 +1154,11 @@
     "RequestAddNewPad": {
       "type": "RequestAddNewPad",
       "cmd": null,
+      "fields": {}
+    },
+    "applyTrait": {
+      "type": "RequestApplyTrait",
+      "cmd": "applyTrait",
       "fields": {}
     },
     "gai": {
@@ -1125,6 +1231,11 @@
       "cmd": "dustenhloot",
       "fields": {}
     },
+    "dustPattern": {
+      "type": "RequestDustPattern",
+      "cmd": "dustPattern",
+      "fields": {}
+    },
     "emotea": {
       "type": "RequestEmote",
       "cmd": "emotea",
@@ -1190,6 +1301,11 @@
       "cmd": "getApop",
       "fields": {}
     },
+    "getClassSkills": {
+      "type": "RequestGetClassSkills",
+      "cmd": "getClassSkills",
+      "fields": {}
+    },
     "getCutscene": {
       "type": "RequestGetCutscene",
       "cmd": "getCutscene",
@@ -1216,6 +1332,16 @@
     "RequestGetMapSapwns": {
       "type": "RequestGetMapSapwns",
       "cmd": null,
+      "fields": {}
+    },
+    "getMonDrops": {
+      "type": "RequestGetMonDrops",
+      "cmd": "getMonDrops",
+      "fields": {}
+    },
+    "getPlayerTitles": {
+      "type": "RequestGetPlayerTitles",
+      "cmd": "getPlayerTitles",
       "fields": {}
     },
     "getQuests": {
@@ -1296,6 +1422,11 @@
     "itemQuery": {
       "type": "RequestItemQuery",
       "cmd": "itemQuery",
+      "fields": {}
+    },
+    "getItemSponsors": {
+      "type": "RequestItemSponsors",
+      "cmd": "getItemSponsors",
       "fields": {}
     },
     "tKill": {
@@ -1446,6 +1577,11 @@
       "cmd": "acceptQuest",
       "fields": {}
     },
+    "getRandomStatues": {
+      "type": "RequestRandomStatues",
+      "cmd": "getRandomStatues",
+      "fields": {}
+    },
     "removeEnh": {
       "type": "RequestRemoveEnh",
       "cmd": "removeEnh",
@@ -1456,9 +1592,9 @@
       "cmd": "removeItem",
       "fields": {}
     },
-    "removePattern": {
-      "type": "RequestRemovePattern",
-      "cmd": "removePattern",
+    "removeTrait": {
+      "type": "RequestRemoveTrait",
+      "cmd": "removeTrait",
       "fields": {}
     },
     "resetsaga": {
@@ -1479,6 +1615,11 @@
     "RequestSavePad": {
       "type": "RequestSavePad",
       "cmd": null,
+      "fields": {}
+    },
+    "savePlayerTitle": {
+      "type": "RequestSavePlayerTitle",
+      "cmd": "savePlayerTitle",
       "fields": {}
     },
     "savePortrait": {

@@ -30,8 +30,8 @@ def main():
     # a kill rolls drops from the catalog and holds them as PENDING loot (rewardPlayer.items).
     # Pick catalog items the starter character does NOT already own, so a kept drop grows inventory.
     drop_ids = [r["item_id"] for r in conn.execute(
-        "SELECT item_id FROM items WHERE item_id > 0 AND item_id NOT IN "
-        "(SELECT item_id FROM char_items WHERE char_id=?) ORDER BY item_id LIMIT 3",
+        "SELECT id AS item_id FROM items WHERE id > 0 AND id NOT IN "
+        "(SELECT item_id FROM char_items WHERE char_id=?) ORDER BY id LIMIT 3",
         (char["id"],)).fetchall()]
     items = [loot._catalog(conn, i) for i in drop_ids]
     wire = loot.add_pending(uid, items)
@@ -104,7 +104,7 @@ def main():
     #     the client opens ItemPreviewNew and its Equip button is permanently disabled. A kept
     #     token must instead be emitted in addItems.patternItems and survive in char_patterns.
     gem_item = next((db.item(conn, r["item_id"]) for r in conn.execute(
-        "SELECT item_id FROM items WHERE item_type=43 ORDER BY item_id")
+        "SELECT id AS item_id FROM items WHERE item_type=43 ORDER BY id")
         if db.item(conn, r["item_id"])), None)
     assert gem_item and gem_item.get("ItemPattern"), "seed must include a real Pattern token"
 

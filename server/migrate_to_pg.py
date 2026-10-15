@@ -1,85 +1,136 @@
 #!/usr/bin/env python3
+"""Plan/copy a complete current SQLite database to an EMPTY PostgreSQL schema.
+
+Default is read-only planning. --apply copies inside one transaction, validates every
+table's contents and identity sequence, and commits only on success. Occupied targets
+are rejected; restoration/replacement must use a separate empty database.
 """
-One-shot data copy: data/infinity.db (SQLite) -> Postgres.
-
-The SQLite file is the source of truth for both authored content (seeded) AND per-player
-state, so copying it wholesale brings everything over — no seed.run() needed on the target.
-
-Run with the target selected via env (same vars db.py reads):
-    INFINITY_DB=postgres INFINITY_PG_HOST=... INFINITY_PG_PORT=... INFINITY_PG_DB=... \
-    INFINITY_PG_USER=... INFINITY_PG_PASSWORD=...  python migrate_to_pg.py
-
-Idempotent: ensures the schema (db.init), TRUNCATEs the target tables (RESTART IDENTITY
-CASCADE), bulk-copies every table preserving ids, advances the accounts/characters identity
-sequences past MAX(id), and asserts per-table row counts match. Safe to re-run.
-"""
-import os
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import re
 import sqlite3
-import sys
 
 import db
 
-# FK-safe insertion order: parents before children (mirrors the REFERENCES in db.SCHEMA).
-TABLES = [
-    "accounts", "characters", "items", "char_items", "shops", "shop_items",
-    "monsters", "maps", "quests", "quest_turnins", "quest_rewards", "apops",
-    "cutscenes", "classes", "class_skills", "skills", "kv", "map_pads",
-    "pad_npcs", "map_state",
-]
-# Tables whose `id` is a GENERATED ... AS IDENTITY column: after loading explicit ids we must
-# advance the backing sequence so the next auto-insert doesn't collide.
-IDENTITY_TABLES = ["accounts", "characters"]
+
+TABLES = re.findall(r"CREATE TABLE IF NOT EXISTS\s+(\w+)", db.SCHEMA)
 
 
-def _sqlite_src():
-    conn = sqlite3.connect(db.DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def quoted(name):
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", name):
+        raise ValueError("Unexpected schema identifier")
+    return '"' + name + '"'
 
 
-def _columns(src, table):
-    return [r["name"] for r in src.execute(f"PRAGMA table_info({table})")]
+def source_tables(src):
+    return {row[0] for row in src.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+
+
+def copy_order(src):
+    tables = source_tables(src)
+    if tables != set(TABLES):
+        raise ValueError(f"Source schema differs: missing={sorted(set(TABLES)-tables)}, "
+                         f"extra={sorted(tables-set(TABLES))}. Upgrade a backup of the source first.")
+    if src.execute("PRAGMA foreign_key_check").fetchone():
+        raise ValueError("Source contains broken foreign-key references")
+    dependencies = {t: {r[2] for r in src.execute(f"PRAGMA foreign_key_list({quoted(t)})")
+                        if r[2] != t} for t in tables}
+    ordered = []
+    while dependencies:
+        ready = sorted(t for t, deps in dependencies.items() if not deps - set(ordered))
+        if not ready:
+            raise ValueError("Cyclic foreign keys require an explicit migration")
+        for t in ready:
+            ordered.append(t)
+            dependencies.pop(t)
+    return ordered
+
+
+def columns(src, table):
+    return [r[1] for r in src.execute(f"PRAGMA table_info({quoted(table)})")]
+
+
+def row_digest(rows):
+    def encode(value):
+        if isinstance(value, (bytes, memoryview)):
+            return {"bytes": bytes(value).hex()}
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
+    # Sort row hashes, preserving duplicates, so physical row order is irrelevant.
+    hashes = sorted(hashlib.sha256(json.dumps([encode(row[i]) for i in range(len(row))],
+                    separators=(",", ":"), ensure_ascii=True).encode()).digest() for row in rows)
+    return hashlib.sha256(b"".join(hashes)).hexdigest()
+
+
+def migrate(src, dst, apply=False):
+    order = copy_order(src)
+    present = {r[0] for r in dst.execute("SELECT tablename FROM pg_tables WHERE schemaname=current_schema()")}
+    if present - set(order):
+        raise ValueError(f"Destination has unrelated tables: {sorted(present-set(order))}")
+    occupied = [t for t in present if dst.execute(f"SELECT 1 FROM {quoted(t)} LIMIT 1").fetchone()]
+    if occupied:
+        raise ValueError(f"Destination must be empty; populated tables: {sorted(occupied)}")
+    counts = {t: src.execute(f"SELECT COUNT(*) FROM {quoted(t)}").fetchone()[0] for t in order}
+    print(json.dumps({"mode": "apply" if apply else "plan", "tables": counts}, indent=2))
+    if not apply:
+        dst.rollback()
+        return counts
+    try:
+        # Schema DDL is transactional on PostgreSQL. Do not invoke db.init's data migrations.
+        dst.executescript(db._schema_sql())
+        dst.execute("LOCK TABLE " + ",".join(quoted(t) for t in order) + " IN ACCESS EXCLUSIVE MODE")
+        if any(dst.execute(f"SELECT 1 FROM {quoted(t)} LIMIT 1").fetchone() for t in order):
+            raise ValueError("Destination changed after planning")
+        # Include additive columns/indexes from the same initializer used by a fresh server.
+        # The locked destination is empty; replace only its generated initialization markers.
+        db.initialize_connection(dst)
+        dst.execute("DELETE FROM kv")
+        for table in order:
+            cols = columns(src, table)
+            if set(cols) != db._columns(dst, table):
+                raise ValueError(f"Column mismatch for {table}; upgrade the source schema first")
+            selected = ",".join(quoted(c) for c in cols)
+            source = src.execute(f"SELECT {selected} FROM {quoted(table)}").fetchall()
+            if source:
+                dst.executemany(f"INSERT INTO {quoted(table)} ({selected}) VALUES "
+                                f"({','.join('?' for _ in cols)})", source)
+            copied = dst.execute(f"SELECT {selected} FROM {quoted(table)}").fetchall()
+            if len(copied) != len(source) or row_digest(copied) != row_digest(source):
+                raise ValueError(f"Content verification failed for {table}")
+        identities = dst.execute("SELECT table_name,column_name FROM information_schema.columns "
+                                 "WHERE table_schema=current_schema() AND is_identity='YES'").fetchall()
+        for row in identities:
+            table, col = row[0], row[1]
+            maximum = dst.execute(f"SELECT MAX({quoted(col)}) FROM {quoted(table)}").fetchone()[0]
+            if maximum is not None:
+                dst.execute("SELECT setval(pg_get_serial_sequence(?, ?), ?)", (table, col, maximum))
+        dst.commit()
+    except Exception:
+        dst.rollback()
+        raise
+    print(f"Migration verified: {sum(counts.values())} rows across {len(order)} tables")
+    return counts
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, default=db.DB_PATH)
+    parser.add_argument("--apply", action="store_true", help="copy to an empty destination after planning")
+    args = parser.parse_args()
     if db.BACKEND != "postgres":
-        sys.exit("migrate_to_pg: set INFINITY_DB=postgres (+ INFINITY_PG_*) to choose the target")
-
-    db.init()                                  # ensure the target schema exists (idempotent)
-    src = _sqlite_src()
-    dst = db.connect()                         # _PgConnection over psycopg
-    raw = dst._raw                             # underlying psycopg connection
-
-    with raw.cursor() as cur:
-        cur.execute("TRUNCATE " + ", ".join(TABLES) + " RESTART IDENTITY CASCADE")
-
-    total = 0
-    print(f"copying {db.DB_PATH} -> postgres:{os.environ.get('INFINITY_PG_DB', 'infinity')}")
-    for t in TABLES:
-        cols = _columns(src, t)
-        rows = src.execute(f"SELECT {','.join(cols)} FROM {t}").fetchall()
-        if rows:
-            placeholders = ",".join(["%s"] * len(cols))
-            with raw.cursor() as cur:
-                cur.executemany(
-                    f"INSERT INTO {t} ({','.join(cols)}) VALUES ({placeholders})",
-                    [tuple(r) for r in rows])
-        n_src = len(rows)
-        n_dst = dst.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-        assert n_src == n_dst, f"{t}: source {n_src} != target {n_dst}"
-        total += n_src
-        print(f"  {t:16s} {n_src:6d} rows")
-
-    # advance the identity sequences past the highest copied id (default initial is 1, which
-    # would collide with the preserved ids on the next auto-insert otherwise).
-    for t in IDENTITY_TABLES:
-        mx = dst.execute(f"SELECT MAX(id) FROM {t}").fetchone()[0]
-        if mx is not None:
-            dst.execute("SELECT setval(pg_get_serial_sequence(?, 'id'), ?)", (t, mx))
-
-    dst.commit()
-    src.close()
-    print(f"migration OK: {total} rows across {len(TABLES)} tables; identity sequences advanced")
+        parser.error("Set INFINITY_DB=postgres and INFINITY_PG_* for the empty target")
+    src = sqlite3.connect(args.source.resolve().as_uri() + "?mode=ro", uri=True)
+    dst = db.connect()
+    try:
+        src.execute("BEGIN")  # consistent snapshot even if the source file changes
+        migrate(src, dst, apply=args.apply)
+    finally:
+        src.close()
+        dst.close()
 
 
 if __name__ == "__main__":

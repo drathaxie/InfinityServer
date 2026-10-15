@@ -31,6 +31,8 @@ def main():
         acc = c.execute("SELECT id FROM accounts WHERE username='g'").fetchone()["id"]
         c.execute("INSERT INTO characters(account_id, name, gold) VALUES(?,?,0)", (acc, "g"))
         char = c.execute("SELECT * FROM characters WHERE name='g'").fetchone()
+        c.execute('UPDATE characters SET level=5 WHERE id=?', (char['id'],))
+        c.commit()
 
         _mk_item(c, 90001, patterns.WEAPON, "Test Blade")
         _mk_item(c, 90002, patterns.ARMOR, "Test Plate")
@@ -173,16 +175,15 @@ def main():
         # 1=1 anchors: the minted default weapon gem equals the captured "Common Weapon"
         # (UpdatePattern, packets.jsonl line 61958) at its Lvl 5, and its damage range matches
         # the in-game "27-34 DAMAGE" tooltip exactly (Base*(1-+Wild), truncated).
-        assert patterns.default_pattern({"EquipSpot": patterns.WEAPON, "Level": 5}) == \
-            patterns.COMMON_WEAPON_L5, "Power-Up mints the captured Common Weapon gem at Lvl 5"
+        baseline = patterns.default_pattern({"EquipSpot": patterns.WEAPON, "Level": 5})
+        assert all(baseline[k] == v for k,v in patterns.COMMON_WEAPON_L5.items()), \
+            "The v2 L5 weapon baseline retains the captured stats and damage"
         assert patterns.weapon_range(patterns.COMMON_WEAPON_L5) == (27, 34), \
             "weapon range = Base*(1-+Wild) = 27..34 (the captured tooltip)"
         assert patterns.weapon_range({"Base": 0}) is None, "a gear gem (no Base) has no weapon range"
-        # Power Up mints a FIXED Common gem (Base 31) regardless of item level - capture: items
-        # 300/17873/51605 all returned Base 31. (A Lvl-1 item must NOT get a scaled-down Base.)
+        # The authored v2 baseline now scales with level while retaining the L5 anchor.
         for lvl in (1, 5, 50):
-            assert patterns.default_pattern({"EquipSpot": patterns.WEAPON, "Level": lvl})["Base"] == 31, \
-                f"Power Up mints Base 31 at any item level, got level {lvl}"
+            assert patterns.default_pattern({"EquipSpot": patterns.WEAPON, "Level": lvl})["Base"] == 16 + 3*lvl
 
         # Equip a Lvl-5 weapon alone, Power it up, and read the gem contribution in ISOLATION:
         # the weapon gem exposes the 27-34 range and its six stats fold in (LUK->LCK), no HP.
@@ -206,7 +207,7 @@ def main():
         bonus = game.pattern_bonus(c, char["id"])
         assert bonus["hp"] == 17, f"helm gem grants flat 17 HEALTH (captured tooltip), got {bonus['hp']}"
         assert bonus["weapon"] == (27, 34), "the weapon range is unchanged by the helm"
-        assert bonus["STR"] == wbonus["STR"] + 3, "the helm gem's stats add to the weapon gem's"
+        assert bonus["STR"] == wbonus["STR"] + 4, "the level-5 helm gem's stats add to the weapon gem's"
 
     # gems ADD to the base stats (not replace) and fold into MaxHP
     base_char = {"id": 90099, "stat_str": 10, "stat_end": 10, "stat_dex": 10, "stat_int": 10,
@@ -267,8 +268,7 @@ def main():
     # archetype inferred from a gem item's name; non-enhanceable items never roll a gem
     assert patterns.archetype_of("Wizard Armor Gem") == "wizard"
     assert patterns.roll_pattern({"EquipSpot": 1}, quality=9) is None, "a non-gear item can't be gemmed"
-    print(f"drop-gems OK: warrior->STR wizard->INT rogue->DEX healer->WIS; rarity scales Base "
-          f"(31..230) + primary stat ({lo/200:.0f}->{hi/200:.0f})")
+    print(f"drop-gems OK: v2 rarity scales Base and budgeted primary stat ({lo/200:.0f}->{hi/200:.0f})")
 
     print(f"patterns OK: weapon gem Base={rw['pattern']['Base']}, gear gem END={ra['pattern']['END']}, "
           f"persists; apply syncs consume+bounce; Destroy Gem removes loose pattern")

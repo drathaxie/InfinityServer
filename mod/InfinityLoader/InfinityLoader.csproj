@@ -32,6 +32,10 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Assets\StatuePedestal.png" LogicalName="InfinityLoader.StatuePedestal.png" />
+    <EmbeddedResource Include="Assets\UIThemes\doomknight\*.png" LogicalName="InfinityLoader.UIThemes.doomknight.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Assets\UIThemes\chaos\*.png" LogicalName="InfinityLoader.UIThemes.chaos.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Assets\UIThemes\blod\*.png" LogicalName="InfinityLoader.UIThemes.blod.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="LoaderUpdate.ps1" LogicalName="InfinityLoader.LoaderUpdate.ps1" />
 
     <Reference Include="Assembly-CSharp">
       <HintPath>$(AqwiManaged)\Assembly-CSharp.dll</HintPath>
@@ -61,6 +65,10 @@
     <Reference Include="UnityEngine.AnimationModule">
       <!-- Animator/runtimeAnimatorController inspection for the NPC baker runtime capture. -->
       <HintPath>$(AqwiManaged)\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(AqwiManaged)\UnityEngine.JSONSerializeModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.AudioModule">

@@ -2,7 +2,7 @@
 import game
 
 from .registry import register
-from .context import send_obj, load_shop
+from .context import send_obj, load_shop, _is_staff
 
 
 @register("buyItem", "sellItem")
@@ -15,7 +15,18 @@ async def buy_sell(session, writer, cmd, params, msg):
     ).fetchone()
     resp = (game.buy if cmd == "buyItem" else game.sell)(
         session.conn, session.char, params)
+    gem = resp.pop('_patternItem', None)
+    gem_coins = resp.pop('_gemCoins', False)
     await send_obj(writer, resp)
+    if gem is not None and resp.get('Success'):
+        await send_obj(writer, {"Cmd": "addItems", "items": [], "patternItems": [gem], "bankedItems": []})
+        session.char = session.conn.execute('SELECT * FROM characters WHERE id=?', (session.char['id'],)).fetchone()
+        if gem_coins:
+            await send_obj(writer, {"Cmd": "upgradeSync", "Coins": session.char['coins'],
+                "UpgradeDays": game.membership_days(session.char), "UpgradeExpires": session.char['upgrade_expires']})
+        else:
+            await send_obj(writer, {"Cmd": "addGoldXP", "Gold": {"val": -resp['Cost'], "bonus": 0},
+                                   "ExpTotal": session.char['exp']})
     # Live inventory: on a successful buy, also push the canonical add/update
     # packet (ResponseAddOrUpdateItems) so the new item shows without a relog.
     if cmd == "buyItem" and resp.get("Success") and resp.get("item"):
@@ -38,7 +49,9 @@ async def buy_sell(session, writer, cmd, params, msg):
 
 @register("loadShop")
 async def load_shop_cmd(session, writer, cmd, params, msg):
-    await send_obj(writer, load_shop(session.conn, params))
+    if session.char is None:
+        return
+    await send_obj(writer, load_shop(session.conn, params, is_staff=_is_staff(session)))
     print("  [s2c] loadShop")
     return
 

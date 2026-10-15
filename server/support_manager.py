@@ -1,5 +1,6 @@
 """Anonymous-by-design staff support and account activity helpers."""
 import json
+import re
 import time
 
 import db
@@ -19,7 +20,7 @@ def audit(conn, account_id, char_id, actor_type, actor_name, action, *, item_id=
 def history(conn, account_id, limit=100):
     rows = conn.execute(
         "SELECT aa.*,i.name AS item_name FROM account_audit aa "
-        "LEFT JOIN items i ON i.item_id=aa.item_id WHERE aa.account_id=? "
+        "LEFT JOIN items i ON i.id=aa.item_id WHERE aa.account_id=? "
         "ORDER BY aa.created DESC,aa.id DESC LIMIT ?", (int(account_id), min(int(limit), 250))).fetchall()
     return [{"id": int(r["id"]), "action": r["action"], "actorType": r["actor_type"],
              "actor": r["actor_name"], "itemId": r["item_id"], "item": r["item_name"],
@@ -51,7 +52,7 @@ def player(conn, char_id):
         return None
     inv = conn.execute(
         "SELECT ci.item_id,i.name,SUM(ci.quantity) quantity,MAX(ci.banked) banked "
-        "FROM char_items ci JOIN items i ON i.item_id=ci.item_id WHERE ci.char_id=? "
+        "FROM char_items ci JOIN items i ON i.id=ci.item_id WHERE ci.char_id=? "
         "GROUP BY ci.item_id,i.name ORDER BY i.name", (int(char_id),)).fetchall()
     return {"accountId": int(row["account_id"]), "charId": int(row["id"]),
             "username": row["username"], "name": row["name"], "level": int(row["level"]),
@@ -84,7 +85,9 @@ def grant(conn, actor, char_id, kind, value, quantity, reason):
         elif kind == "membership":
             if value <= 0 or value > 3650:
                 return False, "Membership days are outside the allowed range."
-            conn.execute("UPDATE characters SET upgrade_days=upgrade_days+? WHERE id=?", (value, char["id"]))
+            conn.execute("UPDATE characters SET upgrade_days=upgrade_days WHERE id=?", (char["id"],))
+            char = conn.execute("SELECT * FROM characters WHERE id=?", (char["id"],)).fetchone()
+            game.set_membership(conn, char["id"], game.membership_days(char) + value)
             audit(conn, char["account_id"], char["id"], "staff", actor, "staff_grant",
                   currency="membership_days", amount=value, detail=reason)
         elif kind == "item":
@@ -105,23 +108,47 @@ def grant(conn, actor, char_id, kind, value, quantity, reason):
 
 
 def save_code(conn, actor, data):
+    try:
+        return _save_code(conn, actor, data)
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _save_code(conn, actor, data):
     code = (data.get("code") or "").strip().upper()
     rewards = data.get("rewards") or []
-    if not code or len(code) > 64 or not rewards:
+    if not code or len(code) > 64 or not isinstance(rewards, list) or not 1 <= len(rewards) <= 100:
         return False, "Code and at least one reward are required."
+    max_uses = int(data.get('maxUses') or 0)
+    if not 0 <= max_uses <= 2_147_483_647 or data.get('active', True) not in (True, False, 0, 1):
+        return False, "Invalid usage limit or active flag."
     clean = []
     for r in rewards:
+        if not isinstance(r, dict):
+            return False, "Invalid reward."
         kind = str(r.get("type") or "").lower()
         if kind not in ("gold", "coins", "item", "achievement"):
             return False, "Unsupported reward type."
-        value, qty = int(r.get("value")), max(1, min(int(r.get("quantity", 1)), 10000))
+        value, qty = int(r.get("value")), int(r.get("quantity", 1))
+        if not 1 <= value <= 2_147_483_647 or not 1 <= qty <= 10000:
+            return False, "Reward values and quantities must be positive and within the allowed range."
+        field = str(r.get('field') or 'ip25')
+        if kind == 'achievement' and not re.fullmatch(r'ip[0-9]{1,3}', field):
+            return False, "Achievement field must be an ip bitfield, such as ip25."
         if kind == "item" and db.item(conn, value) is None:
             return False, f"Item {value} was not found."
-        clean.append((kind, value, qty, str(r.get("field") or "ip25")))
+        clean.append((kind, value, qty, field))
+    # The browser editor uses this same lock while checking its document version.
+    conn.execute("INSERT INTO kv(k,v) VALUES('editor_lock:redeem','0') "
+                 "ON CONFLICT(k) DO UPDATE SET v=kv.v")
+    existing = conn.execute('SELECT code FROM redeem_codes WHERE LOWER(code)=LOWER(?)', (code,)).fetchone()
+    if existing:
+        code = existing['code']
     conn.execute("INSERT INTO redeem_codes(code,description,max_uses,active,created) VALUES(?,?,?,?,?) "
                  "ON CONFLICT(code) DO UPDATE SET description=excluded.description,"
                  "max_uses=excluded.max_uses,active=excluded.active",
-                 (code, str(data.get("description") or "")[:250], int(data.get("maxUses") or 0),
+                  (code, str(data.get("description") or "")[:250], max_uses,
                   1 if data.get("active", True) else 0, time.time()))
     conn.execute("DELETE FROM redeem_code_rewards WHERE code=?", (code,))
     conn.executemany("INSERT INTO redeem_code_rewards(code,reward_type,reward_value,reward_qty,reward_field) "

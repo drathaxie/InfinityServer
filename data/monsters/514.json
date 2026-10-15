@@ -1,0 +1,92 @@
+{
+  "ID": 514,
+  "Name": "Ghost",
+  "Subtitle": "Lead Animator",
+  "Level": 3,
+  "strLinkage": "CustomizableCharacter-Cutscene",
+  "strElement": "Earth",
+  "sRace": "None",
+  "Class": 33,
+  "Bundle": {
+    "ID": 79081,
+    "Name": "CustomizableCharacter-Cutscene",
+    "Filename": "gameassets/prefab/79081_customizablecharacter-cutscene.unity3d",
+    "VersionContent": 0,
+    "VersionStage": 0,
+    "VersionLive": -1
+  },
+  "HairBundle": {
+    "ID": 45970,
+    "Name": "Default",
+    "Filename": "hair/M/45970_Default_M.unity3d",
+    "VersionContent": 0,
+    "VersionStage": 6,
+    "VersionLive": 6
+  },
+  "bRed": 0,
+  "intRSS": 0,
+  "x": 0.0,
+  "y": 0.0,
+  "scale": 1.0,
+  "scaleMin": 1.0,
+  "scaleMax": 1.0,
+  "nameOverride": "",
+  "Gender": "M",
+  "apopID": -1,
+  "levelOverride": -1,
+  "SkinColor": 10119762,
+  "HairColor": 4946963,
+  "EyeColor": 10092288,
+  "BaseColor": 0,
+  "TrimColor": 0,
+  "AccessoryColor": 0,
+  "HairID": 52,
+  "HairFilename": "hair/M/Default.swf",
+  "HairName": "Default",
+  "HPScale": 1.0,
+  "MPMax": 0,
+  "equippedItems": {
+    "4": {
+      "ID": 101000,
+      "Bundle": {
+        "ID": 78461,
+        "Name": "Ghost's Back Blades Of Spooky Hotness",
+        "Filename": "items/capes/78461_GhostsSpookyBackBlades.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 2,
+        "VersionLive": 2
+      },
+      "PrefabName": "GhostsSpookyBackBlades_capeSlots",
+      "EquipSpot": 4,
+      "ItemType": 15
+    },
+    "3": {
+      "ID": 101001,
+      "Bundle": {
+        "ID": 78462,
+        "Name": "Ghost's Hood Of Spooky Hotness",
+        "Filename": "items/helms/78462_GhostsSpookyHood.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 1,
+        "VersionLive": 1
+      },
+      "PrefabName": "ArmorSlots",
+      "EquipSpot": 3,
+      "ItemType": 12
+    },
+    "7": {
+      "ID": 101002,
+      "Bundle": {
+        "ID": 78463,
+        "Name": "Ghost's Armor Of Spooky Hotness",
+        "Filename": "armors/78463_GhostsSpookyArmor.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 1,
+        "VersionLive": 1
+      },
+      "PrefabName": "ArmorSlots",
+      "EquipSpot": 7,
+      "ItemType": 22
+    }
+  }
+}

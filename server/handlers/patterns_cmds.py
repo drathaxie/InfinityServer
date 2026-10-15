@@ -99,3 +99,55 @@ async def dust_pattern(session, writer, cmd, params, msg):
     print(f"  [s2c] dustPattern pattern={char_pattern_id} loot={loot_id} "
           f"-> {'+' + str(resp['Gained']) if resp['bSuccess'] else 'miss'} dust")
     return
+
+
+async def _send_trait_result(session, writer, resp, what):
+    """Deliver a trait change. A gear gem rides UpdatePattern (which is how the client applies a
+    pattern to an inventory item, and which also carries the stat refresh when the gear is worn).
+    A loose bag gem has no UpdatePattern path at all -- Inventory.UpdatePattern resolves ItemID
+    against gear and bank only -- so its refresh goes out as addItems.patternItems, the same
+    channel the equipPattern bounce already uses."""
+    target = resp.pop("_target", None)
+    key = resp.pop("_key", None)
+    if not resp.get("Success"):
+        await send_obj(writer, resp)
+        print("  [s2c] %s -> %s" % (what, resp.get("errorMessage")))
+        return
+    if target == "gear":
+        resp["stats"] = _refresh_pattern_stats(session)
+        await send_obj(writer, resp)
+    else:
+        await send_obj(writer, {"Cmd": "addItems", "items": [], "bankedItems": [],
+                                "patternItems": [{"CharPatternID": int(key),
+                                                  "pattern": resp["pattern"], "LootID": -1}]})
+    pat = resp.get("pattern") or {}
+    print("  [s2c] %s -> %s slots %s/%s" % (what, target, pat.get("SlotsUsed"),
+                                            pat.get("MaxSlots")))
+
+
+@register("applyTrait")
+async def apply_trait(session, writer, cmd, params, msg):
+    # RequestApplyTrait Params=[ShopID, ShopItemID, CharItemID, CharPatternID]. PatternPreview
+    # sends the gear as a CATALOG id and -1 for the gem, or the gem as a CharPatternID and -1
+    # for the gear. It has already checked the duplicate/slot rules client-side; the server
+    # re-checks them because that check is the only thing standing between a crafted packet and
+    # an over-stuffed gem.
+    if session.char is None or len(params) < 4:
+        return
+    resp = patterns.apply_trait(session.conn, session.char["id"],
+                                params[0], params[1], params[2], params[3])
+    await _send_trait_result(session, writer, resp, "applyTrait")
+    return
+
+
+@register("removeTrait")
+async def remove_trait(session, writer, cmd, params, msg):
+    # RequestRemoveTrait Params=[TraitItemID, CharItemID, CharPatternID] -> frees the slots that
+    # trait was spending. The trait itself is consumed, which is what the client confirmation
+    # promises ("It frees N slots", not "returns the trait").
+    if session.char is None or len(params) < 3:
+        return
+    resp = patterns.remove_trait(session.conn, session.char["id"],
+                                 params[0], params[1], params[2])
+    await _send_trait_result(session, writer, resp, "removeTrait")
+    return

@@ -1,7 +1,7 @@
 {
   "ID": 180,
-  "nextElementId": 36,
-  "name": "Sir Fainal reuse",
+  "nextElementId": 37,
+  "name": "Sir Fainal (Battleon)",
   "bgImage": "",
   "bgImageScale": 1,
   "startingPanels": [
@@ -43,7 +43,7 @@
           "changeBoxColor": "#FFFFFF",
           "nameplateTextColor": "#FFFFFF",
           "nameplateBoxColor": "#000000",
-          "text": "Oh? No, I don't got anything new for you. I just saw everyone gathering around looking important, and I wanted to look cool too, so I joined them.\n\nAlthough... you could help me fight the Undead at the /Graveyard if you haven't already...\n",
+          "text": "@name ! I'm so glad to find you in town. A once-in-a-lifetime asteroid is on its way to our world. Rumor has it you can can forge the first ever <b>Infinity Star Sword</b> there!\n\nAlso, a Lich is creating horde of Undead that is threatening to invade town. Join me in the graveyard to stop them! ",
           "hideLead": false,
           "borderless": false,
           "addNameplate": false,
@@ -53,13 +53,40 @@
           "requirements": []
         },
         {
+          "ID": 36,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "Join",
+          "label": "Goto J6's Space Ship (Star Sword)",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "asteroid,Enter,Spawn",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false,
+          "sfxString": "",
+          "musicID": -1,
+          "staffed": false
+        },
+        {
           "ID": 33,
           "type": "Button",
           "targets": [],
           "acceptQuests": [],
           "turninQuests": [],
           "action": "Join",
-          "label": "Fight the Undead at Graveyard!",
+          "label": "Goto Graveyard",
           "subtitle": "",
           "intMin": 0,
           "intMax": 0,
@@ -92,14 +119,15 @@
           "link": "",
           "text": "",
           "icon": "",
-          "reqCondition": "AND"
+          "reqCondition": "AND",
+          "iconOverride": "none"
         }
       ]
     }
   ],
   "actors": [
     {
-      "npcid": 382,
+      "npcid": 521,
       "name": "Sir Fainal",
       "subtitle": "Paladin in Training",
       "targetNode": 0,

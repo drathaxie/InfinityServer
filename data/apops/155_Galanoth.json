@@ -1,0 +1,241 @@
+{
+  "ID": 155,
+  "nextElementId": 35,
+  "name": "Galanoth",
+  "bgImage": "",
+  "bgImageScale": 1,
+  "startingPanels": [
+    1,
+    2
+  ],
+  "panels": [
+    {
+      "PID": 2,
+      "name": "Right Panel Start",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": []
+    },
+    {
+      "PID": 1,
+      "name": "Middle Panel Start",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 29,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Every day is a good day for hunting Dragons! Please come back later, I must finish setting up this ballista.",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "QNC",
+              "ID": 173,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "AND"
+        },
+        {
+          "ID": 34,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Climb Aboard!",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "Quest",
+              "ID": 173,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            },
+            {
+              "RID": 2,
+              "Type": "QNC",
+              "ID": 177,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "label": "undefined**",
+          "reqCondition": "AND"
+        },
+        {
+          "ID": 33,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Well done! \n",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "Quest",
+              "ID": 177,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "label": "undefined*",
+          "reqCondition": "AND"
+        },
+        {
+          "ID": 32,
+          "type": "Button",
+          "targets": [
+            173,
+            178,
+            175,
+            177
+          ],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "ShowQuests",
+          "label": "Quest",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "QNC",
+              "ID": 177,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        },
+        {
+          "ID": 31,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": "",
+          "icon": "",
+          "reqCondition": "AND"
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 225,
+      "name": "Galanoth",
+      "subtitle": "DragonSlayer",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 1,
+  "IsSingleAction": false
+}

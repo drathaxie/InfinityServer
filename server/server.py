@@ -18,17 +18,21 @@ import asyncio
 import json
 import sys
 import time
+import os
 
 import db
+import battlepets
 import seed
 import maps
 import world
 import combat
+import monstermove
 import montemplates
 import forge
 import loot
 import parties
 import guilds
+import game
 
 import handlers
 from handlers.context import (Session, send_str, send_obj, _players, _is_staff,  # noqa: F401
@@ -39,6 +43,14 @@ from handlers.context import (Session, send_str, send_obj, _players, _is_staff, 
 
 HOST = "0.0.0.0"
 PORT = 5588  # must match docs/RedirectPatch.cs
+MAX_FRAME_BYTES = 1024 * 1024  # room for authored staff graphs, bounded for every peer
+HANDSHAKE_SECONDS = 20
+FRAME_SECONDS = 30
+MAX_CONNECTIONS = int(os.environ.get("INFINITY_MAX_CONNECTIONS", "256"))
+MAX_CONNECTIONS_PER_IP = int(os.environ.get("INFINITY_MAX_CONNECTIONS_PER_IP", "16"))
+COMMAND_RATE = 240  # hitstream geometry can report every rendered frame
+COMMAND_BURST = 480
+_connections = {}
 
 # Client-side acks that need no s2c reply (movement confirms).
 NOOP_CMDS = {"MoveOK", "mv"}
@@ -55,27 +67,68 @@ STAFF_CMDS = {
 
 async def handle_client(reader, writer):
     peer = writer.get_extra_info("peername")
+    ip = str(peer[0]) if peer else "unknown"
+    if sum(_connections.values()) >= MAX_CONNECTIONS or _connections.get(ip, 0) >= MAX_CONNECTIONS_PER_IP:
+        writer.close()
+        await writer.wait_closed()
+        return
+    _connections[ip] = _connections.get(ip, 0) + 1
     print(f"[+] client connected: {peer}")
     session = Session(writer)
     buf = bytearray()
+    opened = time.monotonic()
+    partial_since = None
+    budget, last_budget = COMMAND_BURST, opened
     try:
         while True:
-            chunk = await reader.read(65536)
+            now = time.monotonic()
+            # Authenticated players can remain AFK without a read deadline.
+            timeout = (HANDSHAKE_SECONDS - (now - opened)) if session.char is None else None
+            if partial_since is not None:
+                frame_timeout = FRAME_SECONDS - (now - partial_since)
+                timeout = frame_timeout if timeout is None else min(timeout, frame_timeout)
+            if timeout is not None and timeout <= 0:
+                break
+            chunk = await asyncio.wait_for(reader.read(65536), timeout)
             if not chunk:
                 break
+            if not buf:
+                partial_since = time.monotonic()
             buf.extend(chunk)
             while b"\x00" in buf:
                 idx = buf.index(0)
+                if idx > MAX_FRAME_BYTES:
+                    return
                 raw = bytes(buf[:idx])
                 del buf[: idx + 1]
                 if raw:
+                    now = time.monotonic()
+                    budget = min(COMMAND_BURST, budget + (now - last_budget) * COMMAND_RATE) - 1
+                    last_budget = now
+                    if budget < 0:
+                        return
                     await dispatch(session, writer, raw)
-    except (ConnectionResetError, asyncio.IncompleteReadError):
+                    if writer.is_closing():
+                        return
+                partial_since = time.monotonic() if buf else None
+            if len(buf) > MAX_FRAME_BYTES:
+                break
+    except (ConnectionError, asyncio.IncompleteReadError, asyncio.TimeoutError):
         pass
     finally:
-        cleanup_session(session)
-        print(f"[-] client disconnected: {peer}")
-        writer.close()
+        try:
+            cleanup_session(session)
+        finally:
+            session.close()  # also release the account lock if cleanup raised
+            _connections[ip] -= 1
+            if not _connections[ip]:
+                _connections.pop(ip, None)
+            print(f"[-] client disconnected: {peer}")
+            writer.close()
+            try:
+                await asyncio.wait_for(writer.wait_closed(), 2)
+            except (ConnectionError, asyncio.TimeoutError):
+                pass
 
 
 def cleanup_session(session):
@@ -106,12 +159,46 @@ def cleanup_session(session):
 
 async def dispatch(session, writer, raw):
     try:
+        if session.online_lease is not None and not session.online_lease.valid():
+            writer.close()
+            return
+        if session.token is not None:
+            current = game.resolve_session(session.conn, session.username, session.token)
+            if current is None:
+                if session.member:
+                    combat.cancel_player_actions(session.member.uid)
+                writer.close()
+                return
+            session.char = current  # current role, membership and balance on every command
+        await _dispatch(session, writer, raw)
+        if session._conn is not None:
+            session.conn.commit()  # also end read-only PostgreSQL transactions
+    except (ValueError, TypeError, KeyError, IndexError):
+        if session._conn is not None:
+            session.conn.rollback()
+        print("  [c2s] rejected malformed command")
+    except Exception:
+        if session._conn is not None:
+            session.conn.rollback()
+        raise
+
+
+async def _dispatch(session, writer, raw):
+    try:
         msg = json.loads(raw.decode("utf-8", errors="replace"))
     except Exception:
         print(f"  [c2s] <unparseable {len(raw)}B>")
         return
+    if not isinstance(msg, dict):
+        return
     cmd = msg.get("Cmd") or msg.get("cmd") or "(none)"
     params = msg.get("Params") or []
+    if not isinstance(cmd, str) or len(cmd) > 64 or not isinstance(params, list) or len(params) > 4096:
+        return
+    if any(not isinstance(p, (str, int, float, bool, type(None))) for p in params):
+        return
+    if session.char is None and cmd != "Login":
+        return
     print(f"  [c2s] {cmd}")
 
     # Track the monster the client is acting on (m:<MonMapID>) so dev commands
@@ -142,8 +229,37 @@ async def dispatch(session, writer, raw):
     if cmd in NOOP_CMDS:
         return                                  # movement acks; nothing to send back
     print(f"        [unhandled] '{cmd}' -> logged to unhandled.jsonl")
-    log_unhandled(cmd, msg)
+    log_unhandled(cmd, {"Cmd": cmd, "parameterCount": len(params)})
     return
+
+
+async def session_revocation_loop():
+    """Close idle revoked sockets too; the command gate rejects them immediately."""
+    while True:
+        await asyncio.sleep(2)
+        conn = None
+        try:
+            for session in list(_players.values()):
+                if session.online_lease is not None and not session.online_lease.valid():
+                    if session.member:
+                        combat.cancel_player_actions(session.member.uid)
+                    session.writer.close()
+                    continue
+                if session.token is None:
+                    continue
+                if conn is None:
+                    conn = db.connect()
+                current = game.resolve_session(conn, session.username, session.token)
+                if current is None:
+                    combat.cancel_player_actions(session.member.uid)
+                    session.writer.close()
+                else:
+                    session.char = current
+        except Exception as exc:
+            print(f"[sessions] revocation check failed: {type(exc).__name__}")
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 _mon_swing = {}             # (area, "m:ID") -> last swing time (AI loop pacing)
@@ -324,12 +440,23 @@ async def ai_loop():
                 except Exception as exc:                # never let a late packet kill the loop
                     print(f"  [rules] delayed packet dropped: {exc!r}")
             # monsters swing at the players they've aggro'd (unless stunned)
-            for area, mon, uid in combat.engagements():
+            _engaged = combat.engagements()
+            # Anything that wandered off and is no longer engaged walks home (monLeash). Doing
+            # it by reconciliation covers every way aggro ends — left, died, killed, timed out.
+            for _area, _pkt in monstermove.leash_idle({(a, m) for a, m, _ in _engaged}):
+                world.broadcast(_area, _pkt)
+            for area, mon, uid in _engaged:
                 mem = next((m for m in world.members(area) if m.uid == uid), None)
                 if mem is None:                     # target left the area
                     combat.disengage(area, mon)
                     _mon_swing.pop((area, mon), None)
                     continue
+                # Chase: walk the monster toward the player it is fighting (monWalk). Returns
+                # None when it is already in range, moved too recently, is scenery (NoMove), or
+                # would be dragged past its leash.
+                walk = monstermove.chase(area, mon, mem.x, mem.y, now)
+                if walk is not None:
+                    world.broadcast(area, walk)
                 if combat.is_stunned(area, mon):    # Incapacitate etc. -> can't act
                     continue
                 # Telegraphed tile skills (Ragnafluff's thin bars / scanning cross / firewalls):
@@ -398,6 +525,11 @@ async def ai_loop():
                 if not combat.monster_alive(area, target):   # dead/respawning -> stop
                     combat.auto_disengage(uid)
                     continue
+                pet_error = battlepets.check_skill(sess, {'data':data,'forge':fdata}, target)
+                if pet_error:
+                    combat.auto_disengage(uid)
+                    await send_obj(sess.writer, combat.cast_failure(uid, 0, pet_error))
+                    continue
                 if combat.ult_armed(uid):
                     # An armed ultimate belongs to the PLAYER's own attack press: firing it
                     # from here spends the pool but spawns no visual, because an
@@ -442,9 +574,15 @@ async def main():
     _c.close()
     server = await asyncio.start_server(handle_client, HOST, PORT)
     addrs = ", ".join(str(s.getsockname()) for s in server.sockets)
-    store = "Postgres" if db.BACKEND == "postgres" else f"SQLite: {db.DB_PATH}"
+    store = ("Postgres" if db.BACKEND == "postgres" else
+             # Name the actual database: this line is the only startup evidence of WHICH
+             # store the server came up on, and it read "SQLite" straight through the
+             # cutover to the shared MariaDB.
+             f"MariaDB: {os.environ.get('INFINITY_MYSQL_DB', 'aqwworlds')} (shared with SwordShine)"
+             if db.BACKEND in ("mysql", "mariadb") else f"SQLite: {db.DB_PATH}")
     print(f"InfinityServer listening on {addrs}  ({store})")
     asyncio.create_task(ai_loop())          # autonomous monster combat
+    asyncio.create_task(session_revocation_loop())
     async with server:
         await server.serve_forever()
 

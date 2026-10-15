@@ -1,0 +1,188 @@
+{
+  "ID": 154,
+  "nextElementId": 34,
+  "name": "Booker",
+  "bgImage": "",
+  "bgImageScale": 1,
+  "startingPanels": [
+    1,
+    2
+  ],
+  "panels": [
+    {
+      "PID": 2,
+      "name": "Right Panel Start",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": []
+    },
+    {
+      "PID": 1,
+      "name": "Middle Panel Start",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 33,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Help! ",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "QNC",
+              "ID": 171,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "label": "undefined*",
+          "reqCondition": "AND"
+        },
+        {
+          "ID": 29,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Oh wow, thank you for saving me! I saw Twilly heading down the road - maybe you can go catch up!\n",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "Quest",
+              "ID": 171,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "AND"
+        },
+        {
+          "ID": 32,
+          "type": "Button",
+          "targets": [
+            170,
+            171,
+            172
+          ],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "ShowQuests",
+          "label": "Quest",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "QNC",
+              "ID": 172,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 0,
+              "Operator": ">=",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        },
+        {
+          "ID": 31,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "requirements": [],
+          "link": "",
+          "text": "",
+          "icon": "",
+          "reqCondition": "AND"
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 357,
+      "name": "Booker",
+      "subtitle": "Shop Assistant",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 1
+}

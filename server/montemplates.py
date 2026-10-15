@@ -256,7 +256,7 @@ def editor_save(conn, payload):
             iid = int(d.get("item_id"))
         except (TypeError, ValueError):
             continue
-        if conn.execute("SELECT 1 FROM items WHERE item_id=?", (iid,)).fetchone() is None:
+        if conn.execute("SELECT 1 FROM items WHERE id=?", (iid,)).fetchone() is None:
             return {"ok": False, "msg": f"item {iid} isn't in the catalog (add it first)."}
         conn.execute("INSERT INTO monster_drops(mon_id, item_id, rate, quantity) VALUES(?,?,?,?) "
                      "ON CONFLICT(mon_id, item_id) DO UPDATE SET rate=excluded.rate, "

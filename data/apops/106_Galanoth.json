@@ -1,6 +1,6 @@
 {
   "ID": 106,
-  "nextElementId": 35,
+  "nextElementId": 36,
   "name": "Galanoth",
   "bgImage": "",
   "bgImageScale": 1,
@@ -99,6 +99,32 @@
           "lockedMsg": "",
           "lockedMode": "Hide",
           "closePanels": false
+        },
+        {
+          "ID": 35,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false,
+          "sfxString": "",
+          "musicID": -1
         }
       ]
     },

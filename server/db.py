@@ -11,8 +11,12 @@ connection-string swap, not a rewrite.
 """
 import json
 import os
+import datetime
 import sqlite3
 import pathlib
+import uuid
+import atexit
+import re
 from collections.abc import Mapping
 
 import monrecord
@@ -29,6 +33,12 @@ BACKEND = os.environ.get("INFINITY_DB", "sqlite").lower()
 # On Postgres, tests get isolation via a throwaway schema (the equivalent of SQLite's temp
 # DB file) so they never touch the migrated `public` data. "public" = the real database.
 _PG_SCHEMA = "public"
+_PG_TEST_SCHEMAS = set()
+
+# MySQL has no schema-within-a-database: test isolation uses a throwaway DATABASE instead.
+# None = use the configured INFINITY_MYSQL_DB.
+_MY_DB = None
+_MY_TEST_DBS = set()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -37,7 +47,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     password      TEXT,                  -- PBKDF2 hash (pbkdf2_sha256$iter$salt$hash); legacy plaintext upgrades on login
     created       REAL,
     last_accessed REAL,
-    session_token TEXT                    -- random API-issued token the game-server Login must present
+    session_token TEXT,                   -- random API-issued token the game-server Login must present
+    session_version INTEGER NOT NULL DEFAULT 0,
+    token_expires REAL NOT NULL DEFAULT 0
 );
 
 -- A character mirrors AQ2D's playerInfo + user: identity, currencies, level/exp,
@@ -91,7 +103,7 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE TABLE IF NOT EXISTS char_items (
     char_item_id    INTEGER PRIMARY KEY,
     char_id         INTEGER NOT NULL,
-    item_id         INTEGER NOT NULL,
+    item_id         INTEGER UNSIGNED NOT NULL,
     quantity        INTEGER NOT NULL DEFAULT 1,
     equipped        INTEGER NOT NULL DEFAULT 0,
     banked          INTEGER NOT NULL DEFAULT 0,
@@ -101,21 +113,52 @@ CREATE TABLE IF NOT EXISTS char_items (
     meta            TEXT NOT NULL DEFAULT '',      -- per-instance house-item metadata (cid:...)
     purchase_date   TEXT,
     FOREIGN KEY (char_id) REFERENCES characters(id),
-    FOREIGN KEY (item_id) REFERENCES items(item_id)
+    FOREIGN KEY (item_id) REFERENCES items(id)
 );
 CREATE INDEX IF NOT EXISTS idx_char_items_char ON char_items(char_id);
 
+-- Translation between the Flash server's item IDs (SwordShine) and ours, for a shared
+-- inventory across the two clients.
+--
+-- SwordShine's IDs are real AE item IDs, pulled from in-game shops -- except its private
+-- band at 1000000+, which holds custom content that used to squat real AE IDs and was
+-- renumbered out of the way.
+--
+-- Our catalog carries two ID spaces of its own. Below 900000 the IDs are real AE item
+-- IDs. At 900000+ they are SYNTHETIC: the source API returned names and assets but no
+-- IDs, so the importer derived one per asset -- item_id = 900000 + <AE asset id>, which
+-- holds for every row in that band. Asset ids and item ids are different namespaces, so
+-- the two catalogs cannot be translated arithmetically; this table is the bridge. It is
+-- built by matching asset filename stems first and names second.
+--
+-- MANY-TO-ONE: several SwordShine items legitimately share one of ours, because singular
+-- and dual-wield variants are distinct in AQW but share a Unity asset ("Blessed Naval
+-- Cutlass" and "Dual Blessed Cutlasses" are both item 928860). So sword_item_id is unique
+-- and infinity_item_id deliberately is NOT.
+--
+-- confidence: A_ALIGNED (ids already agree) | B_CONFIRMED (asset stem and/or name agree)
+--             | C_NAME_ONLY (name agrees, asset does not -- review before trusting)
+CREATE TABLE IF NOT EXISTS sword_item_map (
+    sword_item_id    INTEGER UNSIGNED PRIMARY KEY,
+    infinity_item_id INTEGER UNSIGNED NOT NULL,
+    confidence       TEXT NOT NULL,
+    basis            TEXT NOT NULL DEFAULT '',
+    sword_name       TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (infinity_item_id) REFERENCES items(id)
+);
+CREATE INDEX IF NOT EXISTS idx_sword_item_map_infinity ON sword_item_map(infinity_item_id);
+
 CREATE TABLE IF NOT EXISTS ac_item_buybacks (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_id         INTEGER NOT NULL,
-    char_id            INTEGER NOT NULL,
-    item_id            BIGINT NOT NULL,
+    account_id         INTEGER UNSIGNED NOT NULL,
+    char_id            INTEGER UNSIGNED NOT NULL,
+    item_id            INTEGER UNSIGNED NOT NULL,
     remaining_quantity INTEGER NOT NULL DEFAULT 1,
     unit_price         INTEGER NOT NULL,
     sold_at            REAL NOT NULL,
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     FOREIGN KEY (char_id) REFERENCES characters(id),
-    FOREIGN KEY (item_id) REFERENCES items(item_id)
+    FOREIGN KEY (item_id) REFERENCES items(id)
 );
 CREATE INDEX IF NOT EXISTS idx_ac_buybacks_account ON ac_item_buybacks(account_id, sold_at);
 
@@ -123,15 +166,15 @@ CREATE INDEX IF NOT EXISTS idx_ac_buybacks_account ON ac_item_buybacks(account_i
 -- row; redemption consumes one token quantity and grants one selected item.
 CREATE TABLE IF NOT EXISTS token_redemptions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_id    INTEGER NOT NULL,
-    char_id       INTEGER NOT NULL,
-    token_item_id BIGINT NOT NULL,
-    item_id       BIGINT NOT NULL,
+    account_id    INTEGER UNSIGNED NOT NULL,
+    char_id       INTEGER UNSIGNED NOT NULL,
+    token_item_id INTEGER UNSIGNED NOT NULL,
+    item_id       INTEGER UNSIGNED NOT NULL,
     redeemed      REAL NOT NULL,
     FOREIGN KEY (account_id) REFERENCES accounts(id),
     FOREIGN KEY (char_id) REFERENCES characters(id),
-    FOREIGN KEY (token_item_id) REFERENCES items(item_id),
-    FOREIGN KEY (item_id) REFERENCES items(item_id)
+    FOREIGN KEY (token_item_id) REFERENCES items(id),
+    FOREIGN KEY (item_id) REFERENCES items(id)
 );
 
 -- Player sponsorships of a catalog item (the AE Kickstarter "Benevolent Founder" credit:
@@ -141,12 +184,12 @@ CREATE TABLE IF NOT EXISTS token_redemptions (
 -- has_house = whether that sponsor has a visitable house on THIS server (drives the client's
 -- "visit home" button); 0 for off-server credits (e.g. the original AE sponsor).
 CREATE TABLE IF NOT EXISTS item_sponsors (
-    item_id      INTEGER NOT NULL,
+    item_id      INTEGER UNSIGNED NOT NULL,
     player_name  TEXT NOT NULL,
     has_house    INTEGER NOT NULL DEFAULT 1,
     seq          INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (item_id, player_name),
-    FOREIGN KEY (item_id) REFERENCES items(item_id)
+    FOREIGN KEY (item_id) REFERENCES items(id)
 );
 CREATE INDEX IF NOT EXISTS idx_item_sponsors_item ON item_sponsors(item_id);
 
@@ -172,24 +215,34 @@ CREATE TABLE IF NOT EXISTS redeem_code_rewards (
 );
 CREATE TABLE IF NOT EXISTS redeem_code_uses (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_id   INTEGER NOT NULL,
+    account_id   INTEGER UNSIGNED NOT NULL,
     code         TEXT NOT NULL,
     description  TEXT NOT NULL DEFAULT '',
     redeemed_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_redeem_rewards_code ON redeem_code_rewards(code);
 CREATE INDEX IF NOT EXISTS idx_redeem_uses_account ON redeem_code_uses(account_id);
+-- Separate unique claims preserve historical duplicate ledger rows without deleting audit data.
+CREATE TABLE IF NOT EXISTS redeem_code_claims (
+    account_id INTEGER UNSIGNED NOT NULL,
+    code TEXT NOT NULL,
+    PRIMARY KEY (account_id, code)
+);
+CREATE TABLE IF NOT EXISTS revoked_browser_sessions (
+    token_hash TEXT PRIMARY KEY,
+    expires REAL NOT NULL
+);
 
 -- Privacy-preserving economy/support ledger. Internal ids and game usernames are enough for
 -- support investigations; deliberately do not store IP addresses, email, hardware or device ids.
 CREATE TABLE IF NOT EXISTS account_audit (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_id  INTEGER NOT NULL,
-    char_id     INTEGER,
+    account_id  INTEGER UNSIGNED NOT NULL,
+    char_id     INTEGER UNSIGNED,
     actor_type  TEXT NOT NULL,
     actor_name  TEXT NOT NULL DEFAULT '',
     action      TEXT NOT NULL,
-    item_id     BIGINT,
+    item_id     INTEGER UNSIGNED,
     quantity    INTEGER,
     currency    TEXT,
     amount      INTEGER,
@@ -203,13 +256,13 @@ CREATE INDEX IF NOT EXISTS idx_account_audit_action ON account_audit(action, cre
 -- server-side snapshot. DynamicStatue carries cid:<char_id> in houseItem.Meta;
 -- the image endpoint resolves that stable id through this table.
 CREATE TABLE IF NOT EXISTS statues (
-    char_id      INTEGER PRIMARY KEY,
-    item_id      INTEGER NOT NULL,
+    char_id      INTEGER UNSIGNED PRIMARY KEY,
+    item_id      INTEGER UNSIGNED NOT NULL,
     generated_at REAL NOT NULL,
     snapshot     TEXT NOT NULL,
     image        BLOB,
     FOREIGN KEY (char_id) REFERENCES characters(id),
-    FOREIGN KEY (item_id) REFERENCES items(item_id)
+    FOREIGN KEY (item_id) REFERENCES items(id)
 );
 
 -- Loose gem inventory (the enhancement "gem bag" — initPlayer.patterns[]). A gem the player
@@ -218,7 +271,7 @@ CREATE TABLE IF NOT EXISTS statues (
 -- (char_items.pattern_json); removePattern returns it here. Class-based rarity gems (2026-07-02).
 CREATE TABLE IF NOT EXISTS char_patterns (
     char_pattern_id INTEGER PRIMARY KEY,
-    char_id         INTEGER NOT NULL,
+    char_id         INTEGER UNSIGNED NOT NULL,
     pattern_json    TEXT NOT NULL,                 -- the loose gem (ItemPattern) JSON
     FOREIGN KEY (char_id) REFERENCES characters(id)
 );
@@ -235,12 +288,12 @@ CREATE TABLE IF NOT EXISTS shops (
 CREATE TABLE IF NOT EXISTS shop_items (
     shop_id         INTEGER NOT NULL,
     shop_item_id    INTEGER NOT NULL,
-    item_id         INTEGER NOT NULL,
+    item_id         INTEGER UNSIGNED NOT NULL,
     cost            INTEGER NOT NULL DEFAULT 0,
     coins           INTEGER NOT NULL DEFAULT 0,
     quantity_remain INTEGER NOT NULL DEFAULT -1,
     PRIMARY KEY (shop_id, shop_item_id),
-    FOREIGN KEY (item_id) REFERENCES items(item_id)
+    FOREIGN KEY (item_id) REFERENCES items(id)
 );
 
 -- ===================== CATALOG (shared content) ========================
@@ -261,11 +314,11 @@ CREATE TABLE IF NOT EXISTS monsters (
 -- rows here drops nothing — there is no global fallback pool.
 CREATE TABLE IF NOT EXISTS monster_drops (
     mon_id   INTEGER NOT NULL,
-    item_id  INTEGER NOT NULL,
+    item_id  INTEGER UNSIGNED NOT NULL,
     rate     REAL    NOT NULL DEFAULT 0.1,   -- 0..1 independent chance this item drops on a kill
     quantity INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (mon_id, item_id),
-    FOREIGN KEY (item_id) REFERENCES items(item_id)
+    FOREIGN KEY (item_id) REFERENCES items(id)
 );
 
 -- Global drop table: items EVERY monster can drop, ON TOP OF its own monster_drops (e.g. gems
@@ -273,10 +326,10 @@ CREATE TABLE IF NOT EXISTS monster_drops (
 -- INTENTIONAL additive pool (seeded from data/global_drops.json) — NOT the removed band-aid
 -- fallback that masked monsters lacking an authored table.
 CREATE TABLE IF NOT EXISTS global_drops (
-    item_id  INTEGER NOT NULL PRIMARY KEY,
+    item_id  INTEGER UNSIGNED NOT NULL PRIMARY KEY,
     rate     REAL    NOT NULL DEFAULT 0.05,
     quantity INTEGER NOT NULL DEFAULT 1,
-    FOREIGN KEY (item_id) REFERENCES items(item_id)
+    FOREIGN KEY (item_id) REFERENCES items(id)
 );
 
 -- Map/Area catalog (the AreaJoin metadata). Cell geometry stays in the .unity3d
@@ -349,7 +402,7 @@ CREATE TABLE IF NOT EXISTS quest_rewards (
     quest_id INTEGER NOT NULL,
     idx      INTEGER NOT NULL,
     kind     TEXT,                -- QuestRewardType: Static / Roll / Choose / Random
-    item_id  INTEGER,
+    item_id  INTEGER UNSIGNED,
     quantity INTEGER,
     rate     REAL    NOT NULL DEFAULT 0,   -- QuestRewardItem.Rate (drop chance for Roll/Random)
     hidden   INTEGER NOT NULL DEFAULT 0,   -- QuestRewardItem.Hidden
@@ -441,14 +494,20 @@ CREATE INDEX IF NOT EXISTS idx_asset_bundles_type ON asset_bundles(type);
 -- blob under kv['base_classes'] (only the 24 default-class hairs AE's base-classes response
 -- carries); promoted to a real table, same pattern as monrecord/itemrecord, so the full harvested
 -- hairstyle roster (capture/harvest_bundle catalog, Type=="HAIR") can live here instead.
+-- SHARED with SwordShine, like `items`: its hair rows are real AE captures, so the two
+-- catalogues are the same catalogue seen twice (16 of the 24 hairs we hold at a real id sit
+-- at the SAME id there). Columns are SwordShine's, because it owns the table on MariaDB.
+-- `File` is AQW's Flash asset and `unity_file`/`bundle` are ours: different files for the
+-- same hair, so both ride on the one row. The Unity client renders from `bundle`.
 CREATE TABLE IF NOT EXISTS hairs (
-    hair_id  INTEGER PRIMARY KEY,
-    name     TEXT,
-    gender   TEXT,          -- "M" / "F"
-    filename TEXT,          -- hair/<gender>/<Name>.swf
-    bundle   TEXT            -- {ID,Name,Filename,VersionStage,VersionLive} JSON
+    id         INTEGER PRIMARY KEY,
+    Gender     TEXT,          -- "M" / "F"
+    Name       TEXT,
+    File       TEXT,          -- AQW:   hair/<Gender>/<Name>.swf
+    unity_file TEXT,          -- AQW:I: hair/<Gender>/<assetid>_<Name>_<Gender>.unity3d
+    bundle     TEXT           -- AQW:I: {ID,Name,Filename,VersionStage,VersionLive} JSON
 );
-CREATE INDEX IF NOT EXISTS idx_hairs_gender ON hairs(gender);
+CREATE INDEX IF NOT EXISTS idx_hairs_gender ON hairs(Gender);
 
 -- Soundtrack/audio bundles (harvest catalog Type MUSIC/AUDIO). The client streams these by
 -- bundle id (data/getsoundtracks); this is the catalog of what exists.
@@ -477,13 +536,13 @@ CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 -- Per-character quest PROGRESS (the quest catalog lives in `quests`/`quest_turnins`;
 -- these track what each character has accepted/completed and per-objective counters).
 CREATE TABLE IF NOT EXISTS char_quests (
-    char_id  INTEGER NOT NULL,
+    char_id  INTEGER UNSIGNED NOT NULL,
     quest_id INTEGER NOT NULL,
     status   INTEGER NOT NULL DEFAULT 1,     -- 1=accepted, 2=completed
     PRIMARY KEY (char_id, quest_id)
 );
 CREATE TABLE IF NOT EXISTS char_quest_objectives (
-    char_id  INTEGER NOT NULL,
+    char_id  INTEGER UNSIGNED NOT NULL,
     qoid     INTEGER NOT NULL,               -- objective id (Turnin.QOID)
     quantity INTEGER NOT NULL DEFAULT 0,     -- progress toward the objective's required Quantity
     PRIMARY KEY (char_id, qoid)
@@ -491,7 +550,7 @@ CREATE TABLE IF NOT EXISTS char_quest_objectives (
 
 -- Per-character saved house layouts (housesave: [houseMapID, frame, itemsJSON]).
 CREATE TABLE IF NOT EXISTS char_houses (
-    char_id      INTEGER NOT NULL,
+    char_id      INTEGER UNSIGNED NOT NULL,
     house_map_id INTEGER NOT NULL,
     frame        TEXT,
     data         TEXT,                        -- JSON array of placed house items
@@ -565,8 +624,8 @@ CREATE TABLE IF NOT EXISTS map_state (
 -- Mutual friendships (two rows per pair). friend_id is the other character's id;
 -- the client's FriendObject is {Level,ID,Name,Server} rebuilt from that char row.
 CREATE TABLE IF NOT EXISTS friends (
-    char_id   INTEGER NOT NULL,
-    friend_id INTEGER NOT NULL,
+    char_id   INTEGER UNSIGNED NOT NULL,
+    friend_id INTEGER UNSIGNED NOT NULL,     -- also a character id, despite the name
     PRIMARY KEY (char_id, friend_id)
 );
 
@@ -668,6 +727,51 @@ class _PgRow(Mapping):
         return self._cols
 
 
+def _adapt_row(cols, vals):
+    """Convert SwordShine's encodings back to the engine's, in place.
+
+    Only the MariaDB path calls this, and only two facts differ: a colour is stored as
+    char(6) hex where we hold a 24-bit int, and account timestamps are DATETIME where we
+    hold an epoch. Both conversions are lossless, so ONE column serves both games rather
+    than two columns drifting apart.
+
+    Dispatching on the value's TYPE rather than the column's table is what makes this safe
+    to apply to every row from every query: monsters.skin_color is already an int and
+    redeem_codes.created is already a float, so neither matches and neither is altered.
+    That is also what makes it complete -- no reader of a character row can be missed.
+    """
+    out = None
+    for i, c in enumerate(cols):
+        v = vals[i]
+        if v is None:
+            continue
+        if c in _MYSQL_COLOR_COLS and isinstance(v, str):
+            try:
+                v = int(v, 16)
+            except ValueError:
+                continue
+        elif c in _MYSQL_EPOCH_COLS and isinstance(v, (datetime.datetime, datetime.date)):
+            v = _epoch(v)
+        elif c in _MYSQL_ISO_COLS and isinstance(v, (datetime.datetime, datetime.date)):
+            # Without this membership_days() gets a datetime where it expects a string,
+            # fromisoformat raises, the except returns 0 -- and every member silently
+            # loses their membership.
+            v = v.strftime(_MYSQL_ISO_FMT)
+        else:
+            continue
+        if out is None:
+            out = list(vals)
+        out[i] = v
+    return vals if out is None else out
+
+
+def _epoch(d):
+    """A date or datetime as a UTC epoch float, matching what the engine stores elsewhere."""
+    if not isinstance(d, datetime.datetime):
+        d = datetime.datetime(d.year, d.month, d.day)
+    return d.replace(tzinfo=datetime.timezone.utc).timestamp()
+
+
 def _pg_row_factory(cursor):
     cols = [c.name for c in cursor.description] if cursor.description else []
     idx = {c: i for i, c in enumerate(cols)}
@@ -718,7 +822,293 @@ class _PgConnection:
     def __exit__(self, exc_type, exc, tb):
         if exc_type is None:
             self._raw.commit()             # commit on success; leave the connection open
+        else:
+            self._raw.rollback()
         return False
+
+
+# =========================== MariaDB / MySQL dialect ========================
+# Same contract as the Postgres wrapper: a sqlite3.Connection-shaped object taking `?`
+# placeholders, so the ~219 call sites stay unchanged. MySQL uses `%s` like psycopg, so
+# _to_pyformat is reused verbatim; only three SQL constructs actually differ.
+
+# Nine of our table names also exist in SwordShine's schema with entirely different
+# shapes -- its `quests` has 26 columns and no quest_id at all. Sharing one database means
+# ours are prefixed so the two cannot collide. `items` is deliberately ABSENT: that one IS
+# shared, and is SwordShine's table.
+#
+# The rename happens here rather than across ~185 call sites: every statement already
+# passes through this translator, so one map covers DDL, DML and foreign keys alike, and
+# no call site can be missed. Only the MySQL path is affected; SQLite and Postgres keep
+# the original names.
+_MYSQL_TABLE_PREFIX = (
+    "sword_item_map", "ac_item_buybacks", "token_redemptions", "item_sponsors",
+    "redeem_codes", "redeem_code_rewards", "redeem_code_uses", "redeem_code_claims",
+    "revoked_browser_sessions", "account_audit", "statues", "char_patterns",
+    "shops", "shop_items", "monsters", "monster_drops", "global_drops", "maps",
+    "quests", "quest_turnins", "quest_objective_refs", "quest_objective_drops",
+    "quest_rewards", "apops", "cutscenes", "classes", "class_skills", "skills",
+    "asset_bundles", "soundtracks", "cutscene_bundles", "kv", "char_quests",
+    "char_quest_objectives", "char_houses", "map_pads", "pad_npcs", "map_state",
+)
+
+# These logical names are compatibility views onto the shared SwordShine-owned rows.
+# Their physical `shared_` names make ownership unmistakable in MariaDB.
+_MYSQL_SHARED_NAMES = {
+    "accounts": "shared_accounts", "characters": "shared_characters",
+    "char_items": "shared_char_items", "friends": "shared_friends",
+    "guilds": "shared_guilds",
+}
+
+# On MariaDB these three are NOT ours: they are VIEWS over SwordShine's `users` and
+# `users_items`, so a player's account, character and bag are ONE row set that both games
+# read and write. The engine's ~341 queries against them are left exactly as written --
+# rewriting each one would be 341 chances to miss a place a player's gold or inventory is
+# saved. What a view cannot express is handled here instead: SwordShine stores colours as
+# char(6) hex and timestamps as DATETIME where we use an int and an epoch, so _adapt_row()
+# converts on the way out and _MYSQL_WRITE_CAST on the way in.
+_MYSQL_SHARED_LOGICAL = tuple(_MYSQL_SHARED_NAMES)
+_MYSQL_SHARED_VIEWS = tuple(_MYSQL_SHARED_NAMES.values())
+
+# Reads: column name -> how to turn SwordShine's stored value into ours. Each is guarded by
+# the value's TYPE, so a same-named column on another table (monsters.skin_color is already
+# an int; redeem_codes.created is already an epoch) passes through untouched.
+_MYSQL_COLOR_COLS = ("skin_color", "eye_color", "hair_color", "trim_color", "accessory_color")
+_MYSQL_EPOCH_COLS = ("created", "last_accessed")
+# Held as an ISO-8601 string with a `T` separator, which is what the engine writes
+# (set_membership) and what it parses back (datetime.fromisoformat in membership_days) and
+# what it hands the client verbatim. SwordShine stores the same instant as a DATETIME.
+_MYSQL_ISO_COLS = ("upgrade_expires", "purchase_date")
+_MYSQL_ISO_FMT = "%Y-%m-%dT%H:%M:%S"
+
+# Writes: the same two conversions as SQL, applied to the bound parameter. Scoped to
+# statements whose target is one of the views above, so an UPDATE of monsters.skin_color
+# (a real int column) is never touched.
+_MYSQL_WRITE_CAST = {c: "LPAD(HEX(%s),6,'0')" for c in _MYSQL_COLOR_COLS}
+_MYSQL_WRITE_CAST.update({c: "FROM_UNIXTIME(%s)" for c in _MYSQL_EPOCH_COLS})
+_MYSQL_WRITE_CAST.update({c: "REPLACE(%s,'T',' ')" for c in _MYSQL_ISO_COLS})
+_MYSQL_PHYSICAL = {name: "inf_" + name for name in _MYSQL_TABLE_PREFIX}
+_MYSQL_PHYSICAL.update(_MYSQL_SHARED_NAMES)
+_MYSQL_RENAME = re.compile(
+    r"\b(FROM|JOIN|INTO|UPDATE|TABLE|REFERENCES|EXISTS|ON)\s+(%s)\b"
+    % "|".join(sorted(_MYSQL_PHYSICAL, key=len, reverse=True)), re.I)
+_MYSQL_QUALIFIED = re.compile(
+    r"\b(%s)\." % "|".join(sorted(_MYSQL_PHYSICAL, key=len, reverse=True)), re.I)
+
+
+def _to_mysql(sql):
+    """Rewrite the SQLite/Postgres constructs MariaDB does not accept.
+
+      ON CONFLICT(c) DO NOTHING       -> ON DUPLICATE KEY UPDATE c=c   (a no-op write)
+      ON CONFLICT(c) DO UPDATE SET x  -> ON DUPLICATE KEY UPDATE x
+      CAST(x AS BIGINT|INTEGER)       -> CAST(x AS SIGNED)
+      CAST(x AS TEXT)                 -> CAST(x AS CHAR)
+      excluded.col                    -> VALUES(col)   (the proposed row, in an upsert)
+    """
+    # The no-op assignment must be QUALIFIED with the insert target: in an
+    # `INSERT INTO t (...) SELECT ... JOIN ...`, a bare column name is ambiguous between
+    # the target and the selected tables ("Column 'account_id' in UPDATE is ambiguous").
+    target = re.search(r"INSERT\s+(?:IGNORE\s+)?INTO\s+[\"`]?(\w+)", sql, re.I)
+    # Through _phys(), because the qualified name is emitted BEFORE _MYSQL_RENAME runs below
+    # and the rename only matches a name that follows INTO/FROM/JOIN -- so an unqualified
+    # `hairs`.`hair_id` would survive into the ON DUPLICATE clause and point at SwordShine's
+    # table ("Unknown column 'hairs.hair_id'").
+    tname = _phys(target.group(1)) if target else None
+
+    def _do_nothing(m):
+        first = m.group(1).split(",")[0].strip().strip('"').strip("`")
+        col = "`%s`.`%s`" % (tname, first) if tname else "`%s`" % first
+        return "ON DUPLICATE KEY UPDATE %s=%s" % (col, col)
+
+    sql = re.sub(r"ON\s+CONFLICT\s*\(([^)]*)\)\s*DO\s+NOTHING", _do_nothing, sql,
+                 flags=re.I)
+    sql = re.sub(r"ON\s+CONFLICT\s*\(([^)]*)\)\s*DO\s+UPDATE\s+SET",
+                 "ON DUPLICATE KEY UPDATE", sql, flags=re.I)
+    sql = re.sub(r"CAST\s*\((.*?)\s+AS\s+(?:BIGINT|INTEGER)\s*\)", r"CAST(\1 AS SIGNED)",
+                 sql, flags=re.I)
+    sql = re.sub(r"CAST\s*\((.*?)\s+AS\s+TEXT\s*\)", r"CAST(\1 AS CHAR)", sql, flags=re.I)
+    # Postgres names the would-be-inserted row `excluded`; MySQL exposes it as VALUES(col).
+    # The column is re-quoted because SwordShine's names include MySQL reserved words --
+    # `Range` most notably -- which are a syntax error bare inside VALUES().
+    sql = re.sub(r"\bexcluded\.\"?(\w+)\"?", r'VALUES("\1")', sql, flags=re.I)
+    # SQLite's REPLACE spelling; MySQL's is REPLACE INTO with the same delete-then-insert
+    # semantics.
+    sql = re.sub(r"\bINSERT\s+OR\s+REPLACE\s+INTO\b", "REPLACE INTO", sql, flags=re.I)
+    # utf8mb4's default collation is already case-insensitive, so SQLite's explicit
+    # COLLATE NOCASE is redundant here -- and MySQL does not know that collation name.
+    sql = re.sub(r"\s+COLLATE\s+NOCASE\b", "", sql, flags=re.I)
+    # Namespace our tables away from SwordShine's same-named ones (see _MYSQL_RENAME).
+    sql = _MYSQL_RENAME.sub(
+        lambda m: "%s %s" % (m.group(1), _MYSQL_PHYSICAL[m.group(2).lower()]), sql)
+    sql = _MYSQL_QUALIFIED.sub(
+        lambda m: _MYSQL_PHYSICAL[m.group(1).lower()] + ".", sql)
+    sql = _mysql_shared_casts(sql, tname)
+    return sql
+
+
+def _mysql_shared_casts(sql, insert_target):
+    """Wrap bound parameters that are written to a shared-view column in a different
+    encoding (see _MYSQL_WRITE_CAST): a colour int becomes char(6) hex, an epoch becomes a
+    DATETIME. The read direction is _adapt_row().
+
+    Doing it here rather than at the call sites is the same bargain _MYSQL_RENAME makes --
+    every statement already passes through this translator, so one rule covers the character
+    creation, the changeColor handler and the login timestamp alike, and none can be missed.
+
+    It is scoped to statements that TARGET a shared view, because `skin_color` is also a
+    real int column on `monsters` and must not be converted there.
+    """
+    target = (insert_target or "").lower()
+    if not target:
+        m = re.match(r"\s*UPDATE\s+[\"`]?(\w+)", sql, re.I)
+        target = m.group(1).lower() if m else ""
+    if target not in _MYSQL_SHARED_VIEWS:
+        return sql
+
+    # UPDATE ... SET col=?  ->  SET col=CAST(?)
+    def _set(m):
+        cast = _MYSQL_WRITE_CAST.get(m.group(2).lower())
+        return m.group(0) if cast is None else m.group(1) + m.group(2) + "=" + cast % "?"
+    sql = re.sub(r"([,\s(])[\"`]?(\w+)[\"`]?\s*=\s*\?", _set, sql)
+
+    # INSERT INTO t (a,b,c) VALUES (?,?,?)  ->  wrap the placeholder in c's position
+    m = re.search(r"INSERT\s+(?:IGNORE\s+)?INTO\s+[\"`]?\w+[\"`]?\s*\(([^)]*)\)\s*"
+                  r"VALUES\s*\(([^)]*)\)", sql, re.I)
+    if m:
+        cols = [c.strip().strip('"').strip("`").lower() for c in m.group(1).split(",")]
+        vals = [v.strip() for v in m.group(2).split(",")]
+        if len(cols) == len(vals) and any(c in _MYSQL_WRITE_CAST for c in cols):
+            vals = [_MYSQL_WRITE_CAST[c] % v if (c in _MYSQL_WRITE_CAST and v == "?") else v
+                    for c, v in zip(cols, vals)]
+            sql = sql[:m.start(2)] + ", ".join(vals) + sql[m.end(2):]
+    return sql
+
+
+class _MyCursor:
+    """Wraps a PyMySQL cursor so rows come back as _PgRow (name- AND position-indexable),
+    matching what sqlite3.Row and the Postgres wrapper both give the call sites."""
+    __slots__ = ("_cur", "_cols", "_idx")
+
+    def __init__(self, cur):
+        self._cur = cur
+        self._cols = [d[0] for d in (cur.description or [])]
+        self._idx = {c: i for i, c in enumerate(self._cols)}
+
+    def _wrap(self, vals):
+        return None if vals is None else _PgRow(self._cols, self._idx,
+                                                _adapt_row(self._cols, vals))
+
+    def fetchone(self):
+        return self._wrap(self._cur.fetchone())
+
+    def fetchall(self):
+        return [self._wrap(v) for v in self._cur.fetchall()]
+
+    def fetchmany(self, size=None):
+        rows = self._cur.fetchmany(size) if size is not None else self._cur.fetchmany()
+        return [self._wrap(v) for v in rows]
+
+    def __iter__(self):
+        for vals in self._cur:
+            yield self._wrap(vals)
+
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
+    @property
+    def lastrowid(self):
+        return self._cur.lastrowid
+
+    @property
+    def description(self):
+        return self._cur.description
+
+    def close(self):
+        self._cur.close()
+
+
+class _MyConnection:
+    """sqlite3.Connection-shaped wrapper over PyMySQL. Mirrors _PgConnection exactly,
+    including the `with` that commits on a clean exit without closing."""
+    def __init__(self, raw):
+        self._raw = raw
+
+    def _run(self, sql, params=()):
+        cur = self._raw.cursor()
+        if params:
+            cur.execute(_to_pyformat(_to_mysql(sql)), tuple(params))
+        else:
+            # No params: still translate dialect, but skip _to_pyformat so literal `%`
+            # in the SQL is not doubled (PyMySQL only scans when args are supplied).
+            cur.execute(_to_mysql(sql))
+        return _MyCursor(cur)
+
+    def execute(self, sql, params=()):
+        return self._run(sql, params)
+
+    def executemany(self, sql, seq):
+        cur = self._raw.cursor()
+        cur.executemany(_to_pyformat(_to_mysql(sql)), [tuple(p) for p in seq])
+        return _MyCursor(cur)
+
+    def executescript(self, script):
+        cur = self._raw.cursor()
+        for stmt in _split_statements(script):
+            cur.execute(_to_mysql(stmt))
+        return _MyCursor(cur)
+
+    def commit(self):
+        self._raw.commit()
+
+    def rollback(self):
+        self._raw.rollback()
+
+    def close(self):
+        self._raw.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            self._raw.commit()
+        else:
+            self._raw.rollback()
+        return False
+
+
+def _my_connect():
+    import pymysql                           # lazy: only the MariaDB path needs it
+    from pymysql.constants import CLIENT
+    # CLIENT.FOUND_ROWS makes cursor.rowcount report rows MATCHED rather than rows CHANGED,
+    # which is what SQLite and Postgres do and what the call sites assume. Without it an
+    # UPDATE that writes a column's existing value reports 0 -- e.g. the shop stock
+    # decrement, whose CASE deliberately re-writes quantity_remain for unlimited stock,
+    # would be read as "sold out".
+    raw = pymysql.connect(
+        client_flag=CLIENT.FOUND_ROWS,
+        host=os.environ.get("INFINITY_MYSQL_HOST", "127.0.0.1"),
+        port=int(os.environ.get("INFINITY_MYSQL_PORT", "3306")),
+        database=_MY_DB or os.environ.get("INFINITY_MYSQL_DB", "aqwworlds"),
+        user=os.environ.get("INFINITY_MYSQL_USER", "swordshine"),
+        password=os.environ.get("INFINITY_MYSQL_PASSWORD", ""),
+        charset="utf8mb4",
+        autocommit=False,
+    )
+    # ANSI_QUOTES makes `"x"` an identifier quote rather than a string literal, so the
+    # column DDL generated by itemrecord/monrecord/shoprecord -- which quotes names the
+    # SQL-standard way -- is accepted unchanged. Appended to the server's existing
+    # sql_mode rather than replacing it, so nothing else about the session changes.
+    with raw.cursor() as cur:
+        cur.execute("SET sql_mode = CONCAT(@@sql_mode, ',ANSI_QUOTES')")
+        # InnoDB defaults to REPEATABLE READ, so a long-lived connection keeps the snapshot
+        # it started with and cannot see rows another connection commits afterwards. SQLite
+        # and Postgres both behave as READ COMMITTED here, and the server holds long-lived
+        # connections, so without this a handler can serve stale data indefinitely.
+        cur.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
+    raw.commit()
+    return _MyConnection(raw)
 
 
 def _pg_connect():
@@ -739,6 +1129,8 @@ def _pg_connect():
 
 
 def connect():
+    if BACKEND in ("mysql", "mariadb"):
+        return _my_connect()
     if BACKEND == "postgres":
         return _pg_connect()
     # SQLite (default): unchanged. timeout/busy_timeout ride over OneDrive sync locks
@@ -760,20 +1152,225 @@ def _schema_sql():
     if BACKEND == "postgres":
         # BY DEFAULT (not ALWAYS) so the data migration can insert rows with their original
         # ids preserved; the identity sequence is then advanced past MAX(id) (see migrate_to_pg).
-        return (sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT",
+        # Postgres has no UNSIGNED. The item-reference columns carry it so MySQL can key
+        # them against SwordShine's shared `items.id int(11) unsigned`; it is simply dropped
+        # here, since an unsigned item id fits a signed INTEGER comfortably.
+        sql = re.sub(r"\s+UNSIGNED\b", "", sql, flags=re.I)
+        return (re.sub(r"\bREAL\b", "DOUBLE PRECISION", sql).replace("INTEGER PRIMARY KEY AUTOINCREMENT",
                             "INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY")
                    .replace(" BLOB", " BYTEA"))
+    if BACKEND in ("mysql", "mariadb"):
+        sql = _mysql_shared_identity(sql)
+        sql = _mysql_key_text_to_varchar(sql)
+        # MySQL's TEXT caps at 65,535 BYTES, where SQLite and Postgres treat TEXT as
+        # unbounded. Several columns hold large JSON documents and silently overflow
+        # ("Data too long for column 'doc'"), so every remaining TEXT becomes LONGTEXT.
+        # Keyed columns were already converted to VARCHAR above and are unaffected.
+        sql = re.sub(r"\bTEXT\b", "LONGTEXT", sql)
+        # Same 65,535-byte ceiling, same fix: a statue snapshot is a PNG and overflows
+        # BLOB ("Data too long for column 'image'"), where SQLite and Postgres treat a
+        # blob as unbounded.
+        sql = re.sub(r"\bBLOB\b", "LONGBLOB", sql)
+        sql = re.sub(r"\bDOUBLE\s+PRECISION\b", "DOUBLE", sql, flags=re.I)
+        sql = re.sub(r"\bREAL\b", "DOUBLE", sql)
+        sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT",
+                          "INTEGER AUTO_INCREMENT PRIMARY KEY")
+        # Appended AFTER the dialect rewrites above, which are for OUR tables: the shared
+        # DDL is already MySQL and must be emitted verbatim.
+        return sql + _MYSQL_SHARED_DDL
     return sql
+
+
+def _mysql_shared_identity(sql):
+    """Take our own accounts/characters/char_items OUT of the schema on MariaDB.
+
+    There, those three names are VIEWS over SwordShine's `users` and `users_items` (created
+    by _MYSQL_SHARED_DDL below), so that a player's account, character and bag are one row
+    set both games read and write -- the shared inventory. Creating our own tables of the
+    same names would shadow them and silently split every player in two.
+
+    Foreign keys pointing AT them are repointed to the base table, because MySQL cannot
+    reference a view. The referenced id is the same number either way: the views expose
+    `users.id` as the account id AND the character id, which it already was -- Infinity has
+    always enforced one character per account (characters.account_id UNIQUE).
+
+    Every char_id/account_id column is declared INTEGER UNSIGNED in SCHEMA for the same
+    reason the item-reference columns are: SwordShine's `users.id` is `int(11) unsigned`,
+    and MySQL rejects a foreign key whose column signedness differs from its target
+    ("Foreign key constraint is incorrectly formed"). Postgres has no UNSIGNED and strips
+    it; SQLite gives it INTEGER affinity. So it costs nothing on the other two backends.
+    """
+    for name in _MYSQL_SHARED_LOGICAL:
+        sql = re.sub(r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+%s\s*\(.*?\n\);" % name,
+                     "", sql, flags=re.I | re.S)
+        sql = re.sub(r"CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+\w+\s+ON\s+%s\s*\([^)]*\);"
+                     % name, "", sql, flags=re.I)
+    sql = re.sub(r"REFERENCES\s+(?:accounts|characters)\s*\(\s*id\s*\)",
+                 "REFERENCES users(id)", sql, flags=re.I)
+    sql = re.sub(r"REFERENCES\s+char_items\s*\(\s*char_item_id\s*\)",
+                 "REFERENCES users_items(id)", sql, flags=re.I)
+    return sql
+
+
+# The shared tables and the views over them. In production SwordShine already owns `users`
+# and `users_items`, so the CREATE TABLEs are no-ops and only the views are (re)made -- which
+# is deliberate: the ENGINE is the single source of truth for what the views must expose, and
+# every boot restates it. The table bodies exist so a throwaway test database is complete
+# without a SwordShine install; they carry no foreign keys for that reason.
+#
+# CREATE OR REPLACE, not IF NOT EXISTS: a view whose definition has drifted from the engine
+# that reads it is worse than no view at all.
+_MYSQL_SHARED_DDL = """
+
+CREATE TABLE IF NOT EXISTS users (
+    id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    Name            VARCHAR(40)  NOT NULL,
+    Hash            VARCHAR(255) NOT NULL,
+    Email           VARCHAR(64)  NOT NULL DEFAULT '',
+    Gender          CHAR(1)      NOT NULL DEFAULT 'M',
+    Gold            INT UNSIGNED NOT NULL DEFAULT 0,
+    Coins           INT UNSIGNED NOT NULL DEFAULT 0,
+    Level           TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    Exp             INT UNSIGNED NOT NULL DEFAULT 0,
+    Access          TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    HairID          INT UNSIGNED NOT NULL DEFAULT 1,
+    ColorSkin       CHAR(6) NOT NULL DEFAULT '000000',
+    ColorEye        CHAR(6) NOT NULL DEFAULT '000000',
+    ColorHair       CHAR(6) NOT NULL DEFAULT '000000',
+    ColorTrim       CHAR(6) NOT NULL DEFAULT '000000',
+    ColorAccessory  CHAR(6) NOT NULL DEFAULT '000000',
+    DateCreated     DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00',
+    LastLogin       DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00',
+    UpgradeDays     SMALLINT NOT NULL DEFAULT 0,
+    UpgradeExpire   DATETIME NOT NULL DEFAULT '2024-01-01 00:00:00',
+    dust            INT NULL,
+    class_id        INT NULL,
+    stat_str        INT NULL,
+    stat_end        INT NULL,
+    stat_dex        INT NULL,
+    stat_int        INT NULL,
+    stat_wis        INT NULL,
+    stat_lck        INT NULL,
+    achievements    LONGTEXT NULL,
+    prefs           LONGTEXT NULL,
+    session_token   VARCHAR(191) NULL,
+    session_version INT NOT NULL DEFAULT 0,
+    token_expires   DOUBLE NOT NULL DEFAULT 0,
+    infinity_account_id INT NULL,
+    inf_hair_id     INT NULL,
+    tracked_quest    INT NOT NULL DEFAULT 0,
+    guild_id         INT NOT NULL DEFAULT 0,
+    guild_rank       INT NOT NULL DEFAULT 0,
+    guild_tag_color  VARCHAR(32)  NOT NULL DEFAULT '',
+    owned_tag_colors VARCHAR(255) NOT NULL DEFAULT '[]',
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_users_name (Name)
+);
+
+CREATE TABLE IF NOT EXISTS users_items (
+    id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    UserID          INT UNSIGNED NOT NULL,
+    ItemID          INT UNSIGNED NOT NULL,
+    EnhID           INT UNSIGNED NULL,
+    Equipped        TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    Quantity        MEDIUMINT UNSIGNED NOT NULL DEFAULT 1,
+    Bank            TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    Wear            TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    DatePurchased   DATETIME NULL,
+    loot_id         INT NOT NULL DEFAULT -1,
+    char_pattern_id INT NULL,
+    pattern_json    VARCHAR(255) NULL,
+    meta            VARCHAR(64) NOT NULL DEFAULT '',
+    inf_char_item_id INT NULL,
+    PRIMARY KEY (id),
+    KEY fk_useritems_userid (UserID)
+);
+
+CREATE OR REPLACE VIEW shared_accounts AS
+SELECT id AS id, Name AS username, Hash AS password,
+       DateCreated AS created, LastLogin AS last_accessed,
+       session_token AS session_token, session_version AS session_version,
+       token_expires AS token_expires
+  FROM users;
+
+CREATE OR REPLACE VIEW shared_characters AS
+SELECT id AS id, id AS account_id, Name AS name, Gender AS gender,
+       Gold AS gold, Coins AS coins, dust AS dust, Level AS level, Exp AS exp,
+       class_id AS class_id, Access AS access_level,
+       stat_str AS stat_str, stat_end AS stat_end, stat_dex AS stat_dex,
+       stat_int AS stat_int, stat_wis AS stat_wis, stat_lck AS stat_lck,
+       UpgradeDays AS upgrade_days, UpgradeExpire AS upgrade_expires,
+       ColorSkin AS skin_color, ColorEye AS eye_color, ColorHair AS hair_color,
+       ColorTrim AS trim_color, ColorAccessory AS accessory_color,
+       HairID AS hair_id, achievements AS achievements, prefs AS prefs,
+       tracked_quest AS tracked_quest, guild_id AS guild_id, guild_rank AS guild_rank,
+       guild_tag_color AS guild_tag_color, owned_tag_colors AS owned_tag_colors
+  FROM users;
+
+CREATE OR REPLACE VIEW shared_char_items AS
+SELECT id AS char_item_id, UserID AS char_id, ItemID AS item_id,
+       Quantity AS quantity, Equipped AS equipped, Bank AS banked,
+       loot_id AS loot_id, char_pattern_id AS char_pattern_id,
+       pattern_json AS pattern_json, meta AS meta, DatePurchased AS purchase_date
+  FROM users_items;
+"""
+
+
+def _mysql_key_text_to_varchar(sql, width=191):
+    """MySQL cannot key a TEXT column without a prefix length ("BLOB/TEXT column used in
+    key specification without a key length"). Find every column that takes part in a key --
+    inline PRIMARY KEY/UNIQUE, a composite PRIMARY KEY(...)/UNIQUE(...) clause, or a
+    CREATE INDEX -- and widen just those TEXT declarations to VARCHAR.
+
+    191 rather than 255: utf8mb4 is 4 bytes per character, and 191*4 stays inside the
+    767-byte index limit of older InnoDB row formats.
+    """
+    # table -> columns named by a CREATE INDEX
+    indexed = {}
+    for tbl, cols in re.findall(r"CREATE\s+INDEX[^;]*?\bON\s+(\w+)\s*\(([^)]*)\)", sql, re.I):
+        indexed.setdefault(tbl.lower(), set()).update(
+            c.strip().strip('"`').lower() for c in cols.split(","))
+
+    def fix_table(m):
+        head, tbl, body, tail = m.group(1), m.group(2), m.group(3), m.group(4)
+        keyed = set(indexed.get(tbl.lower(), ()))
+        # `head` already carries the opening paren, so the body is reassembled onto it
+        # verbatim -- dropping it silently merged single-line tables into their neighbour.
+        # composite clauses: PRIMARY KEY (a, b) / UNIQUE (a, b)
+        for cols in re.findall(r"(?:PRIMARY\s+KEY|UNIQUE)\s*\(([^)]*)\)", body, re.I):
+            keyed.update(c.strip().strip('"`').lower() for c in cols.split(","))
+        # inline: `col TEXT PRIMARY KEY` / `col TEXT UNIQUE NOT NULL`
+        for col in re.findall(r"^\s*\"?(\w+)\"?\s+[A-Za-z]+[^,\n]*?\b(?:PRIMARY\s+KEY|UNIQUE)\b",
+                              body, re.I | re.M):
+            keyed.add(col.lower())
+
+        def widen(cm):
+            return cm.group(0) if cm.group(2).lower() not in keyed else \
+                "%s%s%sVARCHAR(%d)" % (cm.group(1), cm.group(2), cm.group(3), width)
+
+        # Single-line tables (kv) declare their columns after the paren on the same line,
+        # so anchor on an optional line start rather than requiring one.
+        body = re.sub(r"(^\s*\"?|\(\s*)(\w+)(\"?\s+)TEXT\b", widen, body, flags=re.I | re.M)
+        return head + body + tail
+
+    return re.sub(r"(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\()(.*?)(\);)",
+                  fix_table, sql, flags=re.I | re.S)
 
 
 def _columns(c, table):
     """Column names of a table as a set, in the active dialect (replaces PRAGMA table_info).
     On Postgres scope to the active schema so a throwaway test schema and `public` (which may
     both hold a `characters` table, say) don't bleed into each other."""
+    table = _phys(table)
     if BACKEND == "postgres":
         return {r["column_name"] for r in c.execute(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name=? AND table_schema=current_schema()", (table,))}
+    if BACKEND in ("mysql", "mariadb"):
+        return {r["COLUMN_NAME"] if "COLUMN_NAME" in r.keys() else r["column_name"]
+                for r in c.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name=? AND table_schema=DATABASE()", (table,))}
     return {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
 
 
@@ -782,38 +1379,111 @@ def use_throwaway():
     equivalent of swapping db.DB_PATH to a temp file. On SQLite that's exactly a temp file; on
     Postgres it (re)creates a `throwaway` schema and routes connections there, leaving the real
     `public` data untouched. Call BEFORE db.init()."""
-    global DB_PATH, _PG_SCHEMA
+    global DB_PATH, _PG_SCHEMA, _MY_DB
+    if BACKEND in ("mysql", "mariadb"):
+        # MySQL has no schema-inside-a-database, so the isolated equivalent is a throwaway
+        # DATABASE. Needs a user with CREATE privilege; the runtime user does not need it.
+        _MY_DB = None                            # connect to the configured db to create
+        c = _my_connect()
+        name = "infinity_test_" + uuid.uuid4().hex[:24]
+        try:
+            c.execute("CREATE DATABASE `%s` CHARACTER SET utf8mb4" % name)
+            c.commit()
+        finally:
+            c.close()
+        _MY_TEST_DBS.add(name)
+        _MY_DB = name
+        return
     if BACKEND == "postgres":
-        _PG_SCHEMA = "public"               # connect to the real db to (re)create the test schema
+        _PG_SCHEMA = "public"
         c = _pg_connect()
-        c.execute('DROP SCHEMA IF EXISTS throwaway CASCADE')
-        c.execute('CREATE SCHEMA throwaway')
-        c.commit()
-        c.close()
-        _PG_SCHEMA = "throwaway"
+        schema = "infinity_test_" + uuid.uuid4().hex
+        try:
+            c.execute(f'CREATE SCHEMA "{schema}"')
+            c.commit()
+        finally:
+            c.close()
+        _PG_TEST_SCHEMAS.add(schema)
+        _PG_SCHEMA = schema
     else:
         import tempfile
         DB_PATH = pathlib.Path(tempfile.mkdtemp()) / "throwaway.db"
 
 
+def cleanup_test_schemas():
+    """Only remove unique schemas created by this process, never shared or public data."""
+    global _PG_SCHEMA, _MY_DB
+    if BACKEND in ("mysql", "mariadb"):
+        if not _MY_TEST_DBS:
+            return
+        _MY_DB = None
+        c = _my_connect()
+        try:
+            for name in list(_MY_TEST_DBS):
+                c.execute("DROP DATABASE IF EXISTS `%s`" % name)
+                _MY_TEST_DBS.discard(name)
+            c.commit()
+        finally:
+            c.close()
+        return
+    if not _PG_TEST_SCHEMAS:
+        return
+    _PG_SCHEMA = "public"
+    c = _pg_connect()
+    try:
+        for schema in list(_PG_TEST_SCHEMAS):
+            if not re.fullmatch(r"infinity_test_[0-9a-f]{32}", schema):
+                raise ValueError("Invalid test schema")
+            c.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            c.commit()
+            _PG_TEST_SCHEMAS.remove(schema)
+    finally:
+        c.close()
+
+
+atexit.register(cleanup_test_schemas)
+
+
 def init():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with connect() as c:
-        _rename_legacy_pads(c)      # set aside an old blob-shaped map_pads, if any
-        c.executescript(_schema_sql())
-        _migrate(c)
-        _migrate_monsters(c)        # promote monsters raw/catalog blobs -> canonical columns
-        _migrate_items_columns(c)   # promote items raw blob -> canonical columns
-        _migrate_shops_columns(c)   # promote shops raw blob -> canonical columns
-        _migrate_quest_turnins(c)   # activate + populate the quest_turnins objective table
-        _migrate_quest_objective_refs(c)   # add + backfill quest_objective_refs.quest_id
-        _import_legacy_pads(c)      # backfill the normalized pad tables from it
+        initialize_connection(c)
     return DB_PATH
 
 
+def initialize_connection(c):
+    """Initialize using the caller's transaction (also used for an empty migration target)."""
+    _rename_legacy_pads(c)
+    c.executescript(_schema_sql())
+    _migrate(c)
+    _migrate_monsters(c)
+    _migrate_items_columns(c)
+    _migrate_shops_columns(c)
+    _migrate_quest_turnins(c)
+    _migrate_quest_objective_refs(c)
+    _import_legacy_pads(c)
+
+
+def _phys(table):
+    """The physical table name on the active backend.
+
+    _to_mysql() rewrites table names inside SQL text, but helpers like _columns() and
+    _table_exists() pass a name as a PARAMETER, where that rewrite cannot reach -- asking
+    for "classes" would otherwise inspect SwordShine's table of that name instead of ours.
+    """
+    if BACKEND in ("mysql", "mariadb"):
+        return _MYSQL_PHYSICAL.get(table, table)
+    return table
+
+
 def _table_exists(c, name):
+    name = _phys(name)
     if BACKEND == "postgres":
         return c.execute("SELECT to_regclass(?)", (name,)).fetchone()[0] is not None
+    if BACKEND in ("mysql", "mariadb"):
+        return c.execute("SELECT 1 FROM information_schema.tables "
+                         "WHERE table_schema=DATABASE() AND table_name=?",
+                         (name,)).fetchone() is not None
     return c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
                      (name,)).fetchone() is not None
 
@@ -893,7 +1563,7 @@ _ITEMCOLS = ",".join(f'"{c}"' for c in itemrecord.ALL_COLS)
 def item(conn, item_id):
     """The catalog item wire dict for an item_id, GENERATED from the canonical columns. None
     if the item isn't in the catalog. Replaces `json.loads(SELECT raw FROM items ...)`."""
-    row = conn.execute(f"SELECT {_ITEMCOLS} FROM items WHERE item_id=?", (int(item_id),)).fetchone()
+    row = conn.execute(f"SELECT {_ITEMCOLS} FROM items WHERE id=?", (int(item_id),)).fetchone()
     return itemrecord.to_item(itemrecord.row_to_cols(row)) if row else None
 
 
@@ -909,61 +1579,127 @@ def item_sponsors(conn, item_id):
     return [r["player_name"] if r["has_house"] else f"{r['player_name']}:false" for r in rows]
 
 
+_MYSQL_NOTNULL = {}
+
+
+def _fill_notnull(conn, table, row):
+    """Replace NULLs in `row` with something storable, for columns SwordShine declares NOT NULL.
+
+    The shared tables are SwordShine's, and it declares far more columns NOT NULL than our
+    item record has opinions about -- Coins, Upgrade, Rarity and a dozen more. Our record
+    simply has no value for them and writes NULL, which the database rejects outright
+    ("Column 'Coins' cannot be null") rather than falling back to the column default: a
+    DEFAULT only applies when the column is OMITTED, and we are naming it.
+
+    So the table's own declaration is read once and used as the fallback. Deriving it from
+    the live schema rather than a list here is what stops this drifting the next time
+    SwordShine gains a column.
+    """
+    if table not in _MYSQL_NOTNULL:
+        out = {}
+        for r in conn.execute(
+                "SELECT column_name, column_default, data_type, extra "
+                "FROM information_schema.columns "
+                "WHERE table_schema=DATABASE() AND table_name=? AND is_nullable='NO'",
+                (table,)).fetchall():
+            name, dflt, dtype, extra = r[0], r[1], (r[2] or "").lower(), (r[3] or "").lower()
+            if "auto_increment" in extra:
+                continue
+            # A default like `curdate()` is an EXPRESSION, not a literal, and passing the
+            # string "curdate()" as a value fails. Those fall through to the type default.
+            if dflt is not None and "(" not in str(dflt):
+                out[name.lower()] = dflt
+            elif dtype in ("int", "bigint", "smallint", "tinyint", "mediumint",
+                           "double", "float", "decimal"):
+                out[name.lower()] = 0
+            elif dtype in ("datetime", "timestamp", "date"):
+                out[name.lower()] = "1970-01-01 00:00:00"
+            else:
+                out[name.lower()] = ""
+        _MYSQL_NOTNULL[table] = out
+    defaults = _MYSQL_NOTNULL[table]
+    for c in list(row):
+        if row[c] is None and c.lower() in defaults:
+            row[c] = defaults[c.lower()]
+    return row
+
+
 def store_item(conn, it, replace=False):
     """Decompose an item definition (instance fields stripped) into the canonical columns and
     upsert. replace=True overwrites an existing row; default is insert-if-absent."""
     rec = itemrecord.from_dict(item_template(it))
     rec["item_id"] = int(it.get("ID", 0))
     row = itemrecord.cols_to_row(rec)
+    if BACKEND in ("mysql", "mariadb"):
+        _fill_notnull(conn, "items", row)
     qc = ",".join(f'"{c}"' for c in itemrecord.ALL_COLS)
     ph = ",".join("?" for _ in itemrecord.ALL_COLS)
     action = ("DO UPDATE SET " + ", ".join(f'"{c}"=excluded."{c}"'
               for c in itemrecord.ALL_COLS if c != "item_id")) if replace else "DO NOTHING"
-    conn.execute(f"INSERT INTO items ({qc}) VALUES ({ph}) ON CONFLICT(item_id) {action}",
+    conn.execute(f"INSERT INTO items ({qc}) VALUES ({ph}) ON CONFLICT(id) {action}",
                  tuple(row[c] for c in itemrecord.ALL_COLS))
 
 
-_HAIRCOLS = ["hair_id", "name", "gender", "filename", "bundle"]
+_HAIRCOLS = ["id", "Gender", "Name", "File", "unity_file", "bundle"]
+_HAIRSEL = "id,Gender,Name,File,unity_file,bundle"
+
+
+def _hair_wire(row):
+    """One `hairs` row as the HairInfo {ID,Name,Filename,Gender,Bundle} the client expects.
+
+    Filename prefers OUR Unity path and falls back to AQW's Flash one, so a hair SwordShine
+    captured but we have not still answers with something rather than null -- the client
+    dereferences hairBundle.Name without a guard.
+    """
+    return {"ID": row["id"], "Name": row["Name"],
+            "Filename": row["unity_file"] or row["File"],
+            "Gender": row["Gender"],
+            "Bundle": json.loads(row["bundle"]) if row["bundle"] else None}
 
 
 def hair(conn, hair_id):
-    """A HairInfo {ID,Name,Filename,Gender,Bundle} dict for a hair_id (the same wire shape AE's
-    GetBaseClasses .hairs entries use), or None. Prefers `gender` when given, matching the old
-    kv-blob lookup's gender-preference behaviour (kept for callers that pass duplicate hair_ids)."""
-    row = conn.execute("SELECT hair_id,name,gender,filename,bundle FROM hairs WHERE hair_id=?",
-                       (int(hair_id),)).fetchone()
-    if row is None:
-        return None
-    return {"ID": row["hair_id"], "Name": row["name"], "Filename": row["filename"],
-            "Gender": row["gender"], "Bundle": json.loads(row["bundle"]) if row["bundle"] else None}
+    """A HairInfo {ID,Name,Filename,Gender,Bundle} dict for a hair id (the same wire shape AE's
+    GetBaseClasses .hairs entries use), or None."""
+    row = conn.execute(f"SELECT {_HAIRSEL} FROM hairs WHERE id=?", (int(hair_id),)).fetchone()
+    return None if row is None else _hair_wire(row)
 
 
 def hairs_list(conn, gender=None):
     """Every hair as HairInfo dicts, optionally filtered to one gender — feeds the /charedit
     picker and the HairShop apop (data/GetBaseClasses .hairs, loadHairShop)."""
     if gender:
-        rows = conn.execute("SELECT hair_id,name,gender,filename,bundle FROM hairs "
-                            "WHERE gender=? ORDER BY hair_id", (gender,)).fetchall()
+        rows = conn.execute(f"SELECT {_HAIRSEL} FROM hairs WHERE Gender=? ORDER BY id",
+                            (gender,)).fetchall()
     else:
-        rows = conn.execute("SELECT hair_id,name,gender,filename,bundle FROM hairs "
-                            "ORDER BY hair_id").fetchall()
-    return [{"ID": r["hair_id"], "Name": r["name"], "Filename": r["filename"],
-             "Gender": r["gender"], "Bundle": json.loads(r["bundle"]) if r["bundle"] else None}
-            for r in rows]
+        rows = conn.execute(f"SELECT {_HAIRSEL} FROM hairs ORDER BY id").fetchall()
+    return [_hair_wire(r) for r in rows]
 
 
 def store_hair(conn, h, replace=False):
     """Upsert one HairInfo dict {ID,Name,Filename,Gender,Bundle}. replace=True overwrites an
-    existing row; default is insert-if-absent."""
+    existing row; default is insert-if-absent.
+
+    Identity is the id OR the (Gender, Name) pair, not the id alone. The catalogue is shared
+    now, and the two sides do not always agree on a hair's id -- MQElegant is 396 to us and 1
+    to SwordShine. Keying on the id alone would let the seed re-insert it under our number and
+    split one hairstyle into two rows, which is exactly the duplication the merge removed.
+    """
     hid = int(h.get("ID", 0))
+    name, gender = h.get("Name"), h.get("Gender")
     bundle = h.get("Bundle")
-    action = ("DO UPDATE SET name=excluded.name, gender=excluded.gender, "
-              "filename=excluded.filename, bundle=excluded.bundle") if replace else "DO NOTHING"
-    conn.execute(
-        "INSERT INTO hairs (hair_id, name, gender, filename, bundle) VALUES (?,?,?,?,?) "
-        f"ON CONFLICT(hair_id) {action}",
-        (hid, h.get("Name"), h.get("Gender"),
-         h.get("Filename"), json.dumps(bundle, separators=(",", ":")) if bundle else None))
+    bundle = json.dumps(bundle, separators=(",", ":")) if bundle else None
+    existing = conn.execute("SELECT id FROM hairs WHERE id=?", (hid,)).fetchone()
+    if existing is None and name:
+        existing = conn.execute(
+            "SELECT id FROM hairs WHERE Gender=? AND LOWER(Name)=LOWER(?)",
+            (gender, name)).fetchone()
+    if existing is not None:
+        if replace:
+            conn.execute("UPDATE hairs SET Gender=?, Name=?, unity_file=?, bundle=? WHERE id=?",
+                         (gender, name, h.get("Filename"), bundle, existing["id"]))
+        return
+    conn.execute("INSERT INTO hairs (id, Gender, Name, unity_file, bundle) VALUES (?,?,?,?,?)",
+                 (hid, gender, name, h.get("Filename"), bundle))
 
 
 _SHOPCOLS = ",".join(f'"{c}"' for c in shoprecord.ALL_COLS)
@@ -1054,7 +1790,8 @@ def _migrate(c):
     # quest_rewards: QuestRewardItem.Rate/Hidden (for Roll/Random reward kinds).
     if _table_exists(c, "statues") and "image" not in _columns(c, "statues"):
         c.execute("ALTER TABLE statues ADD COLUMN image "
-                  + ("BYTEA" if BACKEND == "postgres" else "BLOB"))
+                  + ("BYTEA" if BACKEND == "postgres" else
+                     "LONGBLOB" if BACKEND in ("mysql", "mariadb") else "BLOB"))
     qr_cols = _columns(c, "quest_rewards")
     if "rate" not in qr_cols:
         c.execute("ALTER TABLE quest_rewards ADD COLUMN rate REAL NOT NULL DEFAULT 0")
@@ -1081,6 +1818,22 @@ def _migrate(c):
         c.execute("ALTER TABLE accounts ADD COLUMN session_token TEXT")
     if _table_exists(c, "accounts") and "last_accessed" not in _columns(c, "accounts"):
         c.execute("ALTER TABLE accounts ADD COLUMN last_accessed REAL")
+    ac_cols = _columns(c, "accounts")
+    for coldef in ("session_version INTEGER NOT NULL DEFAULT 0", "token_expires REAL NOT NULL DEFAULT 0"):
+        if coldef.split()[0] not in ac_cols:
+            c.execute(f"ALTER TABLE accounts ADD COLUMN {coldef}")
+    c.execute("INSERT INTO redeem_code_claims(account_id,code) "
+              "SELECT DISTINCT account_id,LOWER(code) FROM redeem_code_uses WHERE 1=1 "
+              "ON CONFLICT(account_id,code) DO NOTHING")
+    if kv_get(c, "membership_expiry_migration_v1") is None:
+        # Preserve previously granted legacy days once; subsequent reads use the real expiry.
+        import time
+        for row in c.execute("SELECT id,upgrade_days FROM characters WHERE upgrade_days>0 "
+                             "AND (upgrade_expires IS NULL OR upgrade_expires='' "
+                             "OR upgrade_expires='2024-01-01T00:00:00')").fetchall():
+            exp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time()+int(row['upgrade_days'])*86400))
+            c.execute("UPDATE characters SET upgrade_expires=? WHERE id=?", (exp, row['id']))
+        kv_set(c, "membership_expiry_migration_v1", "1")
     # guilds.hall_map / hall_data: the guild hall's map + the leader's saved furniture layout
     # (guildhall system — the guild's decoratable shared house). Additive for pre-existing DBs.
     if _table_exists(c, "guilds"):
@@ -1116,7 +1869,13 @@ def _dedupe_accounts(c):
             c.execute("DELETE FROM characters WHERE account_id=?", (r["id"],))
             c.execute("DELETE FROM accounts WHERE id=?", (r["id"],))
             print(f"[db] removed duplicate account #{r['id']} ({g['lu']!r})")
-    if BACKEND == "postgres":               # PG has no COLLATE NOCASE -> functional index
+    if BACKEND in ("mysql", "mariadb"):
+        # `accounts` is a view; an index belongs on the table under it. utf8mb3_general_ci
+        # is already case-insensitive, so a plain UNIQUE gives the same "one Drathaxie"
+        # guarantee -- and it now covers BOTH games, which is what one shared identity means.
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_username_nocase "
+                  "ON users(Name)")
+    elif BACKEND == "postgres":             # PG has no COLLATE NOCASE -> functional index
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_username_nocase "
                   "ON accounts(LOWER(username))")
     else:
@@ -1134,7 +1893,7 @@ def _migrate_inventory(c):
         item = json.loads(r["raw"])
         item_id = int(item.get("ID", r["item_id"]))
         c.execute(
-            "INSERT INTO items(item_id, name, item_type, raw) VALUES(?,?,?,?) "
+            "INSERT INTO items(id, name, item_type, raw) VALUES(?,?,?,?) "
             "ON CONFLICT(item_id) DO NOTHING",
             (item_id, item.get("Name"), int(item.get("ItemType", 0) or 0),
              json.dumps(item_template(item), separators=(",", ":"))))
@@ -1205,7 +1964,7 @@ def _migrate_items_columns(c):
     sets = ", ".join(f'"{col}"=?' for col in setcols)
     for r in c.execute("SELECT item_id, raw FROM items").fetchall():
         row = itemrecord.cols_to_row(itemrecord.from_dict(json.loads(r["raw"])))
-        c.execute(f"UPDATE items SET {sets} WHERE item_id=?",
+        c.execute(f"UPDATE items SET {sets} WHERE id=?",
                   tuple(row[col] for col in setcols) + (r["item_id"],))
     c.execute("ALTER TABLE items DROP COLUMN raw")
 
@@ -1277,7 +2036,7 @@ def _migrate_items(c):
         for r in c.execute("SELECT * FROM shop_items").fetchall():
             item = json.loads(r["raw"])
             c.execute(
-                "INSERT INTO items(item_id, name, item_type, raw) VALUES(?,?,?,?) "
+                "INSERT INTO items(id, name, item_type, raw) VALUES(?,?,?,?) "
                 "ON CONFLICT(item_id) DO UPDATE SET "
                 "name=excluded.name, item_type=excluded.item_type, raw=excluded.raw",
                 (int(item.get("ID", 0)), item.get("Name"),
@@ -1296,7 +2055,7 @@ def _migrate_items(c):
             coins           INTEGER NOT NULL DEFAULT 0,
             quantity_remain INTEGER NOT NULL DEFAULT -1,
             PRIMARY KEY (shop_id, shop_item_id),
-            FOREIGN KEY (item_id) REFERENCES items(item_id))""")
+            FOREIGN KEY (item_id) REFERENCES items(id))""")
         c.executemany(
             "INSERT INTO shop_items(shop_id, shop_item_id, item_id, cost, coins, "
             "quantity_remain) VALUES(?,?,?,?,?,?)", new_rows)
