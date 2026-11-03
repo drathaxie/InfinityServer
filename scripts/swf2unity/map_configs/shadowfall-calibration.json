@@ -1,0 +1,17 @@
+{
+  "schema": "shadowtest-calibration-v2",
+  "pixelsPerUnit": 10,
+  "cameraZoom": 16,
+  "cells": {
+    "Enter": {
+      "entityScale": 0.5,
+      "entitySpeed": 28
+    },
+    "Garden1": {
+      "entityScale": 0.65,
+      "entitySpeed": 32
+    }
+  },
+  "reason": "Restore source character scale. Expand world geometry and use native 16-unit camera zoom to allow camera travel; movement multiplier is independent of avatar scale.",
+  "proof_boundary": "Camera and movement conversion settings, not a claim of exact Flash playback mechanics."
+}

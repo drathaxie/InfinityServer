@@ -1,0 +1,17 @@
+{
+  "schema": "shadowtest-calibration-v3",
+  "pixelsPerUnit": 10,
+  "cameraZoom": 16,
+  "cells": {
+    "Enter": {
+      "entityScale": 0.65,
+      "entitySpeed": 21.538461538461537
+    },
+    "Garden1": {
+      "entityScale": 0.8450000000000001,
+      "entitySpeed": 24.615384615384613
+    }
+  },
+  "reason": "Increase avatars 30 percent from v3 while preserving rounded walk speeds, world geometry, camera zoom and parallax.",
+  "proof_boundary": "Camera and movement conversion settings, not a claim of exact Flash playback mechanics."
+}
