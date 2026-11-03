@@ -44,7 +44,7 @@ STUBS = {
 }
 
 
-def stage(source, project, cells, visuals=None, calibration=None):
+def stage(source, project, cells, visuals=None, calibration=None, gpu_compression=False):
     source, project = source.resolve(), project.resolve()
     manifest = json.loads((source / 'map_source.json').read_text(encoding='utf-8'))
     marker = project / 'map-prototype-owner.json'
@@ -111,7 +111,7 @@ def stage(source, project, cells, visuals=None, calibration=None):
     output.mkdir(exist_ok=True)
     spec = dict(width=manifest['stage_px'][1]-manifest['stage_px'][0],
                 height=manifest['stage_px'][3]-manifest['stage_px'][2], pixelsPerUnit=scale['pixelsPerUnit'] if scale else 20,
-                outputDir=str(output), cells=inputs,layered=bool(visual_data),cameraZoom=scale.get('cameraZoom',0) if scale else 0)
+                outputDir=str(output), cells=inputs,layered=bool(visual_data),gpuCompression=gpu_compression,cameraZoom=scale.get('cameraZoom',0) if scale else 0)
     if visual_data:
         spec.update(atlas='Assets/MapArt/layered_atlas.png',atlasHeight=visual_data['atlas_height'],
                     visualFrames=visual_data['frames'],visualCells=visual_data['cells'],fps=visual_data['fps'],
@@ -159,8 +159,9 @@ def main():
     parser.add_argument('--android-only', action='store_true', help='Build Android from the existing verified prefab')
     parser.add_argument('--visuals',type=Path)
     parser.add_argument('--calibration',type=Path)
+    parser.add_argument('--gpu-compression',action='store_true',help='BC7 (Standalone) / ASTC 6x6 (Android) atlas pages')
     args = parser.parse_args()
-    spec = stage(args.source, args.project, args.cells.split(','),args.visuals,args.calibration)
+    spec = stage(args.source, args.project, args.cells.split(','),args.visuals,args.calibration,args.gpu_compression)
     print('Isolated project:', args.project.resolve(), flush=True)
     if args.build or args.android_only:
         log = args.project.resolve() / ('android-build.log' if args.android_only else 'build.log')

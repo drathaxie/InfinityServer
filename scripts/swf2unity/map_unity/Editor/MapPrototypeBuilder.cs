@@ -15,12 +15,13 @@ public static class MapPrototypeBuilder
     [Serializable] public class Spawn { public string name; public float x,y; }
     [Serializable] public class Exit { public string name,targetCell,targetPad; public Polygon[] polygons; }
     [Serializable] public class Cell { public string name,image; public float sourceScale,sourceSpeed; public Spawn[] spawns; public Polygon[] walkables,blockers; public Exit[] exits; }
-    [Serializable] public class FrameDef { public string name; public int page,x,y,w,h; }
+    [Serializable] public class TileDef { public int page,x,y,w,h,ox,oy; }
+    [Serializable] public class FrameDef { public string name; public int page,x,y,w,h; public TileDef[] tiles; }
     [Serializable] public class AtlasDef { public string path; public int height; }
     [Serializable] public class VisualLayer { public string name,group; public int order,period,source_char; public int[] frames; public float x,y; }
     [Serializable] public class VisualGroup { public string name,kind; public float speed,x,y; }
     [Serializable] public class VisualCell { public string name; public VisualLayer[] layers; public VisualGroup[] groups; }
-    [Serializable] public class InputData { public float width,height,pixelsPerUnit,fps,cameraZoom,rasterScale; public string outputDir,atlas; public Cell[] cells; public bool layered; public int atlasHeight; public AtlasDef[] visualAtlases; public FrameDef[] visualFrames; public VisualCell[] visualCells; public int[] sampleFrames; }
+    [Serializable] public class InputData { public float width,height,pixelsPerUnit,fps,cameraZoom,rasterScale; public string outputDir,atlas; public Cell[] cells; public bool layered,gpuCompression; public int atlasHeight; public AtlasDef[] visualAtlases; public FrameDef[] visualFrames; public VisualCell[] visualCells; public int[] sampleFrames; }
     [Serializable] public class CheckRecord { public string cell,kind,target; public int samples; public bool passed; }
     [Serializable] public class Report { public string status,proofBoundary; public int cells; public CheckRecord[] checks; }
     static InputData input;
@@ -28,6 +29,7 @@ public static class MapPrototypeBuilder
     class VisualClock { public GameObject go; public AnimationClip clip; public int period; }
     static Dictionary<string,List<VisualClock>> clocks=new Dictionary<string,List<VisualClock>>();
     static Sprite[] visualSprites;
+    static Sprite[][] tileSprites;
     static Vector2 Pos(float x,float y) => new Vector2(x/input.pixelsPerUnit,-y/input.pixelsPerUnit);
 
     static GameObject Node(string name,Transform parent) { var go=new GameObject(name); go.transform.SetParent(parent,false); return go; }
@@ -203,17 +205,31 @@ public static class MapPrototypeBuilder
             importer.textureType=TextureImporterType.Default; importer.textureCompression=TextureImporterCompression.Uncompressed;
             importer.mipmapEnabled=false; importer.isReadable=false;
             importer.filterMode=input.rasterScale>1?FilterMode.Bilinear:FilterMode.Point;
-            importer.wrapMode=TextureWrapMode.Clamp;
+            importer.wrapMode=TextureWrapMode.Clamp; importer.npotScale=TextureImporterNPOTScale.None;
+            // Pages are laid out in 12-texel blocks (map_visuals.BLOCK), so BC7 4x4 and ASTC 6x6 blocks never mix two images.
+            foreach(var (platform,format) in new[]{("Standalone",TextureImporterFormat.BC7),("Android",TextureImporterFormat.ASTC_6x6)})
+            {
+                var settings=importer.GetPlatformTextureSettings(platform);
+                settings.overridden=input.gpuCompression; settings.format=format; settings.maxTextureSize=4096; settings.compressionQuality=100;
+                importer.SetPlatformTextureSettings(settings);
+            }
             importer.alphaIsTransparency=false; importer.maxTextureSize=4096; importer.SaveAndReimport();
             textures.Add(AssetDatabase.LoadAssetAtPath<Texture2D>(page.path));
         }
-        visualSprites=new Sprite[input.visualFrames.Length];
+        float ppu=input.pixelsPerUnit*Mathf.Max(1,input.rasterScale);
+        Sprite Make(string name,int page,int x,int y,int w,int h)
+        {
+            var sprite=Sprite.Create(textures[page],new Rect(x,pages[page].height-y-h,w,h),new Vector2(.5f,.5f),ppu,0,SpriteMeshType.FullRect);
+            sprite.name=name; AssetDatabase.CreateAsset(sprite,"Assets/Generated/Visuals/"+name+".asset");
+            return sprite;
+        }
+        visualSprites=new Sprite[input.visualFrames.Length];tileSprites=new Sprite[input.visualFrames.Length][];
         for(int i=0;i<visualSprites.Length;i++)
         {
             var f=input.visualFrames[i];
-            var sprite=Sprite.Create(textures[f.page],new Rect(f.x,pages[f.page].height-f.y-f.h,f.w,f.h),new Vector2(.5f,.5f),input.pixelsPerUnit*Mathf.Max(1,input.rasterScale),0,SpriteMeshType.FullRect);
-            sprite.name=f.name; AssetDatabase.CreateAsset(sprite,"Assets/Generated/Visuals/"+f.name+".asset");
-            visualSprites[i]=sprite;
+            if(f.tiles!=null&&f.tiles.Length>0)
+                tileSprites[i]=f.tiles.Select((t,k)=>Make(f.name+"_t"+k,t.page,t.x,t.y,t.w,t.h)).ToArray();
+            else visualSprites[i]=Make(f.name,f.page,f.x,f.y,f.w,f.h);
         }
     }
     static void AddVisuals(Cell cell,Transform parent)
@@ -255,6 +271,23 @@ public static class MapPrototypeBuilder
         foreach(var layer in spec.layers)
         {
             var owner=hasDepth?groups[layer.group]:folder.transform;
+            var frame=input.visualFrames[layer.frames[0]];
+            if(tileSprites[layer.frames[0]]!=null)
+            {
+                // Sparse static image: one renderer per stored tile, at the tile's place in the original image.
+                if(layer.period!=1)throw new Exception("Animated layer frames are never tiled: "+layer.name);
+                var node=Node(layer.name,owner);
+                node.transform.position=parent.TransformPoint(new Vector3(layer.x/input.pixelsPerUnit,-layer.y/input.pixelsPerUnit,5));
+                float ppu=input.pixelsPerUnit*Mathf.Max(1,input.rasterScale);
+                for(int k=0;k<frame.tiles.Length;k++)
+                {
+                    var t=frame.tiles[k];var tile=Node(layer.name+"_t"+k,node.transform).AddComponent<SpriteRenderer>();
+                    tile.sprite=tileSprites[layer.frames[0]][k];tile.sortingOrder=layer.order;
+                    tile.sortingLayerName=hasDepth&&owner.GetComponent<ZOffset>()==null?"BGFront":"Default";
+                    tile.transform.localPosition=new Vector3((t.ox+t.w/2f-frame.w/2f)/ppu,-(t.oy+t.h/2f-frame.h/2f)/ppu,0);
+                }
+                continue;
+            }
             var sr=Node(layer.name,owner).AddComponent<SpriteRenderer>();
             sr.sprite=visualSprites[layer.frames[0]];sr.sortingOrder=layer.order;
             sr.sortingLayerName=hasDepth&&owner.GetComponent<ZOffset>()==null?"BGFront":"Default";

@@ -34,11 +34,15 @@ def prepare():
     if VERSION>=3:
         expected_depth=sum(g['kind'] in ('depth','actor') for c in visuals['cells'] for g in c['groups'])
         assert len([c for c in proof['presentation_checks'] if c['kind']=='depth_front_behind'])==expected_depth
-    if VERSION==4:
+    if VERSION>=4:
         assert proof['raster_quality']['source_raster_scale']==3
         assert len([c for c in proof['presentation_checks'] if c['kind']=='npc_dragon_overlap_exercised'])==1
+    if VERSION>=5:
+        assert proof['raster_quality']['tiling']['unique_tiles']>0
+        assert {t['format'] for t in proof['raster_quality']['textures']}=={'BC7'}
     platform_proof=json.loads((SOURCE/'unity_build/android/platform_verification.json').read_text())
     assert platform_proof['status']=='passed'
+    if VERSION>=5:assert {t['format'] for t in platform_proof['android_textures'].values()}=={'ASTC_RGB_6x6'}  # UnityPy's name for Unity 6 ASTC_6x6 (alpha-capable)
     files={}
     for platform in ('windows','android'):
         directory=SOURCE/'unity_build'
@@ -87,7 +91,7 @@ def run(mode):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode',choices=('preflight','prepare','stage','dry-run','apply','verify'))
-    parser.add_argument('--revision',type=int,choices=(2,3,4),default=2)
+    parser.add_argument('--revision',type=int,choices=(2,3,4,5),default=2)
     args=parser.parse_args();VERSION=args.revision
     SOURCE=ROOT/('outputs/map_converter_trial/shadowfall/revisions/v'+str(VERSION))
     OUT=SOURCE/'live_shadowtest';REMOTE='/tmp/infinity-shadowtest-v'+str(VERSION)+'-20261102'

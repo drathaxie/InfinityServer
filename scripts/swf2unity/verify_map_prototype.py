@@ -118,10 +118,13 @@ def verify(source, cells=('Enter', 'Garden1')):
             if obj.type.name!='Texture2D':continue
             tree=obj.read_typetree()
             assert tree['m_TextureSettings']['m_FilterMode']==1 and not tree['m_IsReadable']
-            texture_checks.append(dict(name=tree['m_Name'],width=tree['m_Width'],height=tree['m_Height'],filter='Bilinear',cpu_copy_retained=False))
+            texture_checks.append(dict(name=tree['m_Name'],width=tree['m_Width'],height=tree['m_Height'],filter='Bilinear',cpu_copy_retained=False,
+                                       format=UnityPy.enums.TextureFormat(tree['m_TextureFormat']).name,gpu_bytes=len(tree['image data']) or tree['m_CompleteImageSize']))
         assert sorted((t['width'],t['height']) for t in texture_checks)==sorted((p['width'],p['height']) for p in visual['atlases'])
         assert all(np.isclose(r['pixels_per_unit'],ppu*visual['raster_scale']) for c in audit['cells'] for r in c['components']['SpriteRenderer'])
         report['raster_quality']=dict(source_raster_scale=visual['raster_scale'],texture_bytes=visual['texture_bytes'],textures=texture_checks)
+        if visual.get('tiling'):
+            report['raster_quality'].update(tiling=visual['tiling'],gpu_bytes=sum(t['gpu_bytes'] for t in texture_checks))
     (source / 'unity_build' / 'serialized_audit.json').write_text(json.dumps(audit, indent=2))
     (source / 'unity_build' / 'prototype_verification.json').write_text(json.dumps(report, indent=2))
     return report
@@ -149,6 +152,16 @@ def verify_layered_renders(source,cells):
     (source/'unity_build/render_validation.json').write_text(json.dumps(result,indent=2))
     if result['status']!='passed':raise ValueError('Layered map render mismatch: '+str([r for r in results if not r['passed']]))
     return result
+
+
+def atlas_error(source,name,decoded):
+    """Decoded bundle page against its exported source page, both composited over black (the render-check basis)."""
+    from PIL import Image
+    suffix=name[len('layered_atlas'):]
+    with Image.open(source/'visuals'/('atlas'+suffix+'.png')) as im:expected=im.convert('RGBA')
+    over=lambda im:np.asarray(Image.alpha_composite(Image.new('RGBA',im.size,(0,0,0,255)),im),dtype=np.int16)[...,:3]
+    error=np.abs(over(decoded)-over(expected));mean=float(error.mean());p99=float(np.percentile(error,99))
+    return dict(mean_error_255=mean,p99_error_255=p99,passed=decoded.size==expected.size and mean<=2 and p99<=16)
 
 
 def verify_android(source):
@@ -184,11 +197,19 @@ def verify_android(source):
                 tree=obj.read_typetree();clips[tree['m_Name']]=normalize(tree)
             elif obj.type.name=='Texture2D':
                 texture=obj.read();im=texture.image.convert('RGBA')
-                textures[texture.m_Name]=dict(size=im.size,sha256=hashlib.sha256(im.tobytes()).hexdigest())
+                textures[texture.m_Name]=dict(size=im.size,format=UnityPy.enums.TextureFormat(texture.m_TextureFormat).name,
+                                              sha256=hashlib.sha256(im.tobytes()).hexdigest(),**atlas_error(source,texture.m_Name,im))
         signatures.append(dict(clips=clips,textures=textures))
-    assert signatures[0]==signatures[1],'Platform animation/atlas data differ'
+    assert signatures[0]['clips']==signatures[1]['clips'],'Platform animation data differ'
+    assert {k:v['size'] for k,v in signatures[0]['textures'].items()}=={k:v['size'] for k,v in signatures[1]['textures'].items()}
+    # Platforms use different block formats (BC7 / ASTC), so each decoded page is held to the source atlas instead of to the other.
+    for signature in signatures:
+        assert all(t['passed'] for t in signature['textures'].values()),'Decoded atlas differs from source: '+str(signature['textures'])
+    if all(t['format']==u['format'] for t,u in zip(signatures[0]['textures'].values(),signatures[1]['textures'].values())):
+        assert signatures[0]['textures']==signatures[1]['textures'],'Platform atlas data differ'
     result=dict(status='passed',windows_sha256=audits[0]['sha256'],android_sha256=audits[1]['sha256'],
-                clips=len(signatures[0]['clips']),textures=signatures[0]['textures'],device_render_verified=False)
+                clips=len(signatures[0]['clips']),textures=signatures[0]['textures'],android_textures=signatures[1]['textures'],
+                device_render_verified=False)
     (source/'unity_build/android/platform_verification.json').write_text(json.dumps(result,indent=2))
     return result
 

@@ -12,16 +12,71 @@ import re
 import struct
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 import swfparse as sp
 import render
 from ccscripts import ffdec
 from interactive_morph import functions
-from armor import pack, pot
 
 
 SAMPLES = [0, 1, 5, 10, 11, 24, 85, 86, 87, 171, 174]
+# Static layers are stored as sparse payload tiles. Each cell keeps a one-texel border of the real neighbouring
+# pixels, so bilinear sampling at a tile edge reads what the whole image would have, and adjacent tiles meet
+# seamlessly. Cells and slots are multiples of BLOCK (lcm of BC7 4x4 and ASTC 6x6), so no compression block
+# straddles two images.
+TILE = 130
+CELL = TILE + 2
+BLOCK = 12
+PAGE = 4096
+
+
+def tile_image(image,T=TILE):
+    """(x, y, w, h, cell) for every payload tile of image that holds any visible texel."""
+    a=np.asarray(image.convert('RGBA'));H,W=a.shape[:2]
+    padded=np.zeros((H+T+2,W+T+2,4),np.uint8);padded[1:H+1,1:W+1]=a
+    for y in range(0,H,T):
+        for x in range(0,W,T):
+            cell=padded[y:y+T+2,x:x+T+2]
+            if cell[...,3].any():yield x,y,min(T,W-x),min(T,H-y),cell
+
+
+def pack_pages(unique,static_ids):
+    """Shelf-pack direct images and deduplicated static tiles into block-aligned slots on 4096 pages."""
+    items=[];cells={};tiled={};direct={}
+    for index,image in enumerate(unique):
+        if index in static_ids and image.width*image.height>=2*CELL*CELL:
+            tiles=[]
+            for x,y,w,h,cell in tile_image(image):
+                digest=hashlib.sha256(cell.tobytes()).digest()
+                if digest not in cells:cells[digest]=len(items);items.append((CELL,CELL,Image.fromarray(cell),0))
+                tiles.append((cells[digest],x,y,w,h))
+            tiled[index]=tiles
+        else:
+            # One transparent texel of gutter on every side, rounded up to whole blocks.
+            direct[index]=len(items)
+            items.append((math.ceil((image.width+2)/BLOCK)*BLOCK,math.ceil((image.height+2)/BLOCK)*BLOCK,image,1))
+    usable=PAGE//BLOCK*BLOCK;placed={};heights=[0];x=y=shelf=0
+    for i in sorted(range(len(items)),key=lambda i:(-items[i][1],-items[i][0])):
+        w,h=items[i][:2]
+        if w>usable or h>usable:raise ValueError('Source visual exceeds one full-density 4096 page')
+        if x+w>usable:x=0;y+=shelf;shelf=0
+        if y+h>usable:heights.append(0);x=y=shelf=0
+        placed[i]=(len(heights)-1,x,y);x+=w;shelf=max(shelf,h);heights[-1]=max(heights[-1],y+h)
+    # No mipmaps and a fixed camera zoom: pages need only whole compression blocks, not power-of-two sizes.
+    atlases=[Image.new('RGBA',(PAGE,math.ceil(h/BLOCK)*BLOCK)) for h in heights]
+    for i,(page,x,y) in placed.items():
+        _,_,image,inset=items[i];atlases[page].paste(image,(x+inset,y+inset))
+    frames=[]
+    for index,image in enumerate(unique):
+        name='frame_'+str(index)
+        if index in tiled:
+            frames.append(dict(name=name,w=image.width,h=image.height,tiles=[
+                dict(page=placed[i][0],x=placed[i][1]+1,y=placed[i][2]+1,w=w,h=h,ox=ox,oy=oy) for i,ox,oy,w,h in tiled[index]]))
+        else:
+            page,x,y=placed[direct[index]];frames.append(dict(name=name,page=page,x=x+1,y=y+1,w=image.width,h=image.height))
+    return atlases,frames,dict(tiled_images=len(tiled),tile_refs=sum(len(t) for t in tiled.values()),unique_tiles=len(cells))
 
 
 def clip_to_stage(result,stage,raster_scale,margin=48):
@@ -248,45 +303,60 @@ def convert(source,out,layout=None,reuse=None,raster_scale=1):
                 x=ox/20+w/(2*raster_scale),y=oy/20+h/(2*raster_scale),source_path=draw['source_path'],source_char=draw['char'],group=draw['group']))
         plans.append(dict(name=cell['name'],layers=layers,groups=layout.get('cells',{}).get(cell['name'],{}).get('groups',[])))
         reference(movie,cell,hidden,out,SAMPLES,raster_scale)
-    sizes=[im.size for im in unique]
-    candidates=[]
-    for width in (1024,2048,4096):
-        positions,height=pack(sizes,width)
-        if positions and pot(height)<=4096:candidates.append((width*pot(height),width,pot(height),positions))
-    pages=[]
-    if candidates:
-        _,width,height,positions=min(candidates);pages=[(list(range(len(unique))),width,height,positions)]
-    else:
-        remaining=sorted(range(len(unique)),key=lambda i:-unique[i].width*unique[i].height)
-        while remaining:
-            selected=[];left=[];positions=None;height=None
-            for index in remaining:
-                proposed=selected+[index];pos,h=pack([sizes[i] for i in proposed],4096)
-                if pos and h<=4096:selected=proposed;positions=pos;height=h
-                else:left.append(index)
-            if not selected:raise ValueError('Source visual exceeds one full-density 4096 page')
-            pages.append((selected,4096,pot(height),positions));remaining=left
-    texture_bytes=sum(w*h*4 for _,w,h,_ in pages)
+    animated={fid for c in plans for l in c['layers'] if l['period']>1 for fid in l['frames']}
+    pages,frames,tiling=pack_pages(unique,set(range(len(unique)))-animated)
+    atlases=[]
+    for page,atlas in enumerate(pages):
+        name='atlas.png' if page==0 else 'atlas_'+str(page)+'.png'
+        atlas.save(out/name);atlases.append(dict(file=name,width=atlas.width,height=atlas.height))
+    texture_bytes=sum(p['width']*p['height']*4 for p in atlases)
     if texture_bytes>192*1024*1024:raise ValueError('Map diffuse atlas budget exceeded')
-    frames=[None]*len(unique);atlases=[]
-    for page,(indices,width,height,positions) in enumerate(pages):
-        atlas=Image.new('RGBA',(width,height));name='atlas.png' if page==0 else 'atlas_'+str(page)+'.png'
-        for index,(x,y) in zip(indices,positions):
-            im=unique[index];atlas.paste(im,(x,y));frames[index]=dict(name='frame_'+str(index),page=page,x=x,y=y,w=im.width,h=im.height)
-        atlas.save(out/name);atlases.append(dict(file=name,width=width,height=height))
-    result=dict(schema='flash-map-visuals-v1',source_sha256=manifest['source_sha256'],fps=movie.fps,atlas='atlas.png',
-        atlas_width=atlases[0]['width'],atlas_height=atlases[0]['height'],texture_bytes=texture_bytes,atlases=atlases,raster_scale=raster_scale,frames=frames,cells=plans,samples=SAMPLES,
+    gpu_bytes=dict(rgba32=texture_bytes,bc7=texture_bytes//4,
+                   astc_6x6=sum(math.ceil(p['width']/6)*math.ceil(p['height']/6)*16 for p in atlases))
+    result=dict(schema='flash-map-visuals-v2',source_sha256=manifest['source_sha256'],fps=movie.fps,atlas='atlas.png',
+        atlas_width=atlases[0]['width'],atlas_height=atlases[0]['height'],texture_bytes=texture_bytes,gpu_bytes=gpu_bytes,
+        tiling=dict(tiling,tile=TILE,cell=CELL,block=BLOCK),atlases=atlases,raster_scale=raster_scale,frames=frames,cells=plans,samples=SAMPLES,
         overscan_source_pixels=48,
         initially_hidden_symbols=sorted(hidden),initially_stopped_symbols=sorted(stopped),script_holds=holds,
         proof_boundary='Visual timelines only. Stateful NPC/quest/visibility behavior remains uncompiled.')
     (out/'visuals.json').write_text(json.dumps(result,indent=2))
     print(json.dumps(dict(cells=[(c['name'],len(c['layers']),sum(l['period']>1 for l in c['layers'])) for c in plans],
-                         unique_images=len(unique),atlases=atlases,texture_bytes=result['texture_bytes']),indent=2),flush=True)
+                         unique_images=len(unique),tiling=result['tiling'],atlases=atlases,gpu_bytes=gpu_bytes),indent=2),flush=True)
     return result
+
+
+def repack(previous,out):
+    """Re-store an exported visual set's exact frame pixels as sparse tiles, without re-rasterizing."""
+    import shutil
+    previous,out=previous.resolve(),out.resolve();out.mkdir(parents=True,exist_ok=True)
+    data=json.loads((previous/'visuals.json').read_text())
+    assert not any('tiles' in f for f in data['frames']),'Already tiled'
+    pages=[Image.open(previous/p['file']).convert('RGBA') for p in data['atlases']]
+    unique=[pages[f.get('page',0)].crop((f['x'],f['y'],f['x']+f['w'],f['y']+f['h'])) for f in data['frames']]
+    animated={fid for c in data['cells'] for l in c['layers'] if l['period']>1 for fid in l['frames']}
+    atlas_images,frames,tiling=pack_pages(unique,set(range(len(unique)))-animated)
+    atlases=[]
+    for page,atlas in enumerate(atlas_images):
+        name='atlas.png' if page==0 else 'atlas_'+str(page)+'.png'
+        atlas.save(out/name);atlases.append(dict(file=name,width=atlas.width,height=atlas.height))
+    texture_bytes=sum(p['width']*p['height']*4 for p in atlases)
+    gpu_bytes=dict(rgba32=texture_bytes,bc7=texture_bytes//4,
+                   astc_6x6=sum(math.ceil(p['width']/6)*math.ceil(p['height']/6)*16 for p in atlases))
+    data.update(schema='flash-map-visuals-v2',atlas_width=atlases[0]['width'],atlas_height=atlases[0]['height'],
+                texture_bytes=texture_bytes,gpu_bytes=gpu_bytes,tiling=dict(tiling,tile=TILE,cell=CELL,block=BLOCK),
+                atlases=atlases,frames=frames,repacked_from=str(previous))
+    if (out/'references').exists():shutil.rmtree(out/'references')
+    shutil.copytree(previous/'references',out/'references')
+    (out/'visuals.json').write_text(json.dumps(data,indent=2))
+    print(json.dumps(dict(tiling=data['tiling'],atlases=atlases,gpu_bytes=gpu_bytes),indent=2),flush=True)
+    return data
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('source',type=Path);parser.add_argument('out',type=Path)
     parser.add_argument('--layout',type=Path);parser.add_argument('--reuse',type=Path)
     parser.add_argument('--raster-scale',type=int,choices=(1,2,3),default=1)
-    args=parser.parse_args();convert(args.source,args.out,args.layout,args.reuse,args.raster_scale)
+    parser.add_argument('--repack',action='store_true',help='source is an exported visuals directory; re-store it as sparse tiles')
+    args=parser.parse_args()
+    if args.repack:repack(args.source,args.out)
+    else:convert(args.source,args.out,args.layout,args.reuse,args.raster_scale)

@@ -3,7 +3,63 @@
 November 2, 2026. The selected conversion pilot is Shadowfall, replacing the
 earlier Greenguard proposal. Native map inspection remains reference material.
 
-## Revision 4 under validation: vector density and NPC ordering
+## Version 5 published: sparse tiles and GPU compression
+
+November 3. After v4 the user called its 160 MiB of uncompressed atlas memory
+inefficient. Measurement: only 34% of the v4 atlas held visible art; static
+layers (98% of pixels) were stored as whole rectangles, mostly transparent.
+
+Same pixels, stored differently (no re-rasterization: `--repack` crops v4's
+verified frames back out and re-stores them; a fresh export uses the same
+`pack_pages`):
+
+* Static layers become 130 px payload tiles in 132 px cells. Each cell keeps a
+  one-texel border of the *real* neighbouring pixels, so bilinear sampling at a
+  tile edge reads what the whole image would; tiles meet without seams. Empty
+  tiles are dropped and identical tiles stored once (1,168 refs -> 1,070 tiles).
+  Each tile is an ordinary SpriteRenderer; no custom shader.
+* Every cell/slot is a multiple of 12 texels (lcm of BC7 4x4 and ASTC 6x6), so no
+  compression block mixes two images. Pages are block-rounded, not power-of-two
+  (no mipmaps, fixed zoom): 4096 x 4020 + 4096 x 1116.
+* `--gpu-compression`: BC7 on Standalone, ASTC 6x6 on Android, quality 100.
+
+| | v4 | v5 |
+|---|---|---|
+| GPU memory, PC | 160 MiB (RGBA32) | **20.1 MiB** (BC7) |
+| GPU memory, Android | 160 MiB | **8.9 MiB** (ASTC 6x6) |
+| Bundle, Windows / Android | 5.25 / 5.26 MB | 3.32 / 2.22 MB |
+
+Validation: repack lossless for all 378 frames, with exact borders and
+transparent gutters; 17 Python tests; 22 source comparisons (worst mean
+0.437/255, p99 10/255); tile-edge error equals interior error (Enter 0.88 vs 0.79
+mean max-channel), i.e. no seams; 1,155 Animator, 12 depth, NPC-over-dragon,
+parallax and camera checks. Platform check now holds each platform's decoded
+page to the source atlas (Windows BC7 worst mean 0.195, Android ASTC 0.323)
+instead of requiring identical bytes across formats. Android device rendering
+remains unverified.
+
+* Windows SHA-256: `d697629a37e89f8c650e422c38cf9e1fbbbfaa0ee46b5725ce1fea629a958761`; CRC `61218360`.
+* Android SHA-256: `e4801c2c20e359b76bae0685fc70040fbb2106a66f085d1d8cf4ee5d627966da`; CRC `3271946664`.
+* Backup: `/opt/infinity/backups/shadowtest-v5-20261103T170205Z`. Game PID preserved.
+
+```powershell
+$env:SWF2UNITY_CONFLATION_SCALE='4'
+python scripts/swf2unity/map_visuals.py outputs/map_converter_trial/shadowfall/revisions/v4/visuals outputs/map_converter_trial/shadowfall/revisions/v5/visuals --repack
+python scripts/swf2unity/build_map_prototype.py outputs/map_converter_trial/shadowfall/revisions/v5 --project outputs/map_converter_trial/shadowfall/UnityProject --visuals outputs/map_converter_trial/shadowfall/revisions/v5/visuals --calibration scripts/swf2unity/map_configs/shadowfall-calibration-v4.json --gpu-compression --build
+python scripts/swf2unity/verify_map_prototype.py outputs/map_converter_trial/shadowfall/revisions/v5
+```
+
+(`--android-only` / `--android` for the Android build and check; publish with
+`shadowtest_update_host.py ... --revision 5`.)
+
+## Historical version 4: vector density and NPC ordering
+
+Published November 3. Density math: 10 px/unit world, camera ortho size 16
+shows 320 source px vertically, so 1080p needs 3.375x; 3x leaves 1.125x bilinear
+magnification (was 3.375x at 1x). The 48 px `clip_to_stage` overscan only trims
+off-stage Ground (speed 0) and the DistantCastle top (speed 8, worst-case
+reveal ~27 px). Windows SHA-256 `13f9f579…`, CRC `3175276437`; Android
+`b3fe7064…`, CRC `641746224`; backup `shadowtest-v4-20261103T154535Z`.
 
 November 3: the user confirmed live parallax in version 3, but showed the dragon
 structure covering the NPCs, visibly magnified texture pixels, and an undersized
