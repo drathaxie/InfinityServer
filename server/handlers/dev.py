@@ -24,6 +24,10 @@ async def slash_cmd(session, writer, cmd, params, msg):   # slash commands: Para
     # Some client paths send Params=["shop 1"] instead of ["shop", "1"].
     params = [tok for part in (params or []) for tok in str(part).strip().split()]
     sub = (params[0].lstrip("/").lower() if params else "")
+    if sub == "bphello":
+        if session.member is not None and len(params)>1 and params[1]=="1":
+            session.member.battlepet_v1 = True
+        return
 
     # Batch statue generation via the REAL render pipeline: summon each character's assembled
     # avatar into THIS dev's client (AreaAdd — same path other players use), tell the mod to run it

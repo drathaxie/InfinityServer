@@ -1,6 +1,6 @@
 {
   "ID": 100,
-  "nextElementId": 31,
+  "nextElementId": 33,
   "name": "AUGold",
   "bgImage": "",
   "bgImageScale": 1,
@@ -60,6 +60,58 @@
           "changeSubtitle": "",
           "compactMode": false,
           "requirements": []
+        },
+        {
+          "ID": 31,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "OpenBank",
+          "label": "Open Bank",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false,
+          "sfxString": "",
+          "musicID": -1
+        },
+        {
+          "ID": 32,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false,
+          "sfxString": "",
+          "musicID": -1
         }
       ]
     },
@@ -116,5 +168,6 @@
       "animation": ""
     }
   ],
-  "freezeClient": 1
+  "freezeClient": 1,
+  "IsSingleAction": false
 }

@@ -239,6 +239,9 @@ def _render_node(area, slot, caster, default_targets, nodes, props,
     allies = the area's other players (for heal/ally-buff targeting)."""
     name = props.get("Name")
     killed = []
+    if name == "PetAnimation":
+        from battlepets import render_animation
+        return render_animation(props, default_targets[0] if default_targets else None), 0, killed
     if name == "Damage":
         mult = float(props.get("Multiplier") or 0) or 1.0       # unset -> normal (1x)
         mult *= empower_mult                # Determined empower / Conviction stacks (1.0 if not)
@@ -257,8 +260,11 @@ def _render_node(area, slot, caster, default_targets, nodes, props,
                 amt, crit = _heal_amount(caster, mult)
                 new = _raise_hp(_uid_of(ts), amt)
                 damages.append(-amt); hps.append(new); dtypes.append(1 if crit else 0)
-            return ({"Name": "Damage", "DamageTypes": dtypes, "Damages": damages,
-                     "Targets": ptgts, "TargetHPs": hps}, 0, killed)
+            out = {"Name": "Damage", "DamageTypes": dtypes, "Damages": damages,
+                   "Targets": ptgts, "TargetHPs": hps}
+            if "Immediate" in props:
+                out["Immediate"] = bool(props["Immediate"])
+            return out, 0, killed
         magical = props.get("DamageType") == "Magical"          # element -> which power (ap/sp)
         guaranteed = bool(props.get("Guaranteed"))               # skip the to-hit/dodge roll
         tgts = _resolve_targets(props, nodes, caster, default_targets, area, allies)
@@ -289,8 +295,11 @@ def _render_node(area, slot, caster, default_targets, nodes, props,
             if prev > 0 and hp <= 0:        # don't re-credit an already-dead target
                 killed.append(ts)
             damages.append(d); hps.append(hp); dtypes.append(dtype); dmg += d
-        return ({"Name": "Damage", "DamageTypes": dtypes, "Damages": damages,
-                 "Targets": mtgts, "TargetHPs": hps}, dmg, killed)
+        out = {"Name": "Damage", "DamageTypes": dtypes, "Damages": damages,
+               "Targets": mtgts, "TargetHPs": hps}
+        if "Immediate" in props:
+            out["Immediate"] = bool(props["Immediate"])
+        return out, dmg, killed
     if name == "Cooldown":
         return ({"Name": "Cooldown", "Animation": props.get("Animation") or "",
                  "Slot": slot, "CD": int(props.get("CD") or 0) or 1000}, 0, killed)
@@ -566,7 +575,12 @@ def _apply_cast_resource(cast):
 
 
 def _new_ctx(cast):
-    ctx = uuid.uuid4().hex[:8]
+    now = time.time()
+    for old, pending in list(_casts.items()):
+        if getattr(pending, "context_expires", 0) <= now:
+            _casts.pop(old, None)
+    cast.context_expires = now + 30
+    ctx = uuid.uuid4().hex
     _casts[ctx] = cast
     return ctx
 
@@ -719,20 +733,34 @@ def cast_skill_rules(area, uid, slot, target, data, forge, skill_id, cfg, allies
         return begin_cast(area, uid, slot, target, data, forge, skill_id, allies)
 
 
-def resume_cast(ctx, gai_params):
+def resume_cast(ctx, gai_params, *, uid=None, area=None, frame=None):
     """Handle c2s gai. Returns (packets, killed_list, total_dmg). Empty if no paused cast
     matches (e.g. auto-attack's gai, which we resolve single-shot)."""
-    cast = _casts.pop(ctx, None)
+    cast = _casts.get(ctx)
     if cast is None:
         return [], [], 0
     current_name = cast.order[cast.i][1].get("Name") if cast.i < len(cast.order) else ""
+    if getattr(cast, "context_expires", 0) <= time.time():
+        _casts.pop(ctx, None)
+        return [], [], 0
+    if uid is not None and (cast.uid != uid or cast.area != area or player_hp(uid) <= 0):
+        return [], [], 0
+    if len(gai_params) < 3 or str(gai_params[0]) != str(cast.slot) or gai_params[2] != current_name:
+        return [], [], 0
+    _casts.pop(ctx, None)
     response_tokens = {str(x).strip().lower() for x in gai_params[3:]}
     if current_name in ("Range", "ConditionalRange", "RangeMulti") and \
             response_tokens.intersection({"false", "cancel", "cancelled", "canceled"}):
         release_cooldown(cast.uid, cast.slot)
         return [cast_failure(cast.uid, cast.slot)], [], 0
     ents = [x for x in gai_params[3:]
-            if isinstance(x, str) and (x.startswith("m:") or x.startswith("p:"))]
+             if isinstance(x, str) and (x.startswith("m:") or x.startswith("p:"))]
+    if uid is not None:
+        allowed_players = {f"p:{uid}"} | set(cast.allies or [])
+        ents = [x for x in ents if
+                (x in allowed_players and player_hp(_uid_of(x)) > 0) or
+                (valid_combat_target(area, x) and
+                 (frame is None or _moninfo.get((area, x), {}).get("frame", frame) == frame))]
     if current_name == "RangeMulti" and cast.skill_id == MAGE_EXPLOSION:
         # NodeRangeMulti can report the caster when a targetless mobile cast
         # starts before the client's selected-target field catches up. Explosion
@@ -1464,6 +1492,7 @@ AURA_FX = {
     "Temporal Stasis": {"kind": "stun", "secs": 2.5, "speed": 0.0},
 }
 _auras = {}                 # (area, ts) -> {name: {ends, next, amt, caster, kind}}
+AURA_FX['Monster Transformation'] = {**AURA_FX['Practice Frogzard Form'], 'self_only': True}
 
 
 def aura_entry(area, target, name):
@@ -1676,13 +1705,13 @@ def aura_ticks():
     return out
 
 
-def drop_auras_for(ts):
+def drop_auras_for(ts, area=None):
     """Clear auras whose target is this entity (a player leaving / a monster despawning)."""
     for key in list(_auras.keys()):
-        if key[1] == ts:
+        if key[1] == ts and (area is None or key[0] == area):
             _auras.pop(key, None)
     for key in list(_stun.keys()):
-        if key[1] == ts:
+        if key[1] == ts and (area is None or key[0] == area):
             _stun.pop(key, None)
 
 
@@ -1710,18 +1739,23 @@ def start_hitstream(area, uid, slot, duration_s, multiplier=1.5, magical=True):
                                 "mult": float(multiplier), "magical": bool(magical)}
 
 
-def player_hitstream_hit(uid, slot, mon_targets):
+def player_hitstream_hit(uid, slot, mon_targets, *, current_area=None, frame=None):
     """Apply a client-reported PlayerHitStream hit (pmah) -> (attack_packet, killed_list),
     or (None, []) if there's no active window for this caster/slot (expired/stale report)
     or every listed target is still inside its throttle window."""
     st = _hitstreams.get((uid, slot))
     if st is None or time.time() >= st["end"]:
+        clear_hitstreams(uid, slot)
+        return None, []
+    if player_hp(uid) <= 0 or (current_area is not None and current_area != st["area"]):
         return None, []
     area = st["area"]
     now = time.time()
     landed = []
     for ts in mon_targets:
-        if not (isinstance(ts, str) and ts.startswith("m:")):
+        if not valid_combat_target(area, ts):
+            continue
+        if frame is not None and _moninfo.get((area, ts), {}).get("frame", frame) != frame:
             continue
         k = (area, uid, slot, ts)
         if now - _hitstream_last.get(k, 0.0) < HITSTREAM_HIT_THROTTLE:
@@ -1746,6 +1780,15 @@ def player_hitstream_hit(uid, slot, mon_targets):
     attack = {"Cmd": "Attack", "Caster": caster, "Slot": -1, "StatusCode": 1,
              "Wait": False, "Error": "", "Nodes": [node]}
     return attack, killed
+
+
+def clear_hitstreams(uid, slot=None):
+    for key in list(_hitstreams):
+        if key[0] == uid and (slot is None or key[1] == slot):
+            _hitstreams.pop(key, None)
+    for key in list(_hitstream_last):
+        if key[1] == uid and (slot is None or key[2] == slot):
+            _hitstream_last.pop(key, None)
 
 
 def monster_alive(area, mon_ts):
@@ -1840,6 +1883,7 @@ def set_maxhp(uid, maxhp):
 
 def forget_player(uid):
     cancel_player_actions(uid, clear_cooldowns=True)
+    _revive_after.pop(uid, None)
     _php.pop(uid, None)
     _pmax.pop(uid, None)
     _power.pop(uid, None)
@@ -2183,6 +2227,7 @@ def cancel_player_actions(uid, clear_cooldowns=False):
     field, or sustained auto cannot execute in a new combat context.
     """
     auto_disengage(uid)
+    clear_hitstreams(uid)
     drop_aggro_for(uid)
     for ctx, cast in list(_casts.items()):
         if cast.uid == uid:
@@ -2231,6 +2276,8 @@ def rest_player(uid, name):
     """Out-of-combat rest: full-heal HP and, for mana classes, refill the resource pool.
     -> hpmp packet (ResponseHpMp: sets the entity's HP/RP/State). Determination classes have
     no MP to refill (it's built in combat), so only their HP is restored."""
+    if player_hp(uid) <= 0:
+        return None
     mx = _pmax.get(uid, PLAYER_MAXHP)
     _php[uid] = mx
     if _resource_model.get(uid) == "mana":
@@ -2240,9 +2287,16 @@ def rest_player(uid, name):
     return {"Cmd": "hpmp", "unm": (name or "").lower(), "HP": mx, "RP": _rp.get(uid, 0), "State": 1}
 
 
+_revive_after = {}
+PLAYER_RESPAWN_DELAY = 10.0
+
+
 def revive_player(uid, name):
     """Full-heal a downed player -> playerRes packet (ResponseResPlayer keys on the
     player NAME). Also drops aggro so they aren't re-killed at the respawn point."""
+    if player_hp(uid) > 0 or uid not in _revive_after or time.time() < _revive_after[uid]:
+        return None
+    _revive_after.pop(uid, None)
     mx = _pmax.get(uid, PLAYER_MAXHP)
     _php[uid] = mx
     cancel_player_actions(uid)
@@ -2267,6 +2321,8 @@ def player_death_packet(uid, killer_ts):
     `entityDeath` targeting "p:<uid>" (NOT PlayerDeath) right after the lethal hit. The client runs
     Entity.Die -> the 10s respawn screen for the victim (death anim for everyone else), then auto-
     sends resPlayerTimed. PlayerDeath was wrong: it pre-sets state=Dead and Die() early-returns."""
+    _revive_after.setdefault(uid, time.time() + PLAYER_RESPAWN_DELAY)
+    cancel_player_actions(uid)
     return {"Cmd": "entityDeath", "targetString": f"p:{uid}",
             "efbTargetString": killer_ts or f"p:{uid}"}
 
@@ -2276,7 +2332,7 @@ def death_packets(area, target, uid):
     respawn_packet re-spawns it; aggro on it is cleared."""
     _last.pop(uid, None)
     disengage(area, target)
-    drop_auras_for(target)                  # per-life effects (including Freeze Immune) reset
+    drop_auras_for(target, area)            # per-life effects only in this instance
     caster = f"p:{uid}"
     return [
         {"Cmd": "entityDeath", "targetString": target, "efbTargetString": caster},
@@ -2288,7 +2344,7 @@ def respawn_packet(area, target):
     """Reset a dead monster to full HP and return the RespawnMon broadcast that makes
     it visually reappear (ResponseRespawnMon.Execute -> Monster.Respawn())."""
     key = (area, target)
-    drop_auras_for(target)
+    drop_auras_for(target, area)
     _mon[key] = _maxhp.get(key, DEFAULT_HP)
     try:
         mon_map_id = int(target.split(":", 1)[1])

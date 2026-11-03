@@ -1,0 +1,368 @@
+{
+  "entries": [
+    {
+      "family": "warrior",
+      "primary_stat": "STR",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210000
+    },
+    {
+      "family": "warrior",
+      "primary_stat": "STR",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210001
+    },
+    {
+      "family": "warrior",
+      "primary_stat": "STR",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210002
+    },
+    {
+      "family": "warrior",
+      "primary_stat": "STR",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 210003
+    },
+    {
+      "family": "fighter",
+      "primary_stat": "STR",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210004
+    },
+    {
+      "family": "fighter",
+      "primary_stat": "STR",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 97549
+    },
+    {
+      "family": "fighter",
+      "primary_stat": "STR",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210006
+    },
+    {
+      "family": "fighter",
+      "primary_stat": "STR",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 210007
+    },
+    {
+      "family": "brute",
+      "primary_stat": "STR",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210008
+    },
+    {
+      "family": "brute",
+      "primary_stat": "STR",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210009
+    },
+    {
+      "family": "brute",
+      "primary_stat": "STR",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210010
+    },
+    {
+      "family": "brute",
+      "primary_stat": "STR",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 210011
+    },
+    {
+      "family": "wizard",
+      "primary_stat": "INT",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210012
+    },
+    {
+      "family": "wizard",
+      "primary_stat": "INT",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210013
+    },
+    {
+      "family": "wizard",
+      "primary_stat": "INT",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210014
+    },
+    {
+      "family": "wizard",
+      "primary_stat": "INT",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 97552
+    },
+    {
+      "family": "mage",
+      "primary_stat": "INT",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210016
+    },
+    {
+      "family": "mage",
+      "primary_stat": "INT",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210017
+    },
+    {
+      "family": "mage",
+      "primary_stat": "INT",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210018
+    },
+    {
+      "family": "mage",
+      "primary_stat": "INT",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 210019
+    },
+    {
+      "family": "sorcerer",
+      "primary_stat": "INT",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210020
+    },
+    {
+      "family": "sorcerer",
+      "primary_stat": "INT",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210021
+    },
+    {
+      "family": "sorcerer",
+      "primary_stat": "INT",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210022
+    },
+    {
+      "family": "sorcerer",
+      "primary_stat": "INT",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 210023
+    },
+    {
+      "family": "rogue",
+      "primary_stat": "DEX",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210024
+    },
+    {
+      "family": "rogue",
+      "primary_stat": "DEX",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210025
+    },
+    {
+      "family": "rogue",
+      "primary_stat": "DEX",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210026
+    },
+    {
+      "family": "rogue",
+      "primary_stat": "DEX",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 210027
+    },
+    {
+      "family": "thief",
+      "primary_stat": "DEX",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 97555
+    },
+    {
+      "family": "thief",
+      "primary_stat": "DEX",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210029
+    },
+    {
+      "family": "thief",
+      "primary_stat": "DEX",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210030
+    },
+    {
+      "family": "thief",
+      "primary_stat": "DEX",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 97556
+    },
+    {
+      "family": "assassin",
+      "primary_stat": "DEX",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210032
+    },
+    {
+      "family": "assassin",
+      "primary_stat": "DEX",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210033
+    },
+    {
+      "family": "assassin",
+      "primary_stat": "DEX",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210034
+    },
+    {
+      "family": "assassin",
+      "primary_stat": "DEX",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 210035
+    },
+    {
+      "family": "healer",
+      "primary_stat": "WIS",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210036
+    },
+    {
+      "family": "healer",
+      "primary_stat": "WIS",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210037
+    },
+    {
+      "family": "healer",
+      "primary_stat": "WIS",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210038
+    },
+    {
+      "family": "healer",
+      "primary_stat": "WIS",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 97560
+    },
+    {
+      "family": "cleric",
+      "primary_stat": "WIS",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210040
+    },
+    {
+      "family": "cleric",
+      "primary_stat": "WIS",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210041
+    },
+    {
+      "family": "cleric",
+      "primary_stat": "WIS",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210042
+    },
+    {
+      "family": "cleric",
+      "primary_stat": "WIS",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 210043
+    },
+    {
+      "family": "lucky",
+      "primary_stat": "LUK",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210044
+    },
+    {
+      "family": "lucky",
+      "primary_stat": "LUK",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210045
+    },
+    {
+      "family": "lucky",
+      "primary_stat": "LUK",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210046
+    },
+    {
+      "family": "lucky",
+      "primary_stat": "LUK",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 210047
+    },
+    {
+      "family": "hybrid",
+      "primary_stat": "END",
+      "slot": "Weapon",
+      "equip_spot": 2,
+      "item_id": 210048
+    },
+    {
+      "family": "hybrid",
+      "primary_stat": "END",
+      "slot": "Helm",
+      "equip_spot": 3,
+      "item_id": 210049
+    },
+    {
+      "family": "hybrid",
+      "primary_stat": "END",
+      "slot": "Cape",
+      "equip_spot": 4,
+      "item_id": 210050
+    },
+    {
+      "family": "hybrid",
+      "primary_stat": "END",
+      "slot": "Armor",
+      "equip_spot": 7,
+      "item_id": 210051
+    }
+  ]
+}

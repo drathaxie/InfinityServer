@@ -7,8 +7,10 @@ items table as placeholder catalog entries — the same treatment the ARMOR bund
 Real item defs (Name + Description + stats) aren't reachable in bulk (no REST item endpoint;
 socket item catalog is access-gated — see [data-sources-audit]). So most fields are a TEMPLATE,
 not fabricated data:
-  - Name        : derived from the bundle FileName (items/swords/49_BigAssBall.unity3d ->
-                  "BigAssBall"). NOT a real display name.
+  - Name        : the bundle's own Name when it is a display name (has a space, e.g.
+                  "Scorched Ardor Hammer"); otherwise derived from the bundle FileName
+                  (items/swords/49_BigAssBall.unity3d -> "BigAssBall"), which is NOT a real
+                  display name.
   - Description : left empty (inventing flavor text = fabrication).
   - EquipSpot / ItemType / Icon : per-slot, taken from a template validated to be 100%
                   consistent (EquipSpot/Icon) or dominant (ItemType) across the known items in
@@ -123,7 +125,8 @@ def main():
         byslot[label] += 1
         it = dict(COMMON)
         it["ID"] = SYNTHETIC_ID_BASE + int(bid)
-        it["Name"] = name_from_filename(fn)
+        bname = (r.get("Name") or "").strip()
+        it["Name"] = bname if " " in bname else name_from_filename(fn)
         it["Description"] = ""
         it["Filename"] = fn
         it["EquipSpot"] = tmpl["equip_spot"]
@@ -139,7 +142,7 @@ def main():
     print("by slot:", dict(byslot.most_common()))
 
     total = conn.execute(
-        "SELECT COUNT(*) AS c FROM items WHERE item_id >= ?", (SYNTHETIC_ID_BASE,)).fetchone()["c"]
+        "SELECT COUNT(*) AS c FROM items WHERE id >= ?", (SYNTHETIC_ID_BASE,)).fetchone()["c"]
     print(f"items table now has {total} rows in the synthetic range (>= {SYNTHETIC_ID_BASE})")
 
 

@@ -256,12 +256,12 @@ def equipped_spellstone(conn, char_id):
     """The character's equipped ItemType 44 stone and its standalone graph, or None."""
     r = conn.execute(
         "SELECT i.*, ci.item_id AS equipped_item_id FROM char_items ci "
-        "JOIN items i ON i.item_id=ci.item_id WHERE ci.char_id=? AND ci.banked=0 "
+        "JOIN items i ON i.id=ci.item_id WHERE ci.char_id=? AND ci.banked=0 "
         "AND ci.equipped=1 AND i.item_type=44 ORDER BY ci.char_item_id LIMIT 1",
         (int(char_id),)).fetchone()
     if r is None:
         return None
-    sk = skill_by_id(conn, r["meta_string"])
+    sk = skill_by_id(conn, r["Meta"])
     if sk is None:
         return None
     sk["item_id"] = int(r["equipped_item_id"])

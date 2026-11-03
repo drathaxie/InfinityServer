@@ -3,6 +3,7 @@ import game
 import world
 import combat
 import forge
+import shared_online
 
 from .registry import register
 from .context import send_obj, _players
@@ -10,14 +11,34 @@ from .context import send_obj, _players
 
 @register("Login")
 async def login(session, writer, cmd, params, msg):
+    if session.char is not None:
+        return  # one authenticated identity per socket; reconnect for a different login
     username = params[1] if len(params) > 1 else "Hero"
     token = params[2] if len(params) > 2 else ""
     # The client presents the API-issued session token (account.sToken), NOT the password.
     # Validate it so a direct TCP connection can't log in as someone without authenticating.
-    session.char = game.resolve_session(session.conn, username, token)
-    if session.char is None:
+    char = game.resolve_session(session.conn, username, token)
+    if char is None:
         print(f"        [login] REJECTED {username} (no/invalid session token)")
         return
+    lease = shared_online.acquire(char["account_id"])
+    if lease is None:
+        await send_obj(writer, {"Cmd": "loginResponse", "Success": False,
+                                "failMessage": shared_online.MESSAGE})
+        writer.close()
+        return
+    session.online_lease = lease
+    # Recheck after acquiring: the API may have rotated the token while we waited.
+    session.char = game.resolve_session(session.conn, username, token)
+    if session.char is None:
+        lease.close()
+        session.online_lease = None
+        writer.close()
+        return
+    session.token, session.username = token, username
+    uid = game.uid_for(session.char)
+    # Drop old casts/zones before initializing this login's combat state.
+    combat.forget_player(uid)
     # the live class = the character's saved class (falls back to Dragonslayer 1932)
     session.equipped_class = int(session.char["class_id"] or 0) or forge.EQUIPPED_CLASS_ID
     init = game.build_init_player(session.conn, session.char)

@@ -1,0 +1,26 @@
+[
+  {
+    "ID": 28,
+    "sInfo": "infinityClientVersion",
+    "sHrlyMsg": "",
+    "iFlavor": 0,
+    "live": "0.0.262",
+    "test": "0.0.262"
+  },
+  {
+    "ID": 29,
+    "sInfo": "infinityRelease",
+    "sHrlyMsg": "",
+    "iFlavor": 0,
+    "live": "Alpha Test",
+    "test": "Alpha Test"
+  },
+  {
+    "ID": 30,
+    "sInfo": "infinityMessage",
+    "sHrlyMsg": "",
+    "iFlavor": 0,
+    "live": "NEW VERSION! Grab the newest Android & Steam verions. www.AQ2D.com",
+    "test": "NEW VERSION! Grab the newest Android & Steam verions. www.AQ2D.com"
+  }
+]

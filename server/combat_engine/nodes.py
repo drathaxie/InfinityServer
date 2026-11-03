@@ -40,6 +40,12 @@ def _opt(out, props, *keys):
     return out
 
 
+@renderer("PetAnimation")
+def _pet_animation(ctx, props):
+    from battlepets import render_animation
+    return render_animation(props, ctx.target)
+
+
 # --- damage ------------------------------------------------------------------
 
 @renderer("Damage")

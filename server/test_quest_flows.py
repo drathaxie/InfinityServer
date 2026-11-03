@@ -58,13 +58,15 @@ def main():
     assert r["Success"], r
     assert game._quest_status(conn, cid, 9001) == 2
     qd = game.quest_data(conn, char)
-    assert qd["questsCopmlete"][9001 >> 3] & (1 << (9001 % 8)), "completion bit set"
+    bits = qd["questsCopmlete"]
+    assert bits[len(bits) - 1 - (9001 >> 3)] & (1 << (9001 % 8)), "client sees completion bit set"
 
     game.accept_quest(conn, char, 9001)
     assert game._quest_status(conn, cid, 9001) == 1, "repeatable re-accept flips to accepted"
     assert game._obj_qty(conn, cid, qoid) == 0, "objective counter reset for the fresh run"
     qd = game.quest_data(conn, char)
-    assert not (qd["questsCopmlete"][9001 >> 3] & (1 << (9001 % 8))), \
+    bits = qd["questsCopmlete"]
+    assert not (bits[len(bits) - 1 - (9001 >> 3)] & (1 << (9001 % 8))), \
         "completion bit clears on re-accept"
     assert 9001 in qd["questsAccepted"]
     # ...and it can be completed AGAIN (the whole point of a repeatable)

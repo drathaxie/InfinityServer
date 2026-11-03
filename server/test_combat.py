@@ -155,7 +155,11 @@ def main():
         if died2:
             break
     assert hp2 == 0 and died2, "a hit that empties HP is lethal"
-    res = combat.revive_player(42, "hero")
+    combat.player_death_packet(42, "m:968")
+    assert combat.revive_player(42, "hero") is None, "revive waits for the death timer"
+    from unittest.mock import patch
+    with patch.object(combat.time, "time", return_value=combat._revive_after[42] + 0.01):
+        res = combat.revive_player(42, "hero")
     assert res["Cmd"] == "playerRes" and res["unm"] == "hero" and res["HP"] == combat.PLAYER_MAXHP
     assert combat.player_hp(42) == combat.PLAYER_MAXHP
     assert not any(u == 42 for _a, _m, u in combat.engagements()), "revive drops aggro"

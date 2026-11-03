@@ -8,16 +8,31 @@ the columns + an `_extra` catch-all for any field we don't promote.
 import json
 
 # item JSON key -> canonical column. Anything not here falls to `_extra` (lossless).
+#
+# These names are SwordShine's. The two servers share ONE `items` table, owned by
+# SwordShine, so where a field is the same fact it maps onto SwordShine's existing column
+# rather than a parallel one -- storing it twice is how the two drift apart. MySQL column
+# names are case-insensitive, so `name`/`Name` and `cost`/`Cost` already coincide.
+#
+# Three pairs are NOT the same fact and keep separate columns:
+#   ItemType  -> item_type   SwordShine's `Type` is a string carrying family AND wield mode
+#                            ("Dagger" = dual-wield of any family); this is family only.
+#   EquipSpot -> equip_spot  SwordShine's `Equipment` is 'ar'/'co'/'he'/...; this is numeric.
+#   Element   -> element_id  SwordShine's `Element` is a varchar; this is numeric.
 FIELD_MAP = {
-    "ID": "item_id", "Name": "name", "Description": "description", "ItemType": "item_type",
-    "EquipSpot": "equip_spot", "Linkage": "linkage", "Icon": "icon", "Level": "level",
-    "Quantity": "quantity", "StackSize": "stack_size", "Element": "element", "Faction": "faction",
-    "strReqQuests": "str_req_quests", "MetaString": "meta_string", "DamageRange": "damage_range",
-    "Rarity": "rarity", "Filename": "filename", "Coins": "coins", "PrefabName": "prefab_name",
-    "MobileCompatibility": "mobile_compat", "Cost": "cost", "UpgradeOnly": "upgrade_only",
-    "isClass": "is_class", "DPS": "dps", "HouseInventory": "house_inventory",
-    "RequiredRep": "required_rep", "House": "house", "gameFlag": "game_flag",
-    "requiredClass": "required_class", "requiredCP": "required_cp",
+    "ID": "id", "Name": "Name", "Description": "Description", "ItemType": "item_type",
+    "EquipSpot": "equip_spot", "Linkage": "Link", "Icon": "Icon", "Level": "Level",
+    "Quantity": "Quantity", "StackSize": "Stack", "Element": "element_id",
+    "Faction": "FactionID",
+    # strReqQuests is the string form -> SwordShine's ReqQuests; the structured JSON one
+    # below keeps its own column. MetaString is byte-identical to SwordShine's Meta
+    # (verified against live rows: item 20 = "17", item 61 = "anim:ef_sb,chance:.3").
+    "strReqQuests": "ReqQuests", "MetaString": "Meta", "DamageRange": "Range",
+    "Rarity": "Rarity", "Filename": "File", "Coins": "Coins", "PrefabName": "prefab_name",
+    "MobileCompatibility": "mobile_compat", "Cost": "Cost", "UpgradeOnly": "Upgrade",
+    "isClass": "is_class", "DPS": "DPS", "HouseInventory": "house_inventory",
+    "RequiredRep": "ReqReputation", "House": "house", "gameFlag": "game_flag",
+    "requiredClass": "ReqClassID", "requiredCP": "ReqClassPoints",
     # nested value-objects kept as JSON columns
     "ReqQuests": "req_quests", "boostValues": "boost_values", "Bundle": "bundle",
 }
@@ -27,15 +42,18 @@ SCALAR_COLS = [c for c in FIELD_MAP.values() if c not in JSON_COLS]
 ALL_COLS = list(FIELD_MAP.values()) + ["_extra"]   # bundle/req_quests/boost_values already in map
 
 # SQL type per column — validated by a DB round-trip type-fidelity check against all live rows.
+# Keyed by the SwordShine column names above. Only used to generate the CREATE TABLE for a
+# standalone/test database -- in shared production the `items` table is created and migrated
+# by SwordShine, and Infinity's CREATE TABLE IF NOT EXISTS is a no-op against it.
 COL_TYPES = {
-    "item_id": "BIGINT", "name": "TEXT", "description": "TEXT", "item_type": "BIGINT",
-    "equip_spot": "BIGINT", "linkage": "TEXT", "icon": "TEXT", "level": "BIGINT",
-    "quantity": "BIGINT", "stack_size": "BIGINT", "element": "BIGINT", "faction": "BIGINT",
-    "str_req_quests": "TEXT", "meta_string": "TEXT", "damage_range": "DOUBLE PRECISION",
-    "rarity": "BIGINT", "filename": "TEXT", "coins": "BOOLEAN", "prefab_name": "TEXT",
-    "mobile_compat": "BIGINT", "cost": "BIGINT", "upgrade_only": "BOOLEAN", "is_class": "BOOLEAN",
-    "dps": "BIGINT", "house_inventory": "BOOLEAN", "required_rep": "BIGINT", "house": "BOOLEAN",
-    "game_flag": "BIGINT", "required_class": "BIGINT", "required_cp": "BIGINT",
+    "id": "INTEGER UNSIGNED", "Name": "TEXT", "Description": "TEXT", "item_type": "BIGINT",
+    "equip_spot": "BIGINT", "Link": "TEXT", "Icon": "TEXT", "Level": "BIGINT",
+    "Quantity": "BIGINT", "Stack": "BIGINT", "element_id": "BIGINT", "FactionID": "BIGINT",
+    "ReqQuests": "TEXT", "Meta": "TEXT", "Range": "DOUBLE PRECISION",
+    "Rarity": "BIGINT", "File": "TEXT", "Coins": "BOOLEAN", "prefab_name": "TEXT",
+    "mobile_compat": "BIGINT", "Cost": "BIGINT", "Upgrade": "BOOLEAN", "is_class": "BOOLEAN",
+    "DPS": "BIGINT", "house_inventory": "BOOLEAN", "ReqReputation": "BIGINT", "house": "BOOLEAN",
+    "game_flag": "BIGINT", "ReqClassID": "BIGINT", "ReqClassPoints": "BIGINT",
     "req_quests": "TEXT", "boost_values": "TEXT", "bundle": "TEXT", "_extra": "TEXT",
 }
 
@@ -92,5 +110,5 @@ def row_to_cols(row):
 
 def items_columns_ddl():
     return ",\n".join(
-        f'    "{c}" {COL_TYPES[c]}' + (" PRIMARY KEY" if c == "item_id" else "")
+        f'    "{c}" {COL_TYPES[c]}' + (" PRIMARY KEY" if c == "id" else "")
         for c in ALL_COLS)

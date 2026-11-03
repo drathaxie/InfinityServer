@@ -17,6 +17,8 @@ import random
 import re
 import secrets
 import time
+import math
+from datetime import datetime, timezone
 
 import db
 import seed
@@ -44,6 +46,20 @@ _STAT_COLS = {
 DEFAULT_BANK_SLOTS = 200
 DEFAULT_BAG_SLOTS = 200
 DEFAULT_HOUSE_SLOTS = 50
+
+
+def storage_capacity(conn, char_id, *, banked=False):
+    """Optional server-owned character capacity; ordinary accounts keep defaults."""
+    default = DEFAULT_BANK_SLOTS if banked else DEFAULT_BAG_SLOTS
+    try:
+        settings = json.loads(db.kv_get(conn, f'inventory_capacity:{int(char_id)}') or '{}')
+        value = settings.get('BankSlots' if banked else 'BagSlots', default)
+        if type(value) is not int:
+            return default
+        return max(default, min(value, 20000))
+    except (TypeError, ValueError, AttributeError):
+        return default
+
 # PlayerInfo.dateCreated is a C# DateTime — it MUST be a parseable ISO datetime, never ""
 # (an empty string aborts the whole initPlayer deserialization and hangs login).
 DEFAULT_CREATED = "2024-01-01T00:00:00"
@@ -62,8 +78,11 @@ DEFAULT_ACCOUNT_AGE = 18
 def membership_days(char):
     """Current client-visible membership days for a character row."""
     try:
-        return max(0, int(char["upgrade_days"] or 0)) if "upgrade_days" in char.keys() else 0
-    except (TypeError, ValueError, AttributeError):
+        expiry = datetime.fromisoformat(membership_expires(char))
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        return max(0, math.ceil((expiry.timestamp() - time.time()) / 86400))
+    except (TypeError, ValueError, AttributeError, OverflowError):
         return 0
 
 
@@ -99,7 +118,7 @@ def _apply_redeem_reward(conn, char, achievements, row):
         conn.execute("UPDATE characters SET coins=coins+? WHERE id=?", (value, char["id"]))
         return f"{value} AC"
     if reward_type == "item":
-        item = give_item(conn, char, value, qty)
+        item = give_item(conn, char, value, qty, commit=False)
         return f"{qty}x {item.get('Name') or value}" if item is not None else None
     if reward_type == "achievement":
         field = row["reward_field"] or "ip25"
@@ -112,11 +131,27 @@ _INVISIBLE_CHARS = re.compile("[​‌‍﻿]")   # ZWSP/ZWNJ/ZWJ/BOM
 
 
 def redeem_code(conn, char, code):
+    """Serialize each code's quota and commit its rewards and claim together."""
+    code = _INVISIBLE_CHARS.sub("", str(code or "")).strip()
+    try:
+        # A row lock on PostgreSQL, a write lock on SQLite, before any quota reads.
+        conn.execute("UPDATE redeem_codes SET active=active WHERE LOWER(code)=LOWER(?)", (code,))
+        conn.execute("UPDATE characters SET gold=gold WHERE id=?", (char["id"],))
+        fresh = conn.execute("SELECT * FROM characters WHERE id=?", (char["id"],)).fetchone()
+        result = _redeem_code_locked(conn, fresh, code)
+        (conn.commit if result["success"] else conn.rollback)()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _redeem_code_locked(conn, char, code):
     """Redeem a Heromart promo code for `char`'s account: applies every reward row for that code
     (gold/coins/items/achievement bits, all at once) and records the use. Returns {success,
     message, rewardDesc} shaped exactly like the client's RedeemCodeModal.HeromartRedeemResponse,
     since that's deserialized as-is with no translation. One redemption per account per code (the
-    UNIQUE constraint on redeem_code_uses); a code with max_uses>0 also has a global cap.
+    UNIQUE constraint on redeem_code_claims); a code with max_uses>0 also has a global cap.
 
     RedeemCodeModal's TMP_InputField can hand back a code with a trailing zero-width space (seen
     live: 'welcome\\u200b') — invisible, so it silently fails an exact match. Strip those before
@@ -140,6 +175,11 @@ def redeem_code(conn, char, code):
         (account_id, code)).fetchone()
     if dup is not None:
         return {"success": False, "message": "You've already redeemed this code.", "rewardDesc": ""}
+    claim = conn.execute(
+        "INSERT INTO redeem_code_claims(account_id,code) VALUES(?,LOWER(?)) "
+        "ON CONFLICT(account_id,code) DO NOTHING", (account_id, code))
+    if claim.rowcount != 1:
+        return {"success": False, "message": "You've already redeemed this code.", "rewardDesc": ""}
     max_uses = int(crow["max_uses"] or 0)
     if max_uses > 0:
         used = conn.execute(
@@ -162,8 +202,7 @@ def redeem_code(conn, char, code):
                     "rewardDesc": ""}
         parts.append(text)
     if any(row["reward_type"] == "achievement" for row in rewards):
-        conn.execute("UPDATE characters SET achievements=? WHERE id=?",
-                     (json.dumps(achievements), char["id"]))
+        save_achievements(conn, char["id"], achievements)
 
     reward_desc = crow["description"] or ", ".join(parts)
     conn.execute(
@@ -172,7 +211,6 @@ def redeem_code(conn, char, code):
     import support_manager
     support_manager.audit(conn, account_id, char["id"], "player", "self", "redeem_code",
                           detail=f"{code}: {reward_desc}")
-    conn.commit()
     return {"success": True, "message": f"You received: {reward_desc}!", "rewardDesc": reward_desc}
 
 
@@ -300,6 +338,18 @@ def owned_portrait_frames(username, achievements):
     return owned
 
 
+def wire_achievements(achievements):
+    """Return achievement bitfields in the signed Int32 shape used by the Unity client."""
+    out = {}
+    for field, raw_value in (achievements or {}).items():
+        try:
+            value = int(raw_value) & 0xFFFFFFFF
+        except (TypeError, ValueError):
+            value = 0
+        out[field] = value - 0x100000000 if value > 0x7FFFFFFF else value
+    return out
+
+
 def _dev_users():
     try:
         return {ln.strip().lower() for ln in _DEV_USERS_FILE.read_text(encoding="utf-8").splitlines()
@@ -320,6 +370,8 @@ def login(conn, username, password):
         "SELECT * FROM accounts WHERE LOWER(username)=LOWER(?) ORDER BY id LIMIT 1",
         (username,)).fetchone()
     if acc is None:
+        if username.lower() in _dev_users():
+            return None  # reserved legacy staff name; roles are provisioned by account ID
         account_id = conn.execute(
             "INSERT INTO accounts(username, password, created) VALUES(?,?,?) RETURNING id",
             (username, hash_password(password), time.time()),
@@ -341,14 +393,13 @@ def login(conn, username, password):
     char = conn.execute(
         "SELECT * FROM characters WHERE account_id=?", (account_id,)
     ).fetchone()
-    if char is None:
+    # On MariaDB `accounts` and `characters` are two views over ONE `users` row, so the
+    # character row always exists -- registering the account created it. An UNPROVISIONED
+    # character is the one with no class yet, not a missing row.
+    if char is None or char["class_id"] is None:
         char = _create_character(conn, account_id, username)
-    # grant dev access to staff accounts (unlocks the authoring tools) — data/dev_users.txt
-    if username.lower() in _dev_users():
-        if int(char["access_level"] or 0) < DEV_ACCESS_LEVEL:
-            conn.execute("UPDATE characters SET access_level=? WHERE id=?",
-                         (DEV_ACCESS_LEVEL, char["id"]))
-            char = conn.execute("SELECT * FROM characters WHERE id=?", (char["id"],)).fetchone()
+    # Roles are attached to the persisted character/account identity, never a username.
+    if int(char["access_level"] or 0) >= DEV_ACCESS_LEVEL:
         # ...and full founder status, so Despair's founder-reward shops are visible.
         try:
             ach = json.loads(char["achievements"] or "{}")
@@ -356,8 +407,7 @@ def login(conn, username, password):
             ach = {}
         if (int(ach.get("ip25", 0)) & FOUNDER_IP25) != FOUNDER_IP25:
             ach["ip25"] = int(ach.get("ip25", 0)) | FOUNDER_IP25
-            conn.execute("UPDATE characters SET achievements=? WHERE id=?",
-                         (json.dumps(ach), char["id"]))
+            save_achievements(conn, char["id"], ach)
             char = conn.execute("SELECT * FROM characters WHERE id=?", (char["id"],)).fetchone()
     conn.commit()
     return char
@@ -365,8 +415,8 @@ def login(conn, username, password):
 
 def authenticate(conn, username, password):
     """Verify an EXISTING account's password (does NOT create accounts, unlike login) and return
-    {"username","access"} or None. access = the account's character access_level, raised to
-    DEV_ACCESS_LEVEL for allowlisted dev accounts (data/dev_users.txt). The staff editor login uses
+    {"username","access"} or None. access = the account's persisted character access_level.
+    The staff editor login uses
     this: a normal account authenticates but returns its real (low) access, which the gate rejects."""
     if not username:
         return None
@@ -380,8 +430,6 @@ def authenticate(conn, username, password):
     row = conn.execute("SELECT MAX(access_level) AS a FROM characters WHERE account_id=?",
                        (acc["id"],)).fetchone()
     access = int((row["a"] if row and row["a"] is not None else 0) or 0)
-    if str(acc["username"]).lower() in _dev_users():
-        access = max(access, DEV_ACCESS_LEVEL)
     return {"username": acc["username"], "access": access}
 
 
@@ -391,23 +439,59 @@ def authenticate(conn, username, password):
 _PBKDF2_ITER = 200_000
 
 
+def password_scheme():
+    """The hash the stored password SHOULD be in.
+
+    On the shared database the `Hash` column is one column serving two games, and the other
+    one is SwordShine, whose login is PHP password_verify() -- which understands bcrypt and
+    nothing else. So on MariaDB the canonical scheme is bcrypt: an account that logs in here
+    can then log in there, with the same password, and no reset. Anywhere else (SQLite dev,
+    Postgres) we are the only reader and pbkdf2 stays.
+    """
+    return "bcrypt" if db.BACKEND in ("mysql", "mariadb") else "pbkdf2"
+
+
+def _bcrypt_input(password):
+    """bcrypt hashes at most 72 BYTES and raises on more, so a long password is truncated
+    rather than rejected -- matching what PHP's password_hash() does with the same input."""
+    return (password or "").encode("utf-8")[:72]
+
+
 def hash_password(password):
+    if password_scheme() == "bcrypt":
+        import bcrypt                       # lazy: only the shared-database path needs it
+        return bcrypt.hashpw(_bcrypt_input(password), bcrypt.gensalt()).decode("ascii")
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", (password or "").encode("utf-8"), salt, _PBKDF2_ITER)
     return f"pbkdf2_sha256${_PBKDF2_ITER}${salt.hex()}${dk.hex()}"
 
 
 def verify_password(password, stored):
-    """(ok, needs_upgrade). A hashed value is checked with a constant-time compare; a legacy
-    plaintext value compares directly and is flagged for upgrade to a hash."""
+    """(ok, needs_upgrade). Accepts every scheme the shared `Hash` column can hold -- bcrypt
+    (SwordShine's, and ours on MariaDB), our pbkdf2, and legacy plaintext -- and reports
+    whether the stored value should be REWRITTEN in the canonical scheme for this backend.
+
+    A bcrypt hash is never flagged for upgrade even when we would not have chosen it: the
+    only moment we hold the plaintext is this one, and rewriting it as pbkdf2 would lock the
+    player out of SwordShine, whose PHP login cannot read that. A pbkdf2 hash IS flagged on
+    the shared database, which is how the 63 accounts ported from AQW:I gain an AQW login --
+    each one, on its next login here, is silently rehashed into the shared scheme.
+    """
     if not stored:
         return (False, False)
+    if stored.startswith("$2"):             # $2a$/$2b$/$2y$ -- bcrypt, incl. PHP's spelling
+        try:
+            import bcrypt
+            return (bcrypt.checkpw(_bcrypt_input(password), stored.encode("ascii")), False)
+        except Exception:
+            return (False, False)
     if stored.startswith("pbkdf2_sha256$"):
         try:
             _, iters, salt_hex, hash_hex = stored.split("$")
             dk = hashlib.pbkdf2_hmac("sha256", (password or "").encode("utf-8"),
                                      bytes.fromhex(salt_hex), int(iters))
-            return (hmac.compare_digest(dk.hex(), hash_hex), False)
+            ok = hmac.compare_digest(dk.hex(), hash_hex)
+            return (ok, ok and password_scheme() == "bcrypt")
         except Exception:
             return (False, False)
     return (hmac.compare_digest(password or "", stored), True)   # legacy plaintext
@@ -417,7 +501,8 @@ def issue_token(conn, account_id):
     """Mint + store a fresh session token for an account; the client carries it as account.sToken
     and the game-server Login must present it. Returns the token."""
     token = secrets.token_hex(24)
-    conn.execute("UPDATE accounts SET session_token=? WHERE id=?", (token, int(account_id)))
+    conn.execute("UPDATE accounts SET session_token=?,token_expires=? WHERE id=?",
+                 (token, time.time() + 24 * 3600, int(account_id)))
     conn.commit()
     return token
 
@@ -430,7 +515,7 @@ def resolve_session(conn, username, token):
     acc = conn.execute(
         "SELECT * FROM accounts WHERE LOWER(username)=LOWER(?) ORDER BY id LIMIT 1",
         (username,)).fetchone()
-    if acc is None or not acc["session_token"]:
+    if acc is None or not acc["session_token"] or float(acc["token_expires"] or 0) <= time.time():
         return None
     if not hmac.compare_digest(str(acc["session_token"]), str(token)):
         return None
@@ -438,9 +523,23 @@ def resolve_session(conn, username, token):
 
 
 def _next_char_item_id(conn):
-    cur = int(db.kv_get(conn, "next_char_item_id", "1"))
-    db.kv_set(conn, "next_char_item_id", cur + 1)
-    return cur
+    # Atomic "read and bump" against the kv counter. SQLite and Postgres do it with
+    # upsert + RETURNING; MariaDB supports RETURNING on a plain INSERT but NOT alongside
+    # ON DUPLICATE KEY UPDATE, so it uses the LAST_INSERT_ID(expr) idiom instead -- the
+    # server remembers the value the expression produced and hands it back per-connection,
+    # which is equally atomic and equally free of a read-modify-write race.
+    if db.BACKEND in ("mysql", "mariadb"):
+        cur = conn.execute(
+            "INSERT INTO kv(k,v) VALUES('next_char_item_id','2') "
+            "ON DUPLICATE KEY UPDATE v=LAST_INSERT_ID(CAST(v AS SIGNED)+1)")
+        if cur.rowcount == 1:                     # row did not exist -> we just seeded '2'
+            return 1
+        return int(conn.execute("SELECT LAST_INSERT_ID()").fetchone()[0]) - 1
+    row = conn.execute(
+        "INSERT INTO kv(k,v) VALUES('next_char_item_id','2') "
+        "ON CONFLICT(k) DO UPDATE SET v=CAST(CAST(kv.v AS BIGINT)+1 AS TEXT) "
+        "RETURNING v").fetchone()
+    return int(row[0]) - 1
 
 
 # A FRESH character starts clean — NOT cloned from the captured template (which is a maxed
@@ -469,12 +568,25 @@ def _create_character(conn, account_id, name):
     Warrior class and a pre-gemmed Default Sword, with a distinct seeded colour set so each
     player has their own avatar."""
     gender = "M"
-    char_id = conn.execute(
-        "INSERT INTO characters(account_id, name, gender, gold, coins, level, exp, class_id, "
-        "stat_str, stat_end, stat_dex, stat_int, stat_wis, stat_lck) "
-        "VALUES(?,?,?,0,0,1,0,?,0,0,0,0,0,0) RETURNING id",
-        (account_id, name, gender, STARTER_CLASS_ID),
-    ).fetchone()[0]
+    if db.BACKEND in ("mysql", "mariadb"):
+        # The shared `users` row is the account AND the character (db._MYSQL_SHARED_DDL), so
+        # there is nothing to insert -- the starting state is written onto the row that
+        # registration already created. Access/upgrade are left as they stand: on a shared
+        # account they may have been set by the other game.
+        char_id = int(account_id)
+        conn.execute(
+            "UPDATE characters SET name=?, gender=?, gold=0, coins=0, dust=0, level=1, exp=0, "
+            "class_id=?, stat_str=0, stat_end=0, stat_dex=0, stat_int=0, stat_wis=0, "
+            "stat_lck=0, prefs='{}' WHERE id=?",
+            (name, gender, STARTER_CLASS_ID, char_id))
+        save_achievements(conn, char_id, {})
+    else:
+        char_id = conn.execute(
+            "INSERT INTO characters(account_id, name, gender, gold, coins, level, exp, class_id, "
+            "stat_str, stat_end, stat_dex, stat_int, stat_wis, stat_lck) "
+            "VALUES(?,?,?,0,0,1,0,?,0,0,0,0,0,0) RETURNING id",
+            (account_id, name, gender, STARTER_CLASS_ID),
+        ).fetchone()[0]
     colors = _gen_colors(char_id)
     colors["hair_id"] = _default_hair_id(conn, gender)   # catalog default, not a template's hair
     conn.execute(
@@ -751,7 +863,7 @@ def bank_deposit(conn, char, item_id):
     already_banked = conn.execute(
         "SELECT 1 FROM char_items WHERE char_id=? AND item_id=? AND banked=1 LIMIT 1",
         (cid, item_id)).fetchone() is not None
-    if not already_banked and _slots_used(conn, cid, banked=True) >= DEFAULT_BANK_SLOTS:
+    if not already_banked and _slots_used(conn, cid, banked=True) >= storage_capacity(conn, cid, banked=True):
         return None                                     # bank full (new slot needed)
     if not _move_rows(conn, cid, item_id, to_banked=True):
         return None
@@ -770,7 +882,7 @@ def bank_withdraw(conn, char, item_id):
     already_bagged = conn.execute(
         "SELECT 1 FROM char_items WHERE char_id=? AND item_id=? AND banked=0 LIMIT 1",
         (cid, item_id)).fetchone() is not None
-    if not already_bagged and _slots_used(conn, cid, banked=False) >= DEFAULT_BAG_SLOTS:
+    if not already_bagged and _slots_used(conn, cid, banked=False) >= storage_capacity(conn, cid):
         return None                                     # bag full (new slot needed)
     if not _move_rows(conn, cid, item_id, to_banked=False):
         return None
@@ -922,7 +1034,8 @@ def quest_editor_save(conn, payload):
     return {"ok": True, "ID": qid}
 
 
-# questsCopmlete is a completion BITFIELD the client indexes as questsComplete[qID >> 3]
+# questsCopmlete is a completion BITFIELD the client indexes from the END:
+# questsComplete[questsComplete.Count - 1 - (qID >> 3)] (PlayerQuestData).
 # (PlayerQuestData.isQuestComplete). It must be pre-sized with zero bytes or any
 # isQuestComplete check (NPC quest-state managers run them on spawn) throws
 # IndexOutOfRange and hangs the map join. 2000 bytes covers quest ids up to 16000,
@@ -981,7 +1094,7 @@ def _quest_status(conn, cid, qid):
 def quest_data(conn, char):
     """ResponseQuestData built from this character's PERSISTED progress: accepted quests,
     per-objective counters, and the completion bitfield (questsCopmlete — the client's
-    spelling — indexed as questsComplete[qID>>3], so it's pre-sized with zero bytes)."""
+    spelling — byte-indexed from the end, so it's pre-sized with zero bytes)."""
     cid = char["id"]
     accepted = _accepted_ids(conn, cid)
     completed = [r["quest_id"] for r in conn.execute(
@@ -989,7 +1102,7 @@ def quest_data(conn, char):
     bits = bytearray(QUESTS_COMPLETE_BYTES)
     for qid in completed:
         if 0 <= qid < QUESTS_COMPLETE_BYTES * 8:
-            bits[qid >> 3] |= 1 << (qid % 8)
+            bits[len(bits) - 1 - (qid >> 3)] |= 1 << (qid % 8)
     objectives, quests = [], []
     for qid in accepted:
         q = _quest_def(conn, qid)
@@ -1123,7 +1236,7 @@ def reset_saga(conn, char, sid):
     bits = bytearray(QUESTS_COMPLETE_BYTES)
     for q in completed:
         if 0 <= q < QUESTS_COMPLETE_BYTES * 8:
-            bits[q >> 3] |= 1 << (q % 8)
+            bits[len(bits) - 1 - (q >> 3)] |= 1 << (q % 8)
     return {"Cmd": "updateQuestBits", "qComplete": list(bits)}
 
 
@@ -1220,7 +1333,7 @@ def auto_equip_first_house(conn, char, item_id):
 def equipped_house_id(conn, char_id):
     """The equipped house deed's catalog item id (playerInfo.EquippedHouseItemID), or -1."""
     row = conn.execute(
-        "SELECT ci.item_id FROM char_items ci JOIN items it ON it.item_id=ci.item_id "
+        "SELECT ci.item_id FROM char_items ci JOIN items it ON it.id=ci.item_id "
         "WHERE ci.char_id=? AND ci.equipped=1 AND ci.banked=0 AND it.equip_spot=? LIMIT 1",
         (char_id, EQUIP_SPOT_HOUSE)).fetchone()
     return int(row["item_id"]) if row else -1
@@ -1245,7 +1358,7 @@ def equip_house(conn, char, item_id):
         return None
     conn.execute(
         "UPDATE char_items SET equipped=0 WHERE char_id=? AND equipped=1 AND item_id IN "
-        "(SELECT item_id FROM items WHERE equip_spot=?)", (cid, EQUIP_SPOT_HOUSE))
+        "(SELECT id FROM items WHERE equip_spot=?)", (cid, EQUIP_SPOT_HOUSE))
     conn.execute("UPDATE char_items SET equipped=1 WHERE char_item_id=?",
                  (owned["char_item_id"],))
     conn.commit()
@@ -1886,11 +1999,11 @@ def build_init_player(conn, char):
         "Buyer": False,
         "intHits": 0,
         "MQ": 0, "DF": 0, "AQ": 0,                    # other-game character ids
-        "BankSlots": DEFAULT_BANK_SLOTS,
-        "BagSlots": DEFAULT_BAG_SLOTS,
+        "BankSlots": storage_capacity(conn, char['id'], banked=True),
+        "BagSlots": storage_capacity(conn, char['id']),
         "HouseSlots": DEFAULT_HOUSE_SLOTS,
         "EquippedHouseItemID": equipped_house_id(conn, char["id"]),   # -1 = no house
-        "achievements": achievements,
+        "achievements": wire_achievements(achievements),
         # Name-plate frames this char may pick (client picker gates on this list). [[name-plates]]
         "ownedPortraitFrames": owned_portrait_frames(account_name, achievements),
         # Info.guild: the client reads the guild from playerInfo. null = no guild. [[name-plates]]
@@ -2051,7 +2164,7 @@ def pattern_bonus(conn, char_id):
     bonus = {"STR": 0, "END": 0, "DEX": 0, "INT": 0, "WIS": 0, "LCK": 0, "hp": 0, "weapon": None}
     for ci in conn.execute(
             "SELECT ci.*, it.equip_spot AS item_equip_spot FROM char_items ci "
-            "JOIN items it ON it.item_id=ci.item_id "
+            "JOIN items it ON it.id=ci.item_id "
             "WHERE ci.char_id=? AND ci.equipped=1 AND ci.banked=0", (char_id,)):
         pat = patterns.applied(ci)
         if not pat:
@@ -2149,6 +2262,12 @@ def build_stat_update(char, hp=None, bonus=None):
 
 # ---- shops -----------------------------------------------------------------
 
+DEV_SHOP_IDS = frozenset({2722})
+
+
+def shop_access_allowed(shop_id, is_staff=False):
+    return int(shop_id) not in DEV_SHOP_IDS or is_staff
+
 def shop_listing(conn, shop_item):
     """Rebuild one shop entry: the shared catalog item def re-joined with this
     shop's instance fields (ShopItemID, QuantityRemain). An item's Cost/Coins is a property
@@ -2159,6 +2278,8 @@ def shop_listing(conn, shop_item):
     item = db.item(conn, shop_item["item_id"]) or {"ID": shop_item["item_id"]}
     item["ShopItemID"] = shop_item["shop_item_id"]
     item["QuantityRemain"] = shop_item["quantity_remain"]
+    if int(shop_item["shop_id"]) in DEV_SHOP_IDS:
+        item["Cost"], item["Coins"] = 0, False
     return item
 
 
@@ -2183,12 +2304,26 @@ def load_shop(conn, shop_id, item_filter=0):
 # ---- economy ---------------------------------------------------------------
 
 def buy(conn, char, params):
+    try:
+        result = _buy_locked(conn, char, params)
+        (conn.commit if result["Success"] else conn.rollback)()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _buy_locked(conn, char, params):
     """params = [charID, shopID, shopItemID] -> ResponseBuyItem dict."""
     try:
         shop_id, shop_item_id = int(params[1]), int(params[2])
-    except (IndexError, ValueError):
+    except (IndexError, ValueError, TypeError):
         return {"Cmd": "buyItem", "Success": False, "Message": "Bad request."}
-
+    conn.execute("UPDATE characters SET gold=gold WHERE id=?", (char["id"],))
+    char = conn.execute("SELECT * FROM characters WHERE id=?", (char["id"],)).fetchone()
+    staff = char is not None and int(char["access_level"] or 0) >= 40
+    if char is None or not shop_access_allowed(shop_id, staff):
+        return {"Cmd": "buyItem", "Success": False, "Message": "This shop requires staff access."}
     row = conn.execute(
         "SELECT * FROM shop_items WHERE shop_id=? AND shop_item_id=?",
         (shop_id, shop_item_id),
@@ -2196,8 +2331,15 @@ def buy(conn, char, params):
     if row is None:
         return {"Cmd": "buyItem", "Success": False, "Message": "Item not available."}
 
-    cost = int(row["cost"])
-    use_coins = bool(row["coins"])
+    item = shop_listing(conn, row)
+    if "Name" not in item:
+        return {"Cmd": "buyItem", "Success": False, "Message": "Item not available."}
+    if bool(item.get("UpgradeOnly")) and membership_days(char) <= 0 and not staff:
+        return {"Cmd": "buyItem", "Success": False, "Message": "This item requires membership."}
+    cost = int(item.get("Cost") or 0)
+    use_coins = bool(item.get("Coins"))
+    if cost < 0:
+        return {"Cmd": "buyItem", "Success": False, "Message": "Invalid item price."}
     balance = char["coins"] if use_coins else char["gold"]
     if balance < cost:
         return {"Cmd": "buyItem", "Success": False,
@@ -2209,9 +2351,23 @@ def buy(conn, char, params):
     if item is None:
         return {"Cmd": "buyItem", "Success": False, "Message": "Item not available."}
     field = "coins" if use_coins else "gold"
-    conn.execute(f"UPDATE characters SET {field}={field}-? WHERE id=?", (cost, char["id"]))
+    stock = conn.execute("UPDATE shop_items SET quantity_remain=CASE WHEN quantity_remain<0 "
+                         "THEN quantity_remain ELSE quantity_remain-1 END "
+                         "WHERE shop_id=? AND shop_item_id=? AND quantity_remain<>0",
+                         (shop_id, shop_item_id))
+    if stock.rowcount != 1:
+        return {"Cmd": "buyItem", "Success": False, "Message": "This item is sold out."}
+    paid = conn.execute(f"UPDATE characters SET {field}={field}-? WHERE id=? AND {field}>=?",
+                        (cost, char["id"], cost))
+    if paid.rowcount != 1:
+        return {"Cmd": "buyItem", "Success": False, "Message": "Insufficient funds."}
+    if patterns.is_gem_item(item):
+        pat = patterns.gem_item_pattern(item, level=char['level'])
+        cpid = patterns.grant_gem(conn, char['id'], pat)
+        return {"Cmd": "buyItem", "Success": True, "Show": True, "IsDrop": False,
+                "Cost": cost, "_gemCoins": use_coins,
+                "_patternItem": {"CharPatternID": cpid, "pattern": pat, "LootID": -1}}
     cid = _grant_item(conn, char["id"], item)
-    conn.commit()
     # A HOUSE/furniture purchase replies with the `houseItem` field, NOT `item` —
     # ResponseBuyItem routes houseItem to playerInventory.buyHouseItem (the house list);
     # sending it as `item` would wrongly land it in the client's regular bag dict.
@@ -2353,7 +2509,7 @@ def load_dialog(conn, dialog_id):
     return row["raw"] if (row and row["raw"]) else _MINIMAL_CUTSCENE
 
 
-def give_item(conn, char, item_id, qty=1):
+def give_item(conn, char, item_id, qty=1, *, commit=True):
     """Grant `qty` of catalog item `item_id` to a character (dev /item cheat).
     Returns the item dict shaped for an ResponseAddOrUpdateItems packet, or None
     if the item isn't in our catalog. Stacks onto an existing row like a normal
@@ -2368,7 +2524,8 @@ def give_item(conn, char, item_id, qty=1):
         return None
     item["Quantity"] = qty
     cid = _grant_item(conn, char["id"], item)
-    conn.commit()
+    if commit:
+        conn.commit()
     # Re-read the persisted stack count so the client shows the true total after a merge.
     row = conn.execute("SELECT quantity FROM char_items WHERE char_item_id=?", (cid,)).fetchone()
     item["CharItemID"] = cid
@@ -2489,3 +2646,22 @@ def unequip_item(conn, char, item_id):
     conn.execute("UPDATE char_items SET equipped=0 WHERE char_item_id=?", (row["char_item_id"],))
     conn.commit()
     return spot
+def save_achievements(conn, char_id, achievements):
+    """Persist Infinity bitfields and their mapped SwordShine badges as one union."""
+    if db.BACKEND in ("mysql", "mariadb"):
+        mappings = conn.execute(
+            "SELECT AchievementID,Field,BitIndex FROM achievements_lore").fetchall()
+        wanted = []
+        for m in mappings:
+            if int(achievements.get(m["Field"], 0) or 0) & (1 << int(m["BitIndex"])):
+                wanted.append((char_id, m["AchievementID"]))
+        conn.execute("DELETE ua FROM users_achievements ua JOIN achievements_lore m "
+                     "ON m.AchievementID=ua.AchievementID WHERE ua.UserID=?", (char_id,))
+        conn.execute("UPDATE characters SET achievements=? WHERE id=?",
+                     (json.dumps(achievements), char_id))
+        if wanted:
+            conn.executemany("INSERT IGNORE INTO users_achievements(UserID,AchievementID) VALUES(?,?)",
+                             wanted)
+    else:
+        conn.execute("UPDATE characters SET achievements=? WHERE id=?",
+                     (json.dumps(achievements), char_id))

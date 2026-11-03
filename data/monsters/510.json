@@ -1,0 +1,106 @@
+{
+  "ID": 510,
+  "Name": "PineOak",
+  "Subtitle": "Treant",
+  "Level": 3,
+  "strLinkage": "CustomizableCharacter",
+  "strElement": "Earth",
+  "sRace": "None",
+  "Class": 33,
+  "Bundle": {
+    "ID": 70955,
+    "Name": "Characters",
+    "Filename": "gameassets/70955_characters.unity3d",
+    "VersionContent": 0,
+    "VersionStage": 23,
+    "VersionLive": 23
+  },
+  "HairBundle": {
+    "ID": 45970,
+    "Name": "Default",
+    "Filename": "hair/M/45970_Default_M.unity3d",
+    "VersionContent": 0,
+    "VersionStage": 6,
+    "VersionLive": 6
+  },
+  "bRed": 0,
+  "intRSS": 0,
+  "x": 0.0,
+  "y": 0.0,
+  "scale": 1.0,
+  "scaleMin": 1.0,
+  "scaleMax": 1.0,
+  "nameOverride": "",
+  "Gender": "M",
+  "apopID": -1,
+  "levelOverride": -1,
+  "SkinColor": 10119762,
+  "HairColor": 4946963,
+  "EyeColor": 10092288,
+  "BaseColor": 0,
+  "TrimColor": 0,
+  "AccessoryColor": 0,
+  "HairID": 52,
+  "HairFilename": "hair/M/Default.swf",
+  "HairName": "Default",
+  "HPScale": 1.0,
+  "MPMax": 0,
+  "equippedItems": {
+    "6": {
+      "ID": 16,
+      "Bundle": {
+        "ID": 47,
+        "Name": "Warrior (Rare)",
+        "Filename": "armors/47_warrior_skin.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 4,
+        "VersionLive": 4
+      },
+      "PrefabName": "ArmorSlots",
+      "EquipSpot": 6,
+      "ItemType": 21
+    },
+    "7": {
+      "ID": 2294,
+      "Bundle": {
+        "ID": 5067,
+        "Name": "Treant Morph",
+        "Filename": "armors/5067_Treeant_skin.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 4,
+        "VersionLive": 4
+      },
+      "PrefabName": "ArmorSlots",
+      "EquipSpot": 7,
+      "ItemType": 22
+    },
+    "2": {
+      "ID": 6224,
+      "Bundle": {
+        "ID": 8298,
+        "Name": "Crystal Seed Runed Staff",
+        "Filename": "items/staves/8298_NovelCrystalRunedStaff.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 2,
+        "VersionLive": 2
+      },
+      "PrefabName": "NovelCrystalRunedStaff_weaponSlots",
+      "EquipSpot": 2,
+      "ItemType": 10
+    },
+    "3": {
+      "ID": 33926,
+      "Bundle": {
+        "ID": 27410,
+        "Name": "Chicken on Your Head",
+        "Filename": "items/helms/27410_ChickenHead.unity3d",
+        "VersionContent": 0,
+        "VersionStage": 3,
+        "VersionLive": 3
+      },
+      "PrefabName": "ArmorSlots",
+      "EquipSpot": 3,
+      "ItemType": 12
+    }
+  }
+}

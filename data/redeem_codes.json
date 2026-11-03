@@ -169,6 +169,14 @@
       {"type": "item", "value": 950639, "quantity": 1}
     ]
   },
+  "border": {
+    "description": "Border Collector Achievement - DoomKnight, Chaos, and BLOD UI themes",
+    "maxUses": 0,
+    "active": true,
+    "rewards": [
+      {"type": "achievement", "value": 1, "quantity": 1, "field": "cosmetics26"}
+    ]
+  },
   "UNDEADFOUNDER": {
     "description": "Infinity: Underworld Founder Achievement",
     "maxUses": 1000,

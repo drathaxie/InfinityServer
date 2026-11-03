@@ -32,6 +32,7 @@ import socketserver
 import base64
 import hashlib
 import hmac
+import assetwire
 import json
 import os
 import pathlib
@@ -39,6 +40,7 @@ import random
 import re
 import secrets
 import time
+import threading
 import urllib.parse
 import urllib.request
 
@@ -51,8 +53,14 @@ import questdb
 import editor_enums
 import account_manager
 import support_manager
+import editor_workflows
 
-HOST = "0.0.0.0"
+# Loopback only. Caddy terminates TLS and reverse-proxies to us over localhost, and the
+# client mod's DEFAULT_WEBAPI is http://127.0.0.1:8182/ -- the PLAYER's own machine, for
+# local dev -- so nothing remote ever needs to reach this port directly. Bound to 0.0.0.0
+# it took ~3,200 hostile probes a week (.env, .ssh/id_ed25519, backup.sql) for no benefit.
+# Override with INFINITY_API_HOST=0.0.0.0 for a setup that genuinely needs direct access.
+HOST = os.environ.get("INFINITY_API_HOST", "127.0.0.1")
 PORT = 8182                                   # mod ApiPatch rewrites WebApiURL -> here
 
 # Where the account bundle tells the client to find the GAME server (TCP). Defaults to localhost
@@ -85,8 +93,12 @@ ACCOUNT_COOKIE = "infinity_account"
 
 
 def _sign_session(username, access):
-    """A signed, expiring session token: base64(payload).hmac. Stateless — no session table."""
+    """Signed identity with a server-owned revocation generation."""
+    account = _browser_identity(username=username)
+    if account is None:
+        raise ValueError("Account no longer exists")
     payload = {"u": username, "a": int(access), "csrf": secrets.token_urlsafe(24),
+               "id": account["id"], "v": account["session_version"],
                "exp": int(time.time()) + EDIT_SESSION_SECS}
     body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
     sig = hmac.new(EDIT_SECRET, body.encode(), hashlib.sha256).hexdigest()[:32]
@@ -105,13 +117,17 @@ def _verify_session(token):
         payload = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
     except Exception:
         return None
-    if int(payload.get("exp", 0)) < time.time() or int(payload.get("a", 0)) < EDIT_MIN_ACCESS:
+    if not _current_browser_session(payload, token, EDIT_MIN_ACCESS):
         return None
     return payload
 
 
 def _sign_account_session(account_id, username):
+    account = _browser_identity(account_id=account_id)
+    if account is None:
+        raise ValueError("Account no longer exists")
     payload = {"id": int(account_id), "u": username, "csrf": secrets.token_urlsafe(24),
+               "v": account["session_version"],
                "exp": int(time.time()) + ACCOUNT_SESSION_SECS}
     body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
     sig = hmac.new(ACCOUNT_SECRET, body.encode(), hashlib.sha256).hexdigest()
@@ -129,7 +145,55 @@ def _verify_account_session(token):
         payload = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
     except Exception:
         return None
-    return payload if int(payload.get("exp", 0)) >= time.time() else None
+    return payload if _current_browser_session(payload, token) else None
+
+
+def _browser_identity(*, account_id=None, username=None):
+    conn = db.connect()
+    try:
+        where, value = ("a.id=?", account_id) if account_id is not None else ("LOWER(a.username)=LOWER(?)", username)
+        row = conn.execute("SELECT a.id,a.username,a.session_version,c.access_level FROM accounts a "
+                           "JOIN characters c ON c.account_id=a.id WHERE " + where, (value,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _current_browser_session(payload, token, min_access=0):
+    try:
+        if not isinstance(payload, dict) or float(payload["exp"]) <= time.time():
+            return False
+        account = _browser_identity(account_id=int(payload["id"]))
+        if account is None or int(payload["v"]) != int(account["session_version"]):
+            return False
+        if int(account["access_level"] or 0) < min_access:
+            return False
+        conn = db.connect()
+        try:
+            revoked = conn.execute("SELECT 1 FROM revoked_browser_sessions WHERE token_hash=?",
+                                   (hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
+        finally:
+            conn.close()
+        if revoked:
+            return False
+        payload["u"], payload["a"] = account["username"], int(account["access_level"] or 0)
+        return True
+    except (TypeError, ValueError, KeyError, OverflowError):
+        return False
+
+
+def _revoke_browser_session(token):
+    if not token:
+        return
+    conn = db.connect()
+    try:
+        conn.execute("DELETE FROM revoked_browser_sessions WHERE expires<?", (time.time(),))
+        conn.execute("INSERT INTO revoked_browser_sessions(token_hash,expires) VALUES(?,?) "
+                     "ON CONFLICT(token_hash) DO NOTHING",
+                     (hashlib.sha256(token.encode()).hexdigest(), time.time()+EDIT_SESSION_SECS))
+        conn.commit()
+    finally:
+        conn.close()
 
 LOG_DIR = pathlib.Path(__file__).resolve().parent
 CAPTURE_LOG = LOG_DIR / "webapi_capture.jsonl"
@@ -330,6 +394,27 @@ _load_bundle_registry()
 
 
 def login_nowinfinity(conn, form):
+    import shared_online
+    user = (form.get("user", [""])[0] or "").strip() if isinstance(form, dict) else ""
+    pwd = (form.get("pass", [""])[0] or "") if isinstance(form, dict) else ""
+    acc = conn.execute("SELECT id, password FROM accounts WHERE LOWER(username)=LOWER(?) ORDER BY id LIMIT 1",
+                       (user or "Hero",)).fetchone()
+    # Authenticate before revealing presence, and reserve through token issuance so
+    # a competing API request cannot revoke an already-connected player.
+    if acc is not None and shared_online.enabled():
+        if acc["password"] and not game.verify_password(pwd, acc["password"])[0]:
+            return {"bSuccess": False, "sMsg": "Invalid username or password."}
+        lease = shared_online.acquire(acc["id"])
+        if lease is None:
+            return {"bSuccess": False, "sMsg": shared_online.MESSAGE}
+        try:
+            return _login_nowinfinity(conn, form)
+        finally:
+            lease.close()
+    return _login_nowinfinity(conn, form)
+
+
+def _login_nowinfinity(conn, form):
     """login/nowinfinity -> the launcher's account + server list + character bundle, built FRESH
     from the authenticated account/character — NO captured login template underneath.
 
@@ -406,15 +491,7 @@ def dialogger_save(conn, form):
     (stored verbatim incl. its &lt;/&gt; escaping; the client HtmlDecodes on load)."""
     idv = (form.get("id", [""])[0] or "").strip()
     raw = form.get("json", [""])[0]
-    if idv.isdigit() and int(idv) > 0:
-        cid = int(idv)
-        conn.execute("INSERT INTO cutscenes(id, raw) VALUES(?,?) "
-                     "ON CONFLICT(id) DO UPDATE SET raw=excluded.raw", (cid, raw))
-    else:
-        cid = int(conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM cutscenes").fetchone()[0])
-        conn.execute("INSERT INTO cutscenes(id, raw) VALUES(?,?)", (cid, raw))
-    conn.commit()
-    return str(cid)
+    return str(editor_workflows.store_scene(conn, raw, idv)['ID'])
 
 
 def dialogger_load(conn, form):
@@ -630,13 +707,13 @@ def quest_items(conn, qs):
     """quest/items?q=text -> [{id,name}] catalog item matches for reward/turnin pickers (cap 50)."""
     q = (urllib.parse.parse_qs(qs).get("q", [""])[0] or "").strip().lower()
     if q.lstrip("-").isdigit():
-        rows = conn.execute("SELECT item_id, name FROM items WHERE item_id=? LIMIT 50",
+        rows = conn.execute("SELECT item_id, name FROM items WHERE id=? LIMIT 50",
                             (int(q),)).fetchall()
     elif q:
         rows = conn.execute("SELECT item_id, name FROM items WHERE LOWER(name) LIKE ? "
                             "ORDER BY item_id LIMIT 50", (f"%{q}%",)).fetchall()
     else:
-        rows = conn.execute("SELECT item_id, name FROM items ORDER BY item_id LIMIT 50").fetchall()
+        rows = conn.execute("SELECT id AS item_id, name FROM items ORDER BY id LIMIT 50").fetchall()
     return [{"id": r["item_id"], "name": r["name"] or ""} for r in rows]
 
 
@@ -657,7 +734,30 @@ def quest_save(conn, form):
 def item_list(conn, qs):
     """item/list -> [{ID,name}] for the item editor picker (id-sorted)."""
     return [{"ID": r["item_id"], "name": r["name"] or f"Item {r['item_id']}"}
-            for r in conn.execute("SELECT item_id, name FROM items ORDER BY item_id")]
+            for r in conn.execute("SELECT id AS item_id, name FROM items ORDER BY id")]
+
+
+def item_search(conn, qs):
+    """item/search?q=text&limit=100 -> compact shared-catalog matches by ID or name."""
+    args = urllib.parse.parse_qs(qs)
+    q = (args.get("q", [""])[0] or "").strip()
+    try:
+        limit = max(1, min(250, int(args.get("limit", ["100"])[0])))
+    except (TypeError, ValueError):
+        limit = 100
+    if q.lstrip("-").isdigit():
+        rows = conn.execute(
+            "SELECT id AS item_id, Name AS name, Type AS type, Equipment AS equipment "
+            "FROM items WHERE id=? LIMIT ?", (int(q), limit)).fetchall()
+    elif q:
+        rows = conn.execute(
+            "SELECT id AS item_id, Name AS name, Type AS type, Equipment AS equipment "
+            "FROM items WHERE LOWER(Name) LIKE ? ORDER BY Name,id LIMIT ?",
+            (f"%{q.lower()}%", limit)).fetchall()
+    else:
+        rows = []
+    return [{"ID": r["item_id"], "name": r["name"] or f"Item {r['item_id']}",
+             "type": r["type"] or "", "equipment": r["equipment"] or ""} for r in rows]
 
 
 def item_load(conn, qs):
@@ -736,7 +836,7 @@ def shop_load(conn, qs):
               "name": r["name"] or ""}
              for r in conn.execute(
                  "SELECT si.shop_item_id, si.item_id, si.cost, si.coins, si.quantity_remain, i.name "
-                 "FROM shop_items si LEFT JOIN items i ON i.item_id=si.item_id "
+                 "FROM shop_items si LEFT JOIN items i ON i.id=si.item_id "
                  "WHERE si.shop_id=? ORDER BY si.shop_item_id", (sid,))]
     return {"shop": meta, "items": items}
 
@@ -763,7 +863,7 @@ def shop_save(conn, form):
                 iid = int(it.get("item_id"))
             except (TypeError, ValueError):
                 continue
-            if conn.execute("SELECT 1 FROM items WHERE item_id=?", (iid,)).fetchone() is None:
+            if conn.execute("SELECT 1 FROM items WHERE id=?", (iid,)).fetchone() is None:
                 return {"ok": False, "msg": f"item {iid} isn't in the catalog (add it first)."}
             siid = it.get("shop_item_id")
             if not siid:
@@ -900,6 +1000,7 @@ ROUTES = {
     "quest/items":           ("GET",  quest_items),
     "quest/save":            ("POST", quest_save),
     "item/list":             ("GET",  item_list),
+    "item/search":           ("GET",  item_search),
     "item/load":             ("GET",  item_load),
     "item/save":             ("POST", item_save),
     "monster/list":          ("GET",  monster_list),
@@ -925,8 +1026,12 @@ EDITOR_PAGES = {"apop/edit.aspx": "apop_editor.html", "apop/edit": "apop_editor.
                 "monster/edit.aspx": "monster_editor.html", "monster/edit": "monster_editor.html",
                 "shop/edit.aspx": "shop_editor.html", "shop/edit": "shop_editor.html",
                 "map/edit.aspx": "map_editor.html", "map/edit": "map_editor.html",
-                "support/edit.aspx": "support_editor.html", "support/edit": "support_editor.html"}
-EDITOR_PREFIXES = ("apop/", "quest/", "item/", "monster/", "shop/", "map/", "support/")
+                "support/edit.aspx": "support_editor.html", "support/edit": "support_editor.html",
+                "cutscene/edit.aspx": "cutscene_editor.html", "cutscene/edit": "cutscene_editor.html",
+                "redeem/edit.aspx": "redeem_editor.html", "redeem/edit": "redeem_editor.html"}
+EDITOR_PREFIXES = ("apop/", "quest/", "item/", "monster/", "shop/", "map/", "support/", "cutscene/", "redeem/")
+# These in-client writes use the same current staff-role check as the browser editors.
+STAFF_ROUTES = {"tweak/createnewapop", "tweak/dialoggersave"}
 
 # The DB-manager menu (the hamburger nav shared by every editor page via /editor/nav.js). Add a
 # new editor here and it appears in the menu everywhere. soon=True renders it greyed/disabled.
@@ -938,6 +1043,8 @@ EDITOR_MENU = [
     {"label": "Shops", "url": "/shop/Edit.aspx"},
     {"label": "Maps & NPCs", "url": "/map/Edit.aspx"},
     {"label": "Player Support", "url": "/support/Edit.aspx"},
+    {"label": "Cutscenes", "url": "/cutscene/Edit.aspx"},
+    {"label": "Redeem Codes", "url": "/redeem/Edit.aspx"},
 ]
 
 def _login_html(nxt, error):
@@ -1019,11 +1126,12 @@ def _editor_nav_js():
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    timeout = 30
     def log_message(self, *a):
         pass
 
     def _send_json(self, obj, code=200, headers=None):
-        body = json.dumps(obj).encode("utf-8")
+        body = json.dumps(assetwire.normalize(obj)).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-store")
@@ -1078,7 +1186,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not EDIT_SECRET:
             self._send_json({"error": "editor auth not configured (set INFINITY_EDIT_PASS)"}, 503)
             return False
+        # Unity sends its existing character/session bearer; no browser cookie is required.
+        if self._route_key() in STAFF_ROUTES:
+            conn = db.connect()
+            try:
+                char = self._heromart_auth(conn)
+                if char is not None and int(char["access_level"] or 0) >= EDIT_MIN_ACCESS:
+                    return True
+            finally:
+                conn.close()
         if _verify_session(self._cookie(EDIT_COOKIE)):
+            if self.command in ("POST", "PUT"):
+                origin = self.headers.get("Origin") or self.headers.get("Referer")
+                if origin and urllib.parse.urlsplit(origin).netloc != self.headers.get("Host", ""):
+                    self._send_json({"error": "origin not authorized"}, 403)
+                    return False
             return True
         if self.command == "GET" and self._route_key() in EDITOR_PAGES:
             self.send_response(302)
@@ -1122,6 +1244,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def _editor_logout(self):
+        _revoke_browser_session(self._cookie(EDIT_COOKIE))
         self.send_response(302)
         self.send_header("Set-Cookie", f"{EDIT_COOKIE}=; Path=/; Max-Age=0")
         self.send_header("Location", "/editor/login")
@@ -1130,7 +1253,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _account_payload(self, body):
         try:
-            return json.loads(body.decode("utf-8")) if body else {}
+            data = json.loads(body.decode("utf-8")) if body else {}
+            return data if isinstance(data, dict) else None
         except (ValueError, UnicodeDecodeError):
             return None
 
@@ -1212,6 +1336,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if key == "account/api/logout" and method == "POST":
             if not self._account_auth(require_csrf=True):
                 return
+            _revoke_browser_session(self._cookie(ACCOUNT_COOKIE))
             return self._send_json({"ok": True}, headers={"Set-Cookie":
                 f"{ACCOUNT_COOKIE}=; Path=/account; HttpOnly; SameSite=Strict; Max-Age=0"})
 
@@ -1257,11 +1382,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     conn, session["id"], data.get("currentPassword"), data.get("password"))
                 return self._send_json({"ok": ok, "message": message}, 200 if ok else 400)
             if key == "account/api/sessions/revoke" and method == "POST":
-                conn.execute("UPDATE accounts SET session_token=NULL WHERE id=?", (session["id"],))
+                conn.execute("UPDATE accounts SET session_token=NULL,session_version=session_version+1 WHERE id=?", (session["id"],))
                 support_manager.audit(conn, session["id"], account["char_id"], "player", "self",
                                       "sessions_revoked", detail="Player revoked game sessions")
                 conn.commit()
-                return self._send_json({"ok": True, "message": "All game sessions were signed out."})
+                return self._send_json({"ok": True, "message": "All sessions were revoked. Please sign in again."})
             if key == "account/api/redeem" and method == "POST":
                 ok, message, item = account_manager.redeem(conn, session["id"], data.get("itemId"))
                 return self._send_json({"ok": ok, "message": message,
@@ -1332,6 +1457,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
         finally:
             conn.close()
 
+    def _workflow_api(self, method, key, qs, body):
+        staff = _verify_session(self._cookie(EDIT_COOKIE))
+        if not staff:
+            return self._send_json({"ok": False, "msg": "Sign in with a staff account."}, 401)
+        if method not in ("GET", "POST"):
+            return self._send_json({"ok": False, "msg": "Method not allowed."}, 405)
+        if method == "POST" and not hmac.compare_digest(
+                str(self.headers.get("X-Staff-CSRF", "")), str(staff.get("csrf", ""))):
+            return self._send_json({"ok": False, "msg": "Staff session expired; sign in again."}, 403)
+        conn = db.connect()
+        try:
+            if method == "GET" and key in ("cutscene/npcs", "redeem/items"):
+                result = (cutscene_npcs if key == "cutscene/npcs" else quest_items)(conn, qs)
+                return self._send_json(result[:100])
+            args = urllib.parse.parse_qs(body.decode('utf-8')) if method == 'POST' else qs
+            result = editor_workflows.handle(conn, key, method, args, staff['u'])
+            return self._send_json(result)
+        except editor_workflows.EditConflict as exc:
+            conn.rollback()
+            return self._send_json({"ok": False, "msg": str(exc)}, 409)
+        except (ValueError, TypeError, OverflowError):
+            conn.rollback()
+            return self._send_json({"ok": False, "msg": "Invalid content. Check the page structure, reward values and limits."}, 400)
+        except LookupError as exc:
+            conn.rollback()
+            return self._send_json({"ok": False, "msg": str(exc)}, 404)
+        finally:
+            conn.close()
+
     def do_GET(self):
         self._handle("GET")
 
@@ -1346,7 +1500,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         qs = self.path.split("?", 1)[1] if "?" in self.path else ""
         body = b""
         if method in ("POST", "PUT"):
-            length = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                return self._send_json({"error": "invalid content length"}, 400)
+            if length < 0 or self.headers.get("Transfer-Encoding"):
+                return self._send_json({"error": "invalid body framing"}, 400)
             if length > statues.MAX_RENDER_BYTES:
                 return self._send_json({"error": "statue render is too large"}, 413)
             body = self.rfile.read(length) if length else b""
@@ -1453,18 +1612,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._editor_logout()
         if key == "editor/nav.js" and method == "GET":   # shared hamburger nav (UI only, no data)
             return self._send_text(_editor_nav_js(), ctype="application/javascript; charset=utf-8")
+        if key == "editor/workflows.js" and method == "GET":
+            return self._send_text(_editor_html('editor_workflows.js'), ctype="application/javascript; charset=utf-8")
         if key == "editor/enums.json" and method == "GET":   # shared enum labels for dropdowns
             return self._send_text(json.dumps(editor_enums.ENUMS), ctype="application/json; charset=utf-8")
 
         # staff gate: every editor page AND endpoint (apop/*, quest/*). key is already lowercased,
         # so a mixed-case path can't slip past. Enforced before any editor handler runs.
-        if key in EDITOR_PAGES or any(key.startswith(p) for p in EDITOR_PREFIXES):
+        if key in EDITOR_PAGES or key in STAFF_ROUTES or any(key.startswith(p) for p in EDITOR_PREFIXES):
             if not self._require_edit_auth():
                 return
 
         # the editor pages themselves (HTML), opened by the in-game pencil or a browser
         if method == "GET" and key in EDITOR_PAGES:
             return self._send_html(_editor_html(EDITOR_PAGES[key]))
+
+        if key.startswith(("cutscene/", "redeem/")):
+            return self._workflow_api(method, key, qs, body)
 
         route = ROUTES.get(key)
         if route and route[0] == method:
@@ -1487,8 +1651,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # not implemented yet
         if CAPTURE_PROXY:
             return self._proxy_and_log(method, body)
-        self._log(UNHANDLED_LOG, {"method": method, "path": self.path,
-                                  "body": body.decode("utf-8", "replace")})
+        self._log(UNHANDLED_LOG, {"method": method, "path": key, "bodyBytes": len(body)})
         print(f"  [api] {method} {key} -> UNHANDLED (stub)")
         self._send_json({} if method == "GET" else {})
 
@@ -1529,6 +1692,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
 class _Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True   # rebind immediately on restart (don't fail on a TIME_WAIT socket)
     daemon_threads = True        # don't let lingering request threads block shutdown
+
+    def __init__(self, *args, **kwargs):
+        self._slots = threading.BoundedSemaphore(64)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 def main():

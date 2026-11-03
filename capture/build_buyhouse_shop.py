@@ -37,7 +37,7 @@ EQUIP_SPOT_HOUSE_ITEM = 9
 
 def _furniture_ids(conn):
     return [r["item_id"] for r in conn.execute(
-        "SELECT item_id FROM items WHERE equip_spot=?", (EQUIP_SPOT_HOUSE_ITEM,))]
+        "SELECT id AS item_id FROM items WHERE equip_spot=?", (EQUIP_SPOT_HOUSE_ITEM,))]
 
 
 def make_free_ac(conn):

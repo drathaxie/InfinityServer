@@ -2851,7 +2851,7 @@ var next = new System.Collections.Generic.List<string>();
         _status = "added bubble #" + id;
     }
 
-    // Serialize the in-memory scene and POST it to tweak/DialoggerSave (ungated, same storage the
+    // Serialize the in-memory scene and POST it to authenticated tweak/DialoggerSave (same storage the
     // web editor + AE's native Dialogger use). asNew blanks the id so the server mints the next one.
     // After this, /cutscene <id> plays the edits. WARNING: a plain Save overwrites the loaded id.
     private void SaveScene(bool asNew)
@@ -2867,6 +2867,9 @@ var next = new System.Collections.Generic.List<string>();
             using (var wc = new WebClient())
             {
                 var form = new System.Collections.Specialized.NameValueCollection();
+                string auth = InfinityLoaderMod.EditorAuthorization(Main.WebApiURL + "tweak/DialoggerSave");
+                if (auth == null) { _status = "sign in with a staff account before saving"; return; }
+                wc.Headers[HttpRequestHeader.Authorization] = auth;
                 form["id"] = id; form["json"] = json;
                 byte[] resp = wc.UploadValues(Main.WebApiURL + "tweak/DialoggerSave", form);
                 string savedId = Encoding.UTF8.GetString(resp).Trim();

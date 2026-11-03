@@ -32,8 +32,9 @@ def main():
     _fresh_inv = {i["ID"]: i for i in game.inventory(conn, char["id"])}
     assert set(_fresh_inv) == {game.STARTER_WEAPON_ITEM}, \
         f"fresh inventory is only the weapon, got {list(_fresh_inv)}"
-    assert _fresh_inv[game.STARTER_WEAPON_ITEM].get("ItemPattern", {}).get("Base") == 31, \
-        "the Default Sword is pre-gemmed (Common gem, 27-34) so it's equippable + hits"
+    starter = _fresh_inv[game.STARTER_WEAPON_ITEM].get("ItemPattern", {})
+    assert starter.get("Base") == 19 and starter.get('Level') == 1, \
+        "the Default Sword is pre-gemmed at the new player's level"
     _fresh_cls = {i["ID"]: i for i in game.class_items(conn, char["id"])}
     assert set(_fresh_cls) == {game.STARTER_CLASS_ITEM}, \
         f"fresh classItems is only the starter Warrior, got {list(_fresh_cls)}"

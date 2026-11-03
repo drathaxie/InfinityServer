@@ -29,7 +29,7 @@ def fill(conn, shop_id=SHOP_ID, name=NAME):
     # Rebuild the listing: one free, unlimited shop_item per normal catalog item. shop_item_id
     # = item_id (unique within the shop; buy() keys on (shop_id, shop_item_id)).
     conn.execute("DELETE FROM shop_items WHERE shop_id=?", (shop_id,))
-    ids = [r[0] for r in conn.execute("SELECT item_id FROM items WHERE item_id < 900000 ORDER BY item_id").fetchall()]
+    ids = [r[0] for r in conn.execute("SELECT id FROM items WHERE id < 900000 ORDER BY id").fetchall()]
     for iid in ids:
         conn.execute(
             "INSERT INTO shop_items(shop_id, shop_item_id, item_id, cost, coins, "

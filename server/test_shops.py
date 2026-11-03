@@ -65,7 +65,8 @@ def main():
     # Client builds may send an extra trailing placeholder: Params=[shopID, 0].
     # The server must use the first param as the requested shop id, not the suffix.
     from handlers.context import load_shop as context_load_shop
-    dev_resp = context_load_shop(conn, ["2722", "0"])
+    assert context_load_shop(conn, ["2722", "0"])["shop"]["items"] == []
+    dev_resp = context_load_shop(conn, ["2722", "0"], is_staff=True)
     assert dev_resp["shop"]["shopID"] == 2722, dev_resp
     assert len(dev_resp["shop"]["items"]) > 1000, "trailing loadShop param selected shop 0"
     # 3) The catalog is shared: a second shop reusing an item adds no duplicate item row.

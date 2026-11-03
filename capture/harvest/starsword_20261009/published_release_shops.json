@@ -1,0 +1,230 @@
+{
+  "2783": {
+    "Cmd": "loadShop",
+    "shop": {
+      "$type": "AQ2D_Server.Game_Engine.Com.ResponseLoadShop+FilteredShop, AQ2D_Server",
+      "shopID": 2783,
+      "Name": "Star Sword Shop",
+      "items": [
+        {
+          "ShopItemID": 69189,
+          "Quantity": 1,
+          "QuantityRemain": -1,
+          "ItemPattern": {
+            "ID": 30,
+            "Quality": 6,
+            "Level": 5,
+            "STR": 8,
+            "END": 4,
+            "DEX": 6,
+            "INT": 8,
+            "WIS": 5,
+            "LUK": 3,
+            "Wild": 0.1,
+            "EquipSpot": 2,
+            "Base": 34,
+            "Name": "Hybrid Weapon",
+            "Power": 34,
+            "Dust": 10,
+            "MaxSlots": 3,
+            "Traits": []
+          },
+          "ID": 103810,
+          "Bundle": {
+            "ID": 79094,
+            "Name": "1st Infinity Star Sword",
+            "Filename": "items/swords/79094_InfinityStarSword.unity3d",
+            "VersionStage": 3,
+            "VersionLive": 3
+          },
+          "PrefabName": "InfinityStarSword_weaponGO",
+          "EquipSpot": 2,
+          "ItemType": 6,
+          "Scale": 1.0,
+          "OffsetX": 0.0,
+          "OffsetY": 0.0,
+          "Name": "1st Infinity Star Sword",
+          "Description": "Forged from the heart of a once-in-a-life time asteroid passing our world... this is the first ever Infinity Star Sword. Whomever wields this energy blade, for all of time (and space), will hold the oldest and most sacred power our world has ever known. Eternal proof that you were there at the very beginning.",
+          "DamageRange": 0.1,
+          "Filename": "items/swords/79094_InfinityStarSword.unity3d",
+          "Linkage": "",
+          "Icon": "iwsword",
+          "Level": 1,
+          "StackSize": 1,
+          "Rarity": 100,
+          "Element": 1,
+          "Faction": 1,
+          "RequireText": "Complete J6's Asteroid Quests to unlock this item.",
+          "ReqQuests": [
+            305
+          ],
+          "strReqQuests": "305",
+          "Coins": true,
+          "MetaString": "",
+          "boostValues": {},
+          "MobileCompatibility": 2
+        }
+      ],
+      "lockedItems": [
+        69189
+      ]
+    }
+  },
+  "2778": {
+    "Cmd": "loadShop",
+    "shop": {
+      "$type": "AQ2D_Server.Game_Engine.Shop.ItemShop, AQ2D_Server",
+      "shopID": 2778,
+      "Name": "Dai-lee's Shop",
+      "gameFlag": 2,
+      "items": [
+        {
+          "ShopItemID": 69182,
+          "Quantity": 1,
+          "QuantityRemain": -1,
+          "TokID": 104072,
+          "TokQty": 40,
+          "ID": 104073,
+          "PrefabName": "",
+          "EquipSpot": 2,
+          "ItemType": 6,
+          "Scale": 1.0,
+          "OffsetX": 0.0,
+          "OffsetY": 0.0,
+          "TokName": "Effort Coins",
+          "Name": "Blade of Effort",
+          "Description": "You deserve it!",
+          "DamageRange": 0.1,
+          "Filename": "items/swords/sword12.swf",
+          "Linkage": "",
+          "Icon": "iwsword",
+          "gameFlag": 2,
+          "Level": 5,
+          "StackSize": 1,
+          "Rarity": 100,
+          "Element": 1,
+          "Faction": 1,
+          "ReqQuests": [],
+          "strReqQuests": "",
+          "MetaString": "",
+          "boostValues": {}
+        }
+      ]
+    }
+  },
+  "2781": {
+    "Cmd": "loadShop",
+    "shop": {
+      "$type": "AQ2D_Server.Game_Engine.Shop.MergeShop, AQ2D_Server",
+      "shopID": 2781,
+      "Name": "Oct 23th Shop",
+      "mergeShop": true,
+      "items": []
+    }
+  },
+  "2782": {
+    "Cmd": "loadShop",
+    "shop": {
+      "$type": "AQ2D_Server.Game_Engine.Shop.MergeShop, AQ2D_Server",
+      "shopID": 2782,
+      "Name": "Oct 30th Shop",
+      "mergeShop": true,
+      "items": []
+    }
+  },
+  "2784": {
+    "Cmd": "loadShop",
+    "shop": {
+      "$type": "AQ2D_Server.Game_Engine.Shop.ItemShop, AQ2D_Server",
+      "shopID": 2784,
+      "Name": "Space Chest",
+      "gameFlag": 2,
+      "items": [
+        {
+          "ShopItemID": 69191,
+          "Quantity": 1,
+          "QuantityRemain": -1,
+          "ID": 104080,
+          "PrefabName": "",
+          "EquipSpot": 1,
+          "ItemType": 2,
+          "Scale": 1.0,
+          "OffsetX": 0.0,
+          "OffsetY": 0.0,
+          "Name": "Sneevil Space Flag Note",
+          "Description": "\"One small stab for Sneevils, one giant stabby stab for Sneevil Kind!\"\r\n\r\nOf course a Sneevil's Flag would be a box. On the side of the box is inscribed.. \r\n\r\nB.A.S.A - Box Aeronautics and Space Administration\r\n",
+          "DamageRange": 0.1,
+          "Linkage": "",
+          "Icon": "iibag",
+          "Level": 1,
+          "StackSize": 1,
+          "Cost": 42,
+          "Rarity": 18,
+          "Element": 1,
+          "Faction": 1,
+          "ReqQuests": [],
+          "strReqQuests": "",
+          "MetaString": "",
+          "boostValues": {},
+          "isMiscTab": true
+        },
+        {
+          "ShopItemID": 69195,
+          "Quantity": 1,
+          "QuantityRemain": -1,
+          "ItemPattern": {
+            "ID": 23,
+            "Quality": 5,
+            "Level": 5,
+            "STR": 3,
+            "END": 8,
+            "DEX": 4,
+            "INT": 3,
+            "WIS": 5,
+            "LUK": 7,
+            "Wild": 0.1,
+            "EquipSpot": 3,
+            "Base": 31,
+            "Name": "Hybrid Helm",
+            "Power": 30,
+            "Dust": 5,
+            "MaxSlots": 3,
+            "Traits": []
+          },
+          "ID": 104082,
+          "Bundle": {
+            "ID": 79096,
+            "Name": "Space Box Helm",
+            "Filename": "items/helms/79096_SpaceBoxHelm.unity3d",
+            "VersionStage": 1,
+            "VersionLive": 1
+          },
+          "PrefabName": "HelmGO",
+          "EquipSpot": 3,
+          "ItemType": 12,
+          "Scale": 1.0,
+          "OffsetX": 0.0,
+          "OffsetY": 0.0,
+          "Name": "Space Box Helm",
+          "Description": "Historically speaking, Sneevils overwhelmingly prefer boxed-shaped space helmets. However, they kept stealing them off their fellow Sneevil's heads leaving them to asphyxiate in the cold, brutal, vacuum of space. Containers be containers, yo!",
+          "DamageRange": 0.1,
+          "Filename": "items/helms/79096_SpaceBoxHelm.unity3d",
+          "Linkage": "",
+          "Icon": "iihelm",
+          "gameFlag": 2,
+          "Level": 1,
+          "StackSize": 1,
+          "Cost": 6000,
+          "Rarity": 13,
+          "Element": 1,
+          "Faction": 1,
+          "ReqQuests": [],
+          "strReqQuests": "",
+          "MetaString": "infinity",
+          "boostValues": {},
+          "MobileCompatibility": 2
+        }
+      ]
+    }
+  }
+}

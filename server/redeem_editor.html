@@ -60,11 +60,15 @@
   <button class="go" id="btnSave">Save</button>
   <span class="status" id="status"></span>
 </header>
-<main id="main"></main>
+<main id="main"><p class="empty">Choose an existing code or select + New to create one.</p></main>
 
+<script src="/editor/workflows.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 let data = { redeem:{}, rewards:[] };
+let savedDocument = JSON.stringify(data);
+function discardChanges(){ return JSON.stringify(data) === savedDocument || confirm('Discard unsaved code changes?'); }
+window.addEventListener('beforeunload', e => { if(JSON.stringify(data) !== savedDocument){e.preventDefault(); e.returnValue='';} });
 function setStatus(m, ok=true){ const s=$("#status"); s.textContent=m; s.style.color=ok?"#9aa4b2":"#e08585"; }
 function field(label, el){ const f=document.createElement("div"); f.className="field"; const l=document.createElement("label"); l.textContent=label; f.append(l, el); return f; }
 function inp(val, on, type="text"){ const i=document.createElement("input"); i.type=type; i.value=(val??""); i.oninput=()=>on(type==="number"?(i.value===""?0:(parseInt(i.value)||0)):i.value); return i; }
@@ -75,7 +79,7 @@ function picker(endpoint, placeholder, add){
   const i=document.createElement("input"); i.type="text"; i.placeholder=placeholder; i.style.width="100%";
   const res=document.createElement("div"); res.className="pickres"; let t=null;
   i.oninput=()=>{ clearTimeout(t); t=setTimeout(async()=>{
-    const arr=await (await fetch(endpoint+"?q="+encodeURIComponent(i.value.trim()))).json();
+    const arr=await (await editorFetch(endpoint+"?q="+encodeURIComponent(i.value.trim()))).json();
     res.innerHTML=""; res.style.display=arr.length?"block":"none";
     for(const m of arr){ const d=document.createElement("div"); d.textContent=m.id+" — "+m.name;
       d.onclick=()=>{ add(m.id, m.name); i.value=""; res.style.display="none"; }; res.appendChild(d); }
@@ -90,7 +94,7 @@ function rewardText(r){
 }
 
 let LIST = [];
-async function loadList(){ LIST = await (await fetch("list")).json(); }
+async function loadList(){ LIST = await (await editorFetch("list")).json(); }
 function showResults(q){
   q=(q||"").trim().toLowerCase();
   const box=$("#results"); box.innerHTML="";
@@ -101,24 +105,28 @@ function showResults(q){
   box.style.display = arr.length ? "block" : "none";
 }
 function newRecord(){
-  const v = prompt("New code:", "");
-  if(v==null) return;
-  const code = v.trim();
-  if(!code){ setStatus("code can't be blank", false); return; }
-  if(LIST.some(it=>String(it.ID).toLowerCase()===code.toLowerCase())){ setStatus("code "+code+" exists — loading it", false); loadCode(code); return; }
-  data = { redeem:{ code:code, description:"", max_uses:0, active:1 }, rewards:[] }; render(); setStatus("new code "+code+" — add reward(s) + Save");
+  if(!discardChanges()) return;
+  data = { redeem:{ code:'', description:"", max_uses:0, active:1 }, rewards:[] };
+  render(); setStatus('Enter a code, add rewards, then save.');
 }
 async function loadCode(code){
   if(!code) return;
-  data = await (await fetch("load?ID="+encodeURIComponent(code))).json();
+  if(!discardChanges()) return;
+  data = await (await editorFetch("load?ID="+encodeURIComponent(code))).json();
   if(!data || !data.redeem || !data.redeem.code){ data={ redeem:{ code:code, description:"", max_uses:0, active:1 }, rewards:[] }; }
   data.rewards = data.rewards || [];
+  savedDocument = JSON.stringify(data);
   render(); setStatus("loaded "+(data.redeem.code||code));
 }
 function render(){
   const m=$("#main"); m.innerHTML="";
   const rc=data.redeem||{};
-  const c=card("Code: "+(rc.code||"?"));
+  const c=card(data.version ? "Code: "+rc.code : 'New code');
+  if(!data.version){
+    const name=inp(rc.code, v=>rc.code=v.trim().toUpperCase());
+    name.id='newCode'; name.maxLength=64; name.setAttribute('aria-label', 'Code');
+    c.appendChild(field('Code', name));
+  }
   const r=document.createElement("div"); r.className="row";
   r.appendChild(field("Description (blank = auto-built from rewards)", inp(rc.description, v=>rc.description=v)));
   r.appendChild(field("Max Uses (0 = unlimited)", inp(rc.max_uses==null?0:rc.max_uses, v=>rc.max_uses=v, "number")));
@@ -146,7 +154,7 @@ function render(){
     }
     const del=document.createElement("button"); del.className="del"; del.textContent="✕"; del.title="remove reward";
     del.onclick=()=>{ data.rewards.splice(idx,1); render(); };
-    const dw=document.createElement("div"); dw.className="field"; dw.style.flex="0"; dw.style.minWidth="0";
+    const dw=document.createElement("div"); dw.className="field"; dw.style.flex="0 0 auto"; dw.style.minWidth="0";
     const sp=document.createElement("label"); sp.innerHTML="&nbsp;"; dw.append(sp, del); row.appendChild(dw);
     d.appendChild(row);
   });
@@ -172,9 +180,15 @@ async function save(){
   if(!rc.code){ setStatus("nothing to save", false); return; }
   if(!data.rewards.length){ setStatus("add at least one reward first", false); return; }
   setStatus("saving…");
-  const fd=new URLSearchParams(); fd.set("json", JSON.stringify(data));
-  const r=await fetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).then(r=>r.json());
-  if(r.ok){ setStatus("saved "+r.ID); loadList(); } else setStatus(r.msg||"save failed", false);
+  const snapshot=JSON.stringify(data);
+  const fd=new URLSearchParams(); fd.set("json", snapshot);
+  $('#btnSave').disabled = true;
+  try {
+    const r=await editorFetch("save",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:fd.toString()}).then(r=>r.json());
+    if(r.ok){ const saved=JSON.parse(snapshot); saved.version=r.version; saved.redeem.code=r.ID;
+      savedDocument=JSON.stringify(saved); data.version=r.version; data.redeem.code=r.ID;
+      render(); setStatus("saved "+r.ID); await loadList(); } else setStatus(r.msg||"save failed", false);
+  } finally { $('#btnSave').disabled = false; }
 }
 (async function(){
   await loadList();

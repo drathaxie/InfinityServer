@@ -1,6 +1,6 @@
 {
   "ID": 22,
-  "nextElementId": 9,
+  "nextElementId": 10,
   "name": "Cleric Joy Portal",
   "bgImage": "",
   "bgImageScale": 1.3,
@@ -99,6 +99,32 @@
           "link": "lai",
           "text": "",
           "iconOverride": "none"
+        },
+        {
+          "ID": 9,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false,
+          "sfxString": "",
+          "musicID": -1
         }
       ]
     }

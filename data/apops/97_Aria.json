@@ -1,6 +1,6 @@
 {
   "ID": 97,
-  "nextElementId": 32,
+  "nextElementId": 34,
   "name": "Aria",
   "bgImage": "",
   "bgImageScale": 1,
@@ -52,7 +52,7 @@
           "changeBoxColor": "#FFFFFF",
           "nameplateTextColor": "#FFFFFF",
           "nameplateBoxColor": "#000000",
-          "text": "Welcome to my pet shop! Sorry that everything's a mess right now. I'm still setting up. It's pretty wild that the Kickstarter Backer's have more pets than I do currently!",
+          "text": "Welcome to my shop, @name! We just started setting up so I don't have any new pets for you to adopt yet, but if you're interested in getting a scaly friend, then I have a request for you. ",
           "hideLead": false,
           "borderless": false,
           "addNameplate": false,
@@ -60,6 +60,75 @@
           "changeSubtitle": "",
           "compactMode": false,
           "requirements": []
+        },
+        {
+          "ID": 32,
+          "type": "Button",
+          "targets": [
+            234
+          ],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "ShowQuests",
+          "label": "Hatch Baby Red Dragon!",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        },
+        {
+          "ID": 33,
+          "type": "Button",
+          "targets": [
+            235
+          ],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "ShowQuests",
+          "label": "Hatch Baby Plasma Dragon!",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [
+            {
+              "RID": 1,
+              "Type": "Item",
+              "ID": 101049,
+              "Level": 0,
+              "Index": 0,
+              "Percentage": 0,
+              "Rank": 0,
+              "Flag": false,
+              "Val": "",
+              "ObjectiveID": 0,
+              "Qty": 1,
+              "Operator": ">",
+              "LockType": "Locked",
+              "LockMessage": ""
+            }
+          ],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
         },
         {
           "ID": 31,
@@ -129,7 +198,7 @@
   ],
   "actors": [
     {
-      "npcid": 60,
+      "npcid": 418,
       "name": "Aria",
       "subtitle": "Pet Shop Owner",
       "targetNode": 0,

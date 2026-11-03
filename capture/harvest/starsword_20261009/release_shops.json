@@ -1,0 +1,64 @@
+{
+  "2778": {
+    "Cmd": "loadShop",
+    "shop": {
+      "$type": "AQ2D_Server.Game_Engine.Shop.ItemShop, AQ2D_Server",
+      "shopID": 2778,
+      "Name": "Dai-lee's Shop",
+      "gameFlag": 2,
+      "items": [
+        {
+          "ShopItemID": 69182,
+          "Quantity": 1,
+          "QuantityRemain": -1,
+          "TokID": 104072,
+          "TokQty": 40,
+          "ID": 104073,
+          "PrefabName": "",
+          "EquipSpot": 2,
+          "ItemType": 6,
+          "Scale": 1.0,
+          "OffsetX": 0.0,
+          "OffsetY": 0.0,
+          "TokName": "Effort Coins",
+          "Name": "Blade of Effort",
+          "Description": "You deserve it!",
+          "DamageRange": 0.1,
+          "Filename": "items/swords/sword12.swf",
+          "Linkage": "",
+          "Icon": "iwsword",
+          "gameFlag": 2,
+          "Level": 5,
+          "StackSize": 1,
+          "Rarity": 100,
+          "Element": 1,
+          "Faction": 1,
+          "ReqQuests": [],
+          "strReqQuests": "",
+          "MetaString": "",
+          "boostValues": {}
+        }
+      ]
+    }
+  },
+  "2781": {
+    "Cmd": "loadShop",
+    "shop": {
+      "$type": "AQ2D_Server.Game_Engine.Shop.MergeShop, AQ2D_Server",
+      "shopID": 2781,
+      "Name": "Oct 23th Shop",
+      "mergeShop": true,
+      "items": []
+    }
+  },
+  "2782": {
+    "Cmd": "loadShop",
+    "shop": {
+      "$type": "AQ2D_Server.Game_Engine.Shop.MergeShop, AQ2D_Server",
+      "shopID": 2782,
+      "Name": "Oct 30th Shop",
+      "mergeShop": true,
+      "items": []
+    }
+  }
+}

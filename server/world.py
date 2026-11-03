@@ -9,11 +9,13 @@ push s2c packets to them from anyone's handler.
 Broadcasts are fire-and-forget writes (no per-peer await) so one slow client
 can't stall another's handler; backpressure on a tiny server is negligible.
 """
+import assetwire
 import json
+import battlepets
 
 
 class Member:
-    __slots__ = ("uid", "name", "user_obj", "area", "frame", "x", "y", "writer")
+    __slots__ = ("uid", "name", "user_obj", "area", "frame", "x", "y", "writer", "battlepet_v1")
 
     def __init__(self, uid, name, user_obj, writer):
         self.uid = uid
@@ -24,6 +26,7 @@ class Member:
         self.x = 0.0
         self.y = 0.0
         self.writer = writer
+        self.battlepet_v1 = False
 
 
 _rooms = {}   # area -> {uid: Member}
@@ -138,12 +141,14 @@ def broadcast(area, obj, exclude=None):
     dropped from the room (see _deliver) so a bad peer can't back up the whole fan-out."""
     if obj is None:
         return
-    data = json.dumps(obj, separators=(",", ":")).encode("utf-8") + b"\x00"
+    data = json.dumps(assetwire.normalize(obj), separators=(",", ":")).encode("utf-8") + b"\x00"
+    legacy = battlepets.legacy_packet(obj)
+    old_data = data if legacy is obj else json.dumps(assetwire.normalize(legacy), separators=(",", ":")).encode("utf-8") + b"\x00"
     room = _room(area)
     for m in list(room.values()):
         if m.uid == exclude:
             continue
-        if not _deliver(m.writer, data):
+        if not _deliver(m.writer, data if getattr(m,'battlepet_v1',False) else old_data):
             room.pop(m.uid, None)
 
 
@@ -151,7 +156,7 @@ def send(member, obj):
     """Push obj to a single member's socket (fire-and-forget). Drops the member if it's stalled."""
     if member is None or obj is None:
         return
-    data = json.dumps(obj, separators=(",", ":")).encode("utf-8") + b"\x00"
+    data = json.dumps(assetwire.normalize(obj), separators=(",", ":")).encode("utf-8") + b"\x00"
     if not _deliver(member.writer, data) and member.area is not None:
         _rooms.get(member.area, {}).pop(member.uid, None)
 
@@ -160,7 +165,7 @@ def broadcast_all(obj):
     """Send obj to EVERY connected player across all areas (server-wide; e.g. a mod yell)."""
     if obj is None:
         return
-    data = json.dumps(obj, separators=(",", ":")).encode("utf-8") + b"\x00"
+    data = json.dumps(assetwire.normalize(obj), separators=(",", ":")).encode("utf-8") + b"\x00"
     for room in list(_rooms.values()):
         for m in list(room.values()):
             if not _deliver(m.writer, data):

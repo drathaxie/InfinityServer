@@ -8,12 +8,13 @@ Attack node compared against what AE actually sent.
 
 - 233 captured packets -> 86 presses (auto x40, skill x46)
 - **85/86 graded presses reproduced exactly** (1100 nodes compared)
-- 1 known AE variance (Concealed Blade applied to nobody)
+- 1 known AE variance (Concealed Blade applied to nobody, sky-blade PlayerAnimation Priority Low (AE's 'Interrupt All' never enters the state))
 
 ## golden_attack_fixtures.json (2nd session)
 
 - 214 captured packets -> 74 presses (auto x29, skill x44, ult x1)
-- **70/70 graded presses reproduced exactly** (951 nodes compared)
+- **69/70 graded presses reproduced exactly** (951 nodes compared)
+- 1 known AE variance (Concealed Blade applied to nobody, sky-blade PlayerAnimation Priority Low (AE's 'Interrupt All' never enters the state))
 - 4 activations AE interrupted mid-cast (no resolution packet to compare)
 
 ## Harness sensitivity

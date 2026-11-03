@@ -48,11 +48,35 @@ INFINITY_GAME_PORT=5588
 
 ```bash
 cd /opt/infinity/server && set -a && . ./.pg.env && set +a
-/opt/infinity/.venv/bin/python migrate_to_pg.py    # ensures schema, copies data/infinity.db -> PG
+/opt/infinity/.venv/bin/python migrate_to_pg.py --source /path/to/verified-source-copy.db
+# Inspect the read-only plan, then copy into an EMPTY PostgreSQL database:
+/opt/infinity/.venv/bin/python migrate_to_pg.py --source /path/to/verified-source-copy.db --apply
 ```
 
-`migrate_to_pg.py` is idempotent (TRUNCATE + reload, identity sequences advanced). For a fresh
-authored-content-only DB instead, `db.init()` + `seed.run()` rebuilds everything from `data/`.
+The source must have the current schema. Back it up and upgrade the copy first. The migration
+checks every application table, foreign-key references, row counts and content hashes, and
+advances every identity sequence. It commits the complete copy atomically and refuses occupied
+destinations. It never truncates a running database. Rehearse recovery into a separate empty
+database before cutover; retain the original backup until that rehearsal passes.
+
+For a fresh authored-content-only database, `db.init()` and `seed.run()` rebuild from `data/`;
+they do not reconstruct player progress. Provision staff by immutable account/character ID
+through `characters.access_level`; `dev_users.txt` only reserves legacy staff usernames.
+
+Game tokens expire after 24 hours and rotate on API login. Password/username changes and account
+session revocation invalidate browser sessions and game tokens. Connected game sessions check
+revocation on commands and at most two seconds later while idle. Staff cookies recheck current
+roles. Existing cookies/tokens from before the September 2026 session migration require login.
+
+Authenticated game connections have no inactivity timeout, so players may remain AFK.
+Unauthenticated peers still have 20 seconds to log in, and incomplete frames must finish
+within 30 seconds. Frame-size, command-rate, connection limits, and session revocation
+continue to apply.
+
+Run `python -m pytest -q` in `server/` for the complete suite. Script tests run once through
+`test_all.py`; dedicated regression modules are collected normally. PostgreSQL test runs create
+unique `infinity_test_<uuid>` schemas and remove only their own schemas on exit. Routine replay
+reports go to temporary storage; set `INFINITY_TEST_REPORT_DIR` to retain them explicitly.
 
 ## 4. systemd services (survive reboot)
 
@@ -92,7 +116,7 @@ sudo systemctl restart caddy   # enabled by default -> survives reboot
   for p in 5588 80 443; do sudo iptables -I INPUT 5 -p tcp --dport $p -j ACCEPT; done
   sudo apt-get install -y iptables-persistent && sudo netfilter-persistent save
   ```
-  (8182 need not be public — Caddy reaches it over localhost — but it's harmless if open.)
+  Keep 8182 internal; Caddy reaches it over localhost and provides HTTPS for account/editor traffic.
 - **OCI security list / NSG (Console):** stateful ingress, Source `0.0.0.0/0`, TCP, ports
   **5588** (game), **80** + **443** (Caddy/Let's Encrypt + HTTPS API). DB port 5432 stays closed.
 
@@ -104,6 +128,7 @@ game server at `130.162.189.229:5588` (raw TCP).
 
 ## Notes
 
-- The `.unity3d` asset bundles still stream from AE's own public CDN — we host none of them.
+- Asset delivery follows the configured catalog/CDN endpoints. Synchronizing catalog metadata
+  does not itself copy the bundle files; validate the configured client delivery paths separately.
 - The mod also carries a WebCom insecure-HTTP fallback (for an http:// localhost API), inert
   when the URL is https://.

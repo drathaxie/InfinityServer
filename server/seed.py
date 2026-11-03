@@ -17,6 +17,7 @@ import pathlib
 import db
 import fill_dev_shop
 import montemplates
+import spellstones
 
 DATA = pathlib.Path(__file__).resolve().parent.parent / "data"
 MAPS_DIR = DATA / "maps"
@@ -593,7 +594,7 @@ def class_item_ids(conn):
             iid = (json.loads(r["rig"]) or {}).get("ID")
         except Exception:
             iid = None
-        if iid is not None and conn.execute("SELECT 1 FROM items WHERE item_id=?",
+        if iid is not None and conn.execute("SELECT 1 FROM items WHERE id=?",
                                             (int(iid),)).fetchone():
             ids.append(int(iid))
     return ids
@@ -1559,7 +1560,7 @@ _IH_ITEM = {
     "ItemType": 21, "EquipSpot": 6, "Linkage": "", "Icon": "iiclass", "Level": 1,
     "Quantity": 1, "StackSize": 1, "Element": 1, "Faction": 1, "MetaString": "2022",
     "DamageRange": 0.1, "Rarity": 50, "Filename": "armors/77678_AQ2DKSArmor.unity3d",
-    "Coins": True, "PrefabName": "ArmorSlots", "MobileCompat": 1, "IsClass": True,
+    "Coins": True, "PrefabName": "ArmorSlots", "MobileCompatibility": 1, "isClass": True,
     "Bundle": _IH_RIG["Bundle"],
 }
 
@@ -2084,7 +2085,7 @@ _CHRONO_ITEM = {
     "Quantity": 1, "StackSize": 1, "Element": 1, "Faction": 1,
     "MetaString": str(CHRONOMANCER_CLASS_ID), "DamageRange": 0.1, "Rarity": 50,
     "Filename": "armors/8814_DoctorWho.unity3d", "Coins": True,
-    "PrefabName": "ArmorSlots", "MobileCompat": 1, "IsClass": True,
+    "PrefabName": "ArmorSlots", "MobileCompatibility": 1, "isClass": True,
     "Bundle": _CHRONO_RIG["Bundle"],
 }
 
@@ -2279,7 +2280,7 @@ def grant_class_items(conn):
     staff_ids = [r["id"] for r in conn.execute(
         "SELECT id FROM characters WHERE COALESCE(access_level, 0) >= ?", (STAFF_CLASS_ACCESS,))]
     for iid in STAFF_ONLY_CLASS_ITEMS:
-        if not conn.execute("SELECT 1 FROM items WHERE item_id=?", (iid,)).fetchone():
+        if not conn.execute("SELECT 1 FROM items WHERE id=?", (iid,)).fetchone():
             continue                                       # that staff class isn't in this DB
         for ch in conn.execute(
                 "SELECT id, class_id FROM characters WHERE COALESCE(access_level, 0) < ?",
@@ -2323,13 +2324,13 @@ def seed_items(conn):
 # A minimal real ItemType 44 implementation for the client RequestUseSpellstone path. The
 # item links to its standalone Skill Forge graph through MetaString, just like a class armor
 # links to a class through MetaString without embedding behavior in the item itself.
-PRACTICE_SPELLSTONE_ITEM_ID = 200023
-PRACTICE_SPELLSTONE_SKILL_ID = 90390
+PRACTICE_SPELLSTONE_ITEM_ID = spellstones.TRANSFORMATION_ITEM_ID
+PRACTICE_SPELLSTONE_SKILL_ID = spellstones.TRANSFORMATION_SKILL_ID
 PRACTICE_SPELLSTONE_ITEM = {
     "ID": PRACTICE_SPELLSTONE_ITEM_ID,
-    "Name": "Practice Frogzard Spellstone",
-    "Description": "A beginner Spellstone forged to transform its user into a Frogzard for "
-                   "30 seconds. Equip it to spell slot 6, then press 6 to cast. Reusable.",
+    "Name": "Monster Transformation Spellstone",
+    "Description": "Transform into a random monster from the server's curated list for "
+                   "30 seconds. Equip it to spell slot 6. Reusable; cannot be used in combat.",
     "ItemType": 44, "EquipSpot": 1, "Linkage": "", "Icon": "iibag", "Level": 1,
     "Quantity": 1, "StackSize": 1, "Element": 1, "Faction": 1, "strReqQuests": "",
     "MetaString": str(PRACTICE_SPELLSTONE_SKILL_ID), "DamageRange": 0.1, "Rarity": 1,
@@ -2342,7 +2343,7 @@ PRACTICE_SPELLSTONE_NODES = [
            "Bundle": {"ID": 46555, "Name": "frogzard",
                       "Filename": "npcs/46555_frogzard.unity3d",
                       "VersionStage": 8, "VersionLive": 8}}),
-    ("3", {"Name": "Aura", "AuraName": "Practice Frogzard Form",
+    ("3", {"Name": "Aura", "AuraName": "Monster Transformation",
            "Duration": 30, "MaxTargets": 1}),
 ]
 
@@ -2358,10 +2359,29 @@ def seed_practice_spellstone(conn):
         "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(skill_id) DO UPDATE SET "
         "name=excluded.name, description=excluded.description, icon=excluded.icon, "
         "slot=excluded.slot, data=excluded.data, forge_data=excluded.forge_data",
-        (PRACTICE_SPELLSTONE_SKILL_ID, 0, "Practice Frogzard Form",
-         "Transform into a Frogzard for 30 seconds.", "iibag", -1,
+        (PRACTICE_SPELLSTONE_SKILL_ID, 0, "Monster Transformation",
+         "Transform into a random monster for 30 seconds. Out of combat only.", "iibag", -1,
          json.dumps(data, separators=(",", ":")),
          json.dumps(forge_data, separators=(",", ":"))))
+    return 1
+
+
+def seed_cheer_spellstone(conn):
+    """Add the room cheer to the catalog without changing player ownership or rewards."""
+    import forge
+    item = {**PRACTICE_SPELLSTONE_ITEM, 'ID': spellstones.CHEER_ITEM_ID,
+            'Name': 'Battle On Cheer Spellstone', 'MetaString': str(spellstones.CHEER_SKILL_ID),
+            'Description': 'Have the available heroes in your room say Battle on! together. '
+                           'Reusable every 30 seconds; cannot be used in combat.'}
+    db.store_item(conn, item, replace=True)
+    data, graph = forge.linear_graph([('0', {'Name': 'OnRequest'}),
+                                     ('1', {'Name': 'Cooldown', 'CD': spellstones.COOLDOWN_MS})])
+    conn.execute('INSERT INTO skills(skill_id,action,name,description,icon,slot,data,forge_data) '
+                 'VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(skill_id) DO UPDATE SET '
+                 'name=excluded.name,description=excluded.description,slot=excluded.slot,'
+                 'data=excluded.data,forge_data=excluded.forge_data',
+                 (spellstones.CHEER_SKILL_ID, 0, 'Battle on!', item['Description'], 'iibag', -1,
+                  json.dumps(data, separators=(',', ':')), json.dumps(graph, separators=(',', ':'))))
     return 1
 
 
@@ -2439,7 +2459,7 @@ def seed_global_drops(conn):
     for iid, spec in (data or {}).items():
         if not str(iid).lstrip("-").isdigit():
             continue
-        if not conn.execute("SELECT 1 FROM items WHERE item_id=?", (int(iid),)).fetchone():
+        if not conn.execute("SELECT 1 FROM items WHERE id=?", (int(iid),)).fetchone():
             continue                                   # item not in catalog -> skip (FK)
         conn.execute(
             "INSERT INTO global_drops(item_id, rate, quantity) VALUES(?,?,?) "
@@ -2464,7 +2484,7 @@ def seed_item_sponsors(conn):
     for iid, sponsors in (data or {}).items():
         if not str(iid).lstrip("-").isdigit() or not isinstance(sponsors, list):
             continue                                   # skip "_comment"/doc keys
-        if not conn.execute("SELECT 1 FROM items WHERE item_id=?", (int(iid),)).fetchone():
+        if not conn.execute("SELECT 1 FROM items WHERE id=?", (int(iid),)).fetchone():
             continue                                   # item not in catalog -> skip (FK)
         for seq, s in enumerate(sponsors):
             name = (s or {}).get("name")
@@ -2522,7 +2542,7 @@ def run():
         # shop_items/links resolve.
         items = seed_items(conn)
         redeem_codes = seed_redeem_codes(conn)
-        spellstones = seed_practice_spellstone(conn)
+        spellstone_count = seed_practice_spellstone(conn) + seed_cheer_spellstone(conn)
         shops, links = seed_shops(conn)
         dev_shop = fill_dev_shop.fill(conn)
         mons = montemplates.seed_db(conn)
@@ -2545,7 +2565,7 @@ def run():
         qrefs = seed_quest_objective_refs(conn)
         isponsors = seed_item_sponsors(conn)
         conn.commit()
-    print(f"[seed] items={items} spellstones={spellstones} hairs={hairs} shops={shops} shop_items={links} dev_shop_items={dev_shop} monsters={mons} maps={maps} "
+    print(f"[seed] items={items} spellstones={spellstone_count} hairs={hairs} shops={shops} shop_items={links} dev_shop_items={dev_shop} monsters={mons} maps={maps} "
           f"quests={quests} apops={apops} classes={cls} skills={sk} skill_graphs={graphs} "
           f"monster_skills_linked={mon_skills} paladin_skills={pala} void_skills={void} "
           f"infinity_hero_skills={ihero} "

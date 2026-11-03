@@ -17,7 +17,21 @@ import json
 import world
 
 MAX_MEMBERS = 800
-RANK_MEMBER, RANK_OFFICER, RANK_LEADER = 0, 1, 2
+# SwordShine already uses 0 member, 1 officer, 3 leader. Keep that persisted scale.
+RANK_MEMBER, RANK_OFFICER, RANK_LEADER = 0, 1, 3
+
+
+def set_membership(conn, char_id, guild_id, rank):
+    """Write both projections of the one shared guild membership."""
+    conn.execute("UPDATE characters SET guild_id=?, guild_rank=? WHERE id=?",
+                 (guild_id, rank, char_id))
+    if __import__('db').BACKEND in ("mysql", "mariadb"):
+        if guild_id:
+            conn.execute("INSERT INTO users_guilds(GuildID,UserID,Rank) VALUES(?,?,?) "
+                         "ON DUPLICATE KEY UPDATE GuildID=VALUES(GuildID),Rank=VALUES(Rank)",
+                         (guild_id, char_id, rank))
+        else:
+            conn.execute("DELETE FROM users_guilds WHERE UserID=?", (char_id,))
 
 # The guild hall is modelled on the house system: a decoratable shared map keyed per guild.
 # DEFAULT_HALL_MAP is a plain area we serve as the hall canvas (the "clubhouse" fits a guild);
@@ -149,7 +163,7 @@ def leave(conn, char):
     if not gid:
         return None
     was_leader = int(char["guild_rank"] or 0) >= RANK_LEADER
-    conn.execute("UPDATE characters SET guild_id=0, guild_rank=0 WHERE id=?", (char["id"],))
+    set_membership(conn, char["id"], 0, 0)
     remaining = members(conn, gid)
     if not remaining:
         conn.execute("DELETE FROM guilds WHERE id=?", (gid,))
@@ -159,7 +173,7 @@ def leave(conn, char):
     if was_leader:
         # members() is ordered rank DESC, id — the top remaining member inherits leadership.
         new_leader_id = remaining[0]["id"]
-        conn.execute("UPDATE characters SET guild_rank=? WHERE id=?", (RANK_LEADER, new_leader_id))
+        set_membership(conn, new_leader_id, gid, RANK_LEADER)
         conn.execute("UPDATE guilds SET owner=? WHERE id=?", (new_leader_id, gid))
     conn.commit()
     return {"gid": gid, "left_id": char["id"], "disbanded": False, "new_leader_id": new_leader_id}
@@ -175,6 +189,5 @@ def create(conn, char, name):
         return None
     gid = conn.execute("INSERT INTO guilds(name, motd, owner) VALUES(?,?,?) RETURNING id",
                        (name, "", char["id"])).fetchone()["id"]
-    conn.execute("UPDATE characters SET guild_id=?, guild_rank=? WHERE id=?",
-                 (gid, RANK_LEADER, char["id"]))
+    set_membership(conn, char["id"], gid, RANK_LEADER)
     return gid

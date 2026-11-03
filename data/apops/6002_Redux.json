@@ -1,0 +1,172 @@
+{
+  "ID": 6002,
+  "nextElementId": 34,
+  "name": "Redux",
+  "bgImage": "",
+  "bgImageScale": 1,
+  "startingPanels": [
+    1,
+    2
+  ],
+  "panels": [
+    {
+      "PID": 1,
+      "name": "Buttons",
+      "panelPosition": 2,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 114.2,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "overwritable": false,
+      "elements": []
+    },
+    {
+      "PID": 2,
+      "name": "Speach Bubble",
+      "panelPosition": 1,
+      "hidePanelBG": true,
+      "changeApopBG": "",
+      "changeApopBGScale": 1.3,
+      "restoreBGOnClose": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Bottom",
+      "overwritable": false,
+      "elements": [
+        {
+          "ID": 28,
+          "type": "Header",
+          "text": "Redux",
+          "subtitle": "",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "requirements": []
+        },
+        {
+          "ID": 29,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Hey @name! Battleon's getting a little crowded, I figured I'd join the party! Thank you for taking the time to join this little project of mine. It means a lot to me. As a way to say thank you, I thought I'd give you some gifts! Take these tokens to /EpicFounder and redeem them for one of the Epic Tier reward sets! And don't worry, Despair over there has you covered for the base versions of all three, as well as that sick Underworld set. ",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": []
+        },
+        {
+          "ID": 32,
+          "type": "Button",
+          "targets": [
+            6942,
+            6943
+          ],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "ShowQuests",
+          "label": "See my quests",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        },
+        {
+          "ID": 31,
+          "type": "Button",
+          "targets": [],
+          "acceptQuests": [],
+          "turninQuests": [],
+          "action": "CloseApop",
+          "label": "Done",
+          "subtitle": "",
+          "intMin": 0,
+          "intMax": 0,
+          "strData": "",
+          "link": "",
+          "text": "",
+          "icon": "",
+          "iconOverride": "none",
+          "requirements": [],
+          "reqCondition": "AND",
+          "lockedIcon": "",
+          "lockedLabel": "",
+          "lockedMsg": "",
+          "lockedMode": "Hide",
+          "closePanels": false
+        }
+      ]
+    },
+    {
+      "PID": 3,
+      "name": "New Panel",
+      "panelPosition": 1,
+      "hidePanelBG": false,
+      "addVerticalSpacing": 0,
+      "noTween": false,
+      "tweenFrom": "Right",
+      "changeApopBG": "",
+      "changeApopBGScale": 1,
+      "restoreBGOnClose": false,
+      "elements": [
+        {
+          "ID": 14,
+          "type": "Header",
+          "text": "Redux",
+          "subtitle": "",
+          "canCloseHeader": false,
+          "canCloseApop": false,
+          "requirements": []
+        },
+        {
+          "ID": 15,
+          "type": "Bubble",
+          "color": "#000000",
+          "changeBoxColor": "#FFFFFF",
+          "nameplateTextColor": "#FFFFFF",
+          "nameplateBoxColor": "#000000",
+          "text": "Greetings, @name. I have a couple of tasks if you're willing.",
+          "hideLead": false,
+          "borderless": false,
+          "addNameplate": false,
+          "changeNameplate": "",
+          "changeSubtitle": "",
+          "compactMode": false,
+          "requirements": []
+        }
+      ]
+    }
+  ],
+  "actors": [
+    {
+      "npcid": 99998,
+      "name": "Redux",
+      "subtitle": "Pet Shop Owner",
+      "targetNode": 0,
+      "side": "left",
+      "xOffset": 0,
+      "yOffset": 0,
+      "scale": 1,
+      "animation": ""
+    }
+  ],
+  "freezeClient": 1,
+  "IsSingleAction": false
+}

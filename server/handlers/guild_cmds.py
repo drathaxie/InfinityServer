@@ -74,8 +74,7 @@ async def guild_invite_accept(session, writer, cmd, params, msg):   # Params=[ow
     if len(guilds.members(session.conn, gid)) >= guilds.MAX_MEMBERS:
         await _server_msg(writer, "That guild is full.")
         return
-    session.conn.execute("UPDATE characters SET guild_id=?, guild_rank=? WHERE id=?",
-                         (gid, guilds.RANK_MEMBER, session.char["id"]))
+    guilds.set_membership(session.conn, session.char["id"], gid, guilds.RANK_MEMBER)
     _reload_char(session)
     session.member.user_obj["guild"] = guilds.guild_object(session.conn, gid)
     # tell existing members about the newcomer, then hand the joiner the full guild
@@ -108,7 +107,7 @@ async def _rank_change(session, writer, params, new_rank, out_cmd):
     trow = session.conn.execute("SELECT guild_id FROM characters WHERE id=?", (target_id,)).fetchone()
     if trow is None or trow["guild_id"] != session.char["guild_id"]:
         return
-    session.conn.execute("UPDATE characters SET guild_rank=? WHERE id=?", (new_rank, target_id))
+    guilds.set_membership(session.conn, target_id, session.char["guild_id"], new_rank)
     session.conn.commit()
     guilds.broadcast(session.conn, session.char["guild_id"],
                      {"Cmd": out_cmd, "rank": new_rank, "userID": target_id})
@@ -143,7 +142,7 @@ async def guild_kick(session, writer, cmd, params, msg):       # Params=[userID]
                                 (target_id,)).fetchone()
     if trow is None or trow["guild_id"] != gid:
         return
-    session.conn.execute("UPDATE characters SET guild_id=0, guild_rank=0 WHERE id=?", (target_id,))
+    guilds.set_membership(session.conn, target_id, 0, 0)
     session.conn.commit()
     guilds.broadcast(session.conn, gid, {"Cmd": "guildRemove", "UserID": target_id})
     kicked = world.find_member(trow["name"])     # tell the kicked player too
