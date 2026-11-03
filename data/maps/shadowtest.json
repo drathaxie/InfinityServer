@@ -1,0 +1,46 @@
+{
+  "area": {
+    "Cmd": "AreaJoin",
+    "areaName": "shadowtest-1",
+    "strMapName": "shadowtest",
+    "DisplayName": "Shadowfall Test",
+    "Bundle": {
+      "ID": 2100000,
+      "Name": "shadowtest",
+      "Type": "MAP",
+      "Version": 3,
+      "VersionContent": 3,
+      "VersionStage": 3,
+      "VersionLive": 3,
+      "DependencyID": 0,
+      "CRCPC": "705511530",
+      "CRCAndroid": "784221737",
+      "Filename": "maps/custom/2100000_map-shadowtest.unity3d"
+    },
+    "PrefabName": "map-shadowfall",
+    "intType": 1,
+    "sExtra": "",
+    "areaId": 2100000,
+    "Frame": "Enter",
+    "Pad": "Spawn",
+    "monBranch": [],
+    "uoBranch": [],
+    "QuestIDs": []
+  },
+  "cells": {
+    "Enter": {
+      "Cmd": "CellJoin",
+      "Frame": "Enter",
+      "Pad": "Spawn",
+      "entities": [],
+      "monsterSpawns": []
+    },
+    "Garden1": {
+      "Cmd": "CellJoin",
+      "Frame": "Garden1",
+      "Pad": "Bottom",
+      "entities": [],
+      "monsterSpawns": []
+    }
+  }
+}

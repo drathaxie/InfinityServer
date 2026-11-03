@@ -28,9 +28,9 @@ def remote(command, data=None, timeout=90):
     return result.stdout
 
 
-def server_script(script, arguments='', data=None):
+def server_script(script, arguments='', data=None, timeout=90):
     command = ENV + '/opt/infinity/.venv/bin/python ' + script + (' ' + arguments if arguments else '')
-    return remote('sudo -n bash -c ' + shlex.quote(command), data)
+    return remote('sudo -n bash -c ' + shlex.quote(command), data, timeout)
 
 
 def preflight():

@@ -44,7 +44,14 @@ def ffdec(*args, profile=None):
         os.makedirs(profile, exist_ok=True)
         cmd.append("-Duser.home=" + profile)
         env["APPDATA"] = profile
-    cmd += ["-jar", FFDEC_JAR, "-cli"] + list(args)
+    cmd += ["-jar", FFDEC_JAR, "-cli"]
+    if "-export" in args or "-render" in args:
+        # JPEXS anti-aliases every fill separately, so two shapes sharing an edge each leave it half transparent
+        # (conflation): see-through seams inside solid art that Flash Player never draws. Rendering at 16x and
+        # box-reducing removes them (Hollowborn Paladin Helmet: 2,041 seam pixels -> none visible).
+        cmd += ["-config", "reduceAntialiasConflationByScalingForExport=1,reduceAntialiasConflationByScalingValueForExport="
+                + os.environ.get("SWF2UNITY_CONFLATION_SCALE", "16")]
+    cmd += list(args)
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, env=env)
     if r.returncode != 0:
         raise RuntimeError("ffdec failed (%d): %s %s" % (r.returncode, r.stdout[-2000:], r.stderr[-2000:]))

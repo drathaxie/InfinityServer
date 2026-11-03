@@ -478,7 +478,8 @@ def load(path_or_bytes) -> Movie:
 def display_lists(frames: List[Frame]):
     """Yield, per frame, {depth: state} where state is a dict of the active placement's properties.
     Implements Flash display-list semantics: PlaceObject(move=False) replaces, move=True modifies,
-    a new character at a moved depth replaces the instance (new instance id)."""
+    a new character at a moved depth replaces the instance (new instance id) but keeps the depth's matrix,
+    colour transform, blend, filters, name and clip depth unless the tag sets them (Flash Player, Ruffle, JPEXS)."""
     active: Dict[int, dict] = {}
     serial = 0
     out = []
@@ -487,13 +488,16 @@ def display_lists(frames: List[Frame]):
             active.pop(d, None)
         for pl in fr.places:
             st = active.get(pl.depth)
-            if not pl.move or st is None or (pl.char is not None and pl.char != st["char"]):
+            if not pl.move or st is None:
                 serial += 1
                 st = {"inst": serial, "char": pl.char if pl.char is not None else (st or {}).get("char"),
                       "matrix": (1.0, 0.0, 0.0, 1.0, 0, 0), "cxform": None, "ratio": 0, "clip": None,
                       "blend": None, "name": None, "filters": False, "filters_raw": b""}
                 if not pl.move and active.get(pl.depth) and pl.char is None:
                     st.update({k: v for k, v in active[pl.depth].items() if k != "inst"})
+            elif pl.char is not None and pl.char != st["char"]:
+                serial += 1
+                st = dict(st, inst=serial, char=pl.char)
             else:
                 st = dict(st)
             if pl.matrix is not None:
