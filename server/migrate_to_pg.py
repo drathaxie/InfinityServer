@@ -91,14 +91,19 @@ def migrate(src, dst, apply=False):
         dst.execute("DELETE FROM kv")
         for table in order:
             cols = columns(src, table)
-            if set(cols) != db._columns(dst, table):
+            # SQLite keeps an unquoted identifier's spelling (hairs.Gender); PostgreSQL folds it
+            # to lower case (hairs.gender) unless the DDL quoted it (items."Name"). Both name the
+            # same column, so pair them case-insensitively and address each side by its own name.
+            dst_by_fold = {c.casefold(): c for c in db._columns(dst, table)}
+            if sorted(c.casefold() for c in cols) != sorted(dst_by_fold):
                 raise ValueError(f"Column mismatch for {table}; upgrade the source schema first")
             selected = ",".join(quoted(c) for c in cols)
+            target = ",".join(quoted(dst_by_fold[c.casefold()]) for c in cols)
             source = src.execute(f"SELECT {selected} FROM {quoted(table)}").fetchall()
             if source:
-                dst.executemany(f"INSERT INTO {quoted(table)} ({selected}) VALUES "
+                dst.executemany(f"INSERT INTO {quoted(table)} ({target}) VALUES "
                                 f"({','.join('?' for _ in cols)})", source)
-            copied = dst.execute(f"SELECT {selected} FROM {quoted(table)}").fetchall()
+            copied = dst.execute(f"SELECT {target} FROM {quoted(table)}").fetchall()
             if len(copied) != len(source) or row_digest(copied) != row_digest(source):
                 raise ValueError(f"Content verification failed for {table}")
         identities = dst.execute("SELECT table_name,column_name FROM information_schema.columns "

@@ -707,13 +707,13 @@ def quest_items(conn, qs):
     """quest/items?q=text -> [{id,name}] catalog item matches for reward/turnin pickers (cap 50)."""
     q = (urllib.parse.parse_qs(qs).get("q", [""])[0] or "").strip().lower()
     if q.lstrip("-").isdigit():
-        rows = conn.execute("SELECT item_id, name FROM items WHERE id=? LIMIT 50",
+        rows = conn.execute("SELECT id AS item_id, \"Name\" AS name FROM items WHERE id=? LIMIT 50",
                             (int(q),)).fetchall()
     elif q:
-        rows = conn.execute("SELECT item_id, name FROM items WHERE LOWER(name) LIKE ? "
-                            "ORDER BY item_id LIMIT 50", (f"%{q}%",)).fetchall()
+        rows = conn.execute("SELECT id AS item_id, \"Name\" AS name FROM items WHERE LOWER(\"Name\") LIKE ? "
+                            "ORDER BY id LIMIT 50", (f"%{q}%",)).fetchall()
     else:
-        rows = conn.execute("SELECT id AS item_id, name FROM items ORDER BY id LIMIT 50").fetchall()
+        rows = conn.execute("SELECT id AS item_id, \"Name\" AS name FROM items ORDER BY id LIMIT 50").fetchall()
     return [{"id": r["item_id"], "name": r["name"] or ""} for r in rows]
 
 
@@ -734,7 +734,7 @@ def quest_save(conn, form):
 def item_list(conn, qs):
     """item/list -> [{ID,name}] for the item editor picker (id-sorted)."""
     return [{"ID": r["item_id"], "name": r["name"] or f"Item {r['item_id']}"}
-            for r in conn.execute("SELECT id AS item_id, name FROM items ORDER BY id")]
+            for r in conn.execute("SELECT id AS item_id, \"Name\" AS name FROM items ORDER BY id")]
 
 
 def item_search(conn, qs):
