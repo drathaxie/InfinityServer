@@ -68,17 +68,19 @@ def catalog(conn, query="", limit=5000):
     q = (query or "").strip()
     if q.isdigit():
         rows = conn.execute(
-            "SELECT i.id,i.name,i.item_type,i.equip_spot,i.rarity,i.cost,i.coins,i.Upgrade,"
+            "SELECT i.id,i.\"Name\" AS name,i.item_type,i.equip_spot,i.\"Rarity\" AS rarity,"
+            "i.\"Cost\" AS cost,i.\"Coins\" AS coins,i.\"Upgrade\" AS \"Upgrade\","
             "(SELECT COUNT(*) FROM token_redemptions tr WHERE tr.item_id=i.id) AS popularity "
-            "FROM items i WHERE i.id=? OR LOWER(i.name) LIKE LOWER(?) "
-            "ORDER BY popularity DESC,i.name,i.id LIMIT ?",
+            "FROM items i WHERE i.id=? OR LOWER(i.\"Name\") LIKE LOWER(?) "
+            "ORDER BY popularity DESC,i.\"Name\",i.id LIMIT ?",
             (int(q), f"%{q}%", limit)).fetchall()
     else:
         rows = conn.execute(
-            "SELECT i.id,i.name,i.item_type,i.equip_spot,i.rarity,i.cost,i.coins,i.Upgrade,"
+            "SELECT i.id,i.\"Name\" AS name,i.item_type,i.equip_spot,i.\"Rarity\" AS rarity,"
+            "i.\"Cost\" AS cost,i.\"Coins\" AS coins,i.\"Upgrade\" AS \"Upgrade\","
             "(SELECT COUNT(*) FROM token_redemptions tr WHERE tr.item_id=i.id) AS popularity "
-            "FROM items i WHERE LOWER(i.name) LIKE LOWER(?) "
-            "ORDER BY popularity DESC,i.name,i.id LIMIT ?",
+            "FROM items i WHERE LOWER(i.\"Name\") LIKE LOWER(?) "
+            "ORDER BY popularity DESC,i.\"Name\",i.id LIMIT ?",
             (f"%{q}%", limit)).fetchall()
     return [{"id": int(r["id"]), "name": r["name"] or f"Item {r['id']}",
              "type": int(r["item_type"] or 0), "equipSpot": int(r["equip_spot"] or 0),
@@ -99,10 +101,10 @@ def token_balance(conn, char_id):
 def token_inventory(conn, char_id):
     marks = ",".join("?" for _ in TOKEN_ITEM_IDS)
     rows = conn.execute(
-        "SELECT ci.item_id,i.name,COALESCE(SUM(ci.quantity),0) AS n FROM char_items ci "
+        "SELECT ci.item_id,i.\"Name\" AS name,COALESCE(SUM(ci.quantity),0) AS n FROM char_items ci "
         "JOIN items i ON i.id=ci.item_id WHERE ci.char_id=? "
         f"AND ci.item_id IN ({marks}) AND ci.banked=0 AND ci.equipped=0 "
-        "GROUP BY ci.item_id,i.name ORDER BY ci.item_id",
+        "GROUP BY ci.item_id,i.\"Name\" ORDER BY ci.item_id",
         (int(char_id), *TOKEN_ITEM_IDS)).fetchall()
     return [{"itemId": int(r["item_id"]), "name": r["name"] or "IoDA Token",
              "count": int(r["n"] or 0)} for r in rows]
@@ -110,10 +112,11 @@ def token_inventory(conn, char_id):
 
 def inventory(conn, char_id):
     rows = conn.execute(
-        "SELECT ci.item_id,i.name,i.item_type,i.equip_spot,i.rarity,"
+        "SELECT ci.item_id,i.\"Name\" AS name,i.item_type,i.equip_spot,i.\"Rarity\" AS rarity,"
         "SUM(ci.quantity) AS quantity,MAX(ci.equipped) AS equipped,MAX(ci.banked) AS banked "
         "FROM char_items ci JOIN items i ON i.id=ci.item_id WHERE ci.char_id=? "
-        "GROUP BY ci.item_id,i.name,i.item_type,i.equip_spot,i.rarity ORDER BY i.name,ci.item_id",
+        "GROUP BY ci.item_id,i.\"Name\",i.item_type,i.equip_spot,i.\"Rarity\" "
+        "ORDER BY i.\"Name\",ci.item_id",
         (int(char_id),)).fetchall()
     return [{"itemId": int(r["item_id"]), "name": r["name"] or f"Item {r['item_id']}",
              "type": int(r["item_type"] or 0), "equipSpot": int(r["equip_spot"] or 0),
@@ -123,7 +126,7 @@ def inventory(conn, char_id):
 
 def buyback_history(conn, account_id):
     rows = conn.execute(
-        "SELECT b.id,b.item_id,i.name,i.item_type,b.remaining_quantity,b.unit_price,b.sold_at "
+        "SELECT b.id,b.item_id,i.\"Name\" AS name,i.item_type,b.remaining_quantity,b.unit_price,b.sold_at "
         "FROM ac_item_buybacks b JOIN items i ON i.id=b.item_id "
         "WHERE b.account_id=? AND b.remaining_quantity>0 ORDER BY b.sold_at DESC,b.id DESC",
         (int(account_id),)).fetchall()
@@ -244,7 +247,7 @@ def equip_house(conn, account, item_id):
 
 def redemption_history(conn, account_id, limit=50):
     rows = conn.execute(
-        "SELECT tr.item_id,i.name,i.item_type,tr.token_item_id,ti.name AS token_name,tr.redeemed "
+        "SELECT tr.item_id,i.\"Name\" AS name,i.item_type,tr.token_item_id,ti.\"Name\" AS token_name,tr.redeemed "
         "FROM token_redemptions tr JOIN items i ON i.id=tr.item_id "
         "LEFT JOIN items ti ON ti.id=tr.token_item_id WHERE tr.account_id=? "
         "ORDER BY tr.redeemed DESC LIMIT ?", (int(account_id), int(limit))).fetchall()

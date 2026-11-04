@@ -8,6 +8,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import assetwire
 import db
 import forge
 import game
@@ -77,7 +78,9 @@ def main():
     assert len(packets) == 1 and packets[0]["Cmd"] == "getMonDrops"
     assert packets[0]["monID"] == mon_id
     drops = packets[0]["ItemDrops"]
-    assert drops == loot.drop_table(conn, mon_id)
+    # send_obj runs every packet through assetwire.normalize (fills bundle Version* from the
+    # asset catalog), so the wire equals the normalized table, not the raw one.
+    assert drops == assetwire.normalize(loot.drop_table(conn, mon_id))
     ids = {d["itemID"] for d in drops}
     assert int(authored["item_id"]) in ids, "the monster's own drop is listed"
     global_ids = {int(r["item_id"]) for r in

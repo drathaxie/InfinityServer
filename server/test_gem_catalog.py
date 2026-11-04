@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def catalog():
-    return (json.loads((ROOT/'data/items.json').read_text()),
-            json.loads((ROOT/'data/gem_catalog.json').read_text())['entries'])
+    return (json.loads((ROOT/'data/items.json').read_text(encoding='utf-8')),
+            json.loads((ROOT/'data/gem_catalog.json').read_text(encoding='utf-8'))['entries'])
 
 
 def test_every_supported_family_has_four_slots_and_six_rollable_rarities():
