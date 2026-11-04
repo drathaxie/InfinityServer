@@ -1,0 +1,17 @@
+{
+  "schema": "shadowtest-calibration-v10",
+  "pixelsPerUnit": 10,
+  "cameraZoom": 21.4,
+  "cells": {
+    "Enter": {
+      "entityScale": 0.869375,
+      "entitySpeed": 16.10352264557872
+    },
+    "Garden1": {
+      "entityScale": 1.1301875000000001,
+      "entitySpeed": 18.404025880661393
+    }
+  },
+  "reason": "v9 framing (orthographic size 21.4: 87%% of the room height, ~20 units of 16:9 pan). v9 sized avatars to the baked NPCs, which the user found far too big; v10 keeps v8's on-screen avatar size instead (v8 scale x 21.4/16). World walking speed (entityScale x entitySpeed) unchanged.",
+  "proof_boundary": "In-client feel requires the user's check."
+}

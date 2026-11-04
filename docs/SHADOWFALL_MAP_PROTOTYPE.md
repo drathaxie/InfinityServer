@@ -3,6 +3,24 @@
 November 2, 2026. The selected conversion pilot is Shadowfall, replacing the
 earlier Greenguard proposal. Native map inspection remains reference material.
 
+## Version 10 published: window glow and lanterns ride their wall; avatar size restored
+
+November 4. In-client v9 showed the castle-window glow sliding off the windows
+and an avatar "far too big".
+
+* The translucent window-glow overlay (`1/174`) and the wall lanterns (`1/206`,
+  `1/208`, `1/300`) were merged into Ground bands (parallax 0) while the windows
+  and wall are DistantCastle. The misalignment existed since v3; v9's 1.7x
+  speed made it obvious. They now ride DistantCastle (layout v10), checked at
+  both camera extremes. Lantern glows sit on the lamps' source centres
+  (x 184.5 / 267.5 / 350, y 325); the third lamp mostly hides behind the dragon.
+* v9's NPC-proportion avatar (1.6 / 1.4) is reverted. v10 keeps v8's on-screen
+  size at the wider framing: v8 scale x 21.4/16 = Enter 0.869, Garden1 1.13,
+  with world walking speed unchanged (calibration v10).
+* Windows SHA-256: `1f286b4c9b19a95dd328a2134c1284cb9c793153919a6b3b3e627b2605aca135`; CRC `130925745`.
+* Android SHA-256: `9a685382e1951de10f368943d450f5a5dd7c59b1ec10dbb9d4120a88536483d5`; CRC `1731765154`.
+* Backup: `/opt/infinity/backups/shadowtest-v10-20261104T153832Z`. Game PID preserved.
+
 ## Version 9 published: wider framing, parallax kept, source-proportion avatars
 
 November 4. In-client, v3-v8's camera (orthographic size 16) showed only 65% of

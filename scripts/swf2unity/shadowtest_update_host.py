@@ -99,7 +99,7 @@ def run(mode):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode',choices=('preflight','prepare','stage','dry-run','apply','verify'))
-    parser.add_argument('--revision',type=int,choices=(2,3,4,5,6,7,8,9),default=2)
+    parser.add_argument('--revision',type=int,choices=(2,3,4,5,6,7,8,9,10),default=2)
     args=parser.parse_args();VERSION=args.revision
     SOURCE=ROOT/('outputs/map_converter_trial/shadowfall/revisions/v'+str(VERSION))
     OUT=SOURCE/'live_shadowtest';REMOTE='/tmp/infinity-shadowtest-v'+str(VERSION)+'-20261102'
