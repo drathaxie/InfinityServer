@@ -1,0 +1,17 @@
+{
+  "schema": "shadowtest-calibration-v9",
+  "pixelsPerUnit": 10,
+  "cameraZoom": 21.4,
+  "cells": {
+    "Enter": {
+      "entityScale": 1.6,
+      "entitySpeed": 8.75
+    },
+    "Garden1": {
+      "entityScale": 1.4,
+      "entitySpeed": 14.85714285714286
+    }
+  },
+  "reason": "Show 87% of the room height (orthographic size 21.4 of a 49.4-unit room) instead of v3-v8's 65% crop, while keeping ~20 units of camera pan at 16:9 so parallax still reads (parallax speeds raised 1.7x in layout v9 to match v3-v8's 34-unit travel). Avatars sized to the source art's own baked humanoid NPCs (Enter NSoD/Doomy 117-132 px, Garden1 skeleton guards 109 px; avatar measured in-client at ~75 source px per unit scale); entitySpeed divided by the same factor, so world walking speed is unchanged.",
+  "proof_boundary": "Camera framing and avatar proportion; in-client feel requires the user's check."
+}

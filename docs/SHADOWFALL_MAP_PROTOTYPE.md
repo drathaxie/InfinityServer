@@ -3,7 +3,212 @@
 November 2, 2026. The selected conversion pilot is Shadowfall, replacing the
 earlier Greenguard proposal. Native map inspection remains reference material.
 
-## Version 5 published: sparse tiles and GPU compression
+## Version 11 published: depth planes (2.5D parallax)
+
+November 4. Community feedback ("the parallaxing is kinda unrealistic ... but
+interiors") was right: each plane must sit at one distance, but v3-v10 lumped
+the near courtyard wall with the far castle, and Garden1's whole back wall
+(speed 14) slid ~28 px against the floor it stands on.
+
+The client's own `BGParallax.LateUpdate` (decompiled from the installed
+Assembly-CSharp) moves each non-ground layer by camera delta x Speed/100,
+following the camera in x and opposing it in y, so a negative Speed is a
+native foreground plane. Layout v11 assigns subtrees by actual depth:
+
+| Plane | Enter subtrees | Speed |
+|---|---|---|
+| Moon | `1/4`, `1/6` | 48 |
+| Sky | `1/1`, `1/8` | 40 |
+| Castle (towers, keep, window glow) | `1/11`, `1/87`, `1/174` | 16 |
+| Far rampart + doorway | `1/13`, `1/85` | 8 |
+| Courtyard wall + lanterns | `1/100`, `1/206`, `1/208`, `1/300` | 4 |
+| Walking plane (floor, dragon, cliff, torches) | | 0 |
+| Foreground rock pillar (`FrontAll`, above players) | `1/476` | -12 |
+
+Garden1 is an enclosed courtyard: its back wall (`1/21`, one subtree) and the
+banners drop to 3, so the wall base drifts ~6 px against the floor over the
+full pan. Edge budgets: moon/sky vertical drift <=16 px against a 24 px top
+margin; the foreground rock shifts <=12 px against its 48 px overscan.
+
+The builder registers the client's `FrontAll` sorting layer (ID 4201144777).
+The serialized field is unsigned: an `intValue` write silently stored 0, which
+collided with Default (the first build had no FrontAll renderers). A new
+`foreground_frontall_layer` check now guards it; the bundle carries 52 FrontAll
+renderers. Limit: the floor is one flat painting, so its far edge cannot recede
+at a different rate without stretching the art. Planes give 2.5D, not true 3D.
+
+* Windows SHA-256: `a214932bf233b3c2ad0b09ac5b8d49c232440a4648526a0713ed41b02eab3c3f`; CRC `3198678418`.
+* Android SHA-256: `c64a1bc88efeb19ef526e2affe0425a33a342074469af114d25a3a48ce47c280`; CRC `489893779`.
+* Published; backup `/opt/infinity/backups/shadowtest-v11-20261104T195802Z`. Game PID preserved.
+
+## Version 10 published: window glow and lanterns ride their wall; avatar size restored
+
+November 4. In-client v9 showed the castle-window glow sliding off the windows
+and an avatar "far too big".
+
+* The translucent window-glow overlay (`1/174`) and the wall lanterns (`1/206`,
+  `1/208`, `1/300`) were merged into Ground bands (parallax 0) while the windows
+  and wall are DistantCastle. The misalignment existed since v3; v9's 1.7x
+  speed made it obvious. They now ride DistantCastle (layout v10), checked at
+  both camera extremes. Lantern glows sit on the lamps' source centres
+  (x 184.5 / 267.5 / 350, y 325); the third lamp mostly hides behind the dragon.
+* v9's NPC-proportion avatar (1.6 / 1.4) is reverted. v10 keeps v8's on-screen
+  size at the wider framing: v8 scale x 21.4/16 = Enter 0.869, Garden1 1.13,
+  with world walking speed unchanged (calibration v10).
+* Windows SHA-256: `1f286b4c9b19a95dd328a2134c1284cb9c793153919a6b3b3e627b2605aca135`; CRC `130925745`.
+* Android SHA-256: `9a685382e1951de10f368943d450f5a5dd7c59b1ec10dbb9d4120a88536483d5`; CRC `1731765154`.
+* Backup: `/opt/infinity/backups/shadowtest-v10-20261104T153832Z`. Game PID preserved.
+
+## Version 9 published: wider framing, parallax kept, source-proportion avatars
+
+November 4. In-client, v3-v8's camera (orthographic size 16) showed only 65% of
+the 49.4-unit room height, losing much of the scenery. Full-height framing
+(24.7) would leave ~8 units of pan at 16:9 and almost no parallax, which the
+user called out as a real-map feature to keep. v9 uses orthographic size 21.4:
+87% of the height and ~20 units of pan at 16:9. Parallax speeds are raised 1.7x
+(Sky 34, DistantCastle 14, CastleWall and banners 14) to keep v3-v8's depth
+shift over the shorter travel; layers follow the camera, so they reveal less
+past their art edges, and the ±3.3-unit vertical drift moves the sky at most
+11 px against its 24 px top margin.
+
+Avatars are sized to the source art's own baked humanoid NPCs (Enter NSoD/Doomy
+117-132 px, Garden1 skeleton guards 109 px), using an in-client measurement of
+~75 source px per unit scale: Enter 1.6, Garden1 1.4. entitySpeed is divided by
+the same factor, so world walking speed (entityScale x entitySpeed: 14 / 20.8)
+is unchanged. Settings: `map_configs/shadowfall-calibration-v9.json`,
+`shadowfall-layout-v9.json`. The camera-travel check now runs at 16:9 and
+requires the view to fit inside the room and pan more than 1 unit.
+
+* Windows SHA-256: `61105f902f6dedec53972f3d11c24026666074873c6cc76434153a2c5f9a6690`; CRC `3971002114`.
+* Android SHA-256: `94398e77b8441c39c33682be5afad61b1973b2a386682e0eb37028dc36bc4750`; CRC `277555315`.
+* Backup: `/opt/infinity/backups/shadowtest-v9-20261104T152508Z`. Game PID preserved.
+
+## Version 8 published: lore effects for the fallen dracolich fortress
+
+November 4. Lore anchor: Shadowfall is the seat of the Shadowscythe (Sepulchure's
+undead army), now ruled by Gravelyn; the skeleton crashed into the entrance is
+Sepulchure's fallen flying dracolich fortress. Effects are positioned in
+`map_configs/shadowfall-layout-v8.json` (`effects`, source px, optional `after`
+layer and parallax `group`); banners are `sway` groups.
+
+* **Dracolich eye** (Enter): AE `npcs/78866_dracolich_bone` v2 eye glow, ported,
+  visible only through a `SpriteMask` cut from the socket's own dark interior
+  (`build_map_prototype.socket_mask`), so it comes from inside the skull. AE's eye
+  smoke is one 999 s particle dissolved by a custom erosion shader, a permanent
+  streak on stock shaders, so it is rebuilt as faint red wisps (same texture and
+  colour) that appear only once they rise out. One eye: the second dark hole
+  is the nostril (user correction).
+* **Bats** (Enter sky): AQW Flash `mon/Bat2` (skeletal, red eyes), its "Walk" flap
+  loop (sprite 54, frames 17-29) baked from vectors by `bake_flipbook.py` into a
+  4x4 sheet; occasional groups of 1-3 cross in the Sky parallax layer, behind
+  the castle.
+* **Torch light**: a flickering warm glow (Fire Mage `Glow1`) behind each flame.
+* **Lanterns** (Enter): flicker glow on the two wall lamps, riding the
+  DistantCastle parallax.
+* **Ash + cinders**: grey ash drifting down across both rooms (lighter in
+  Garden1); cinders rising from the Enter rubble.
+* **Banners** (Garden1): all 7 Shadowscythe banners are split into their own
+  layers and sway +/-1.4 degrees from their top edge (3.6 s, phased), still on
+  the CastleWall parallax speed.
+* Deliberately not done: a green window glow (clashes with the red palette).
+
+Validation: 104 effect checks (16 kinds: live, fit, upright, socket mask,
+sway bindings, bundle bindings), 22 art comparisons (worst mean 0.396/255),
+902 Animator checks; 46 particle systems and the socket mask present on both
+platforms. Previews `revisions/v8/unity_build/*-effects*.png`.
+
+* Windows SHA-256: `e9a34a7d6fc8986b53e2f4b4e9bccff077cd1d3bcedeab2dfb9bebfd24d25723`; CRC `2202065946`.
+* Android SHA-256: `4b75ca897575f058452c5391cf1f30119ac1059aadae6c2a32fca2b5954efb5c`; CRC `875256300`.
+* Backup: `/opt/infinity/backups/shadowtest-v8-20261104T151731Z`. Game PID preserved.
+
+```powershell
+$env:SWF2UNITY_CONFLATION_SCALE='4'
+$E='outputs/map_converter_trial/shadowfall/effect_sources'
+python scripts/swf2unity/bake_flipbook.py "$E/Bat2.swf" 54 17 29 "$E/BatFlap.png" --zoom 0.6
+python scripts/swf2unity/map_visuals.py outputs/map_converter_trial/shadowfall outputs/map_converter_trial/shadowfall/revisions/v8/visuals --layout scripts/swf2unity/map_configs/shadowfall-layout-v8.json --reuse outputs/map_converter_trial/shadowfall/revisions/v4/visuals --raster-scale 3
+python scripts/swf2unity/build_map_prototype.py outputs/map_converter_trial/shadowfall/revisions/v8 --project outputs/map_converter_trial/shadowfall/UnityProject --visuals outputs/map_converter_trial/shadowfall/revisions/v8/visuals --calibration scripts/swf2unity/map_configs/shadowfall-calibration-v4.json --gpu-compression --effects-bundle "$E/46573_skeletalfiremage_v10.unity3d" --effect-source "dracolich=$E/78866_dracolich_bone_v2.unity3d" --bat-sheet "$E/BatFlap.png" --build
+```
+
+`Bat2.swf` is `aqw_rig_dataset/monsters/mon_Bat2_3fe0b59532/original.swf` from the
+XAMPP preservation dataset (SHA-256 `3fe0b595…`).
+
+## Version 7 published: torch-sized flames
+
+November 4. In-client, the user found v6's flames "a liiiil too big": torches,
+not bonfires. v6 fit only height (1.15x the Flash flame), but the monster's
+fire is far wider than the thin Flash flame. v7 fits both axes of the main
+flame's own particles (soft glow excluded): at most 0.6x the Flash flame's
+height and 2.2x its width, whichever binds. Entrance flames are now ~1.9 x 2.5
+units, Garden1 ~3 x 4. Everything else is v6 (visuals copied unchanged).
+
+* Windows SHA-256: `72bbe1a6977882a441dcc1eb5a7aac383a35b379d76e7ea317b9b08a286582e1`; CRC `326660873`.
+* Android SHA-256: `bf0eedd72e2be0ceecb37b9a2ad232caf5c761b0a5681c5f292f0efe474701fb`; CRC `893794832`.
+* Backup: `/opt/infinity/backups/shadowtest-v7-20261104T144208Z`. Game PID preserved.
+
+## Version 6 published: baked gameplay art removed, native fire and smoke
+
+November 4. The user asked to drop art that a native Infinity map doesn't bake
+in, and to upgrade the old Flash torch flames (suggesting the fire-mage
+monster's), plus smoke rolling across the crashed-dragon courtyard.
+
+Removed by exact root placement (`remove` in
+`map_configs/shadowfall-layout-v6.json`), never by symbol: char 367 (the
+skeleton guard) is reused by skeleton NPCs in other rooms.
+
+* Enter: NSoD (598), Doomy (604), the armored guard + its "!" popup (498/500),
+  and the Flash "Set Background" UI button (642).
+* Garden1: both skeleton spear guards (752/850) and the "!" popup (1102), the
+  six collectible dogs (878-1058) and their three blue markers (1096-1100).
+  The gold ground arrows are base art and stay.
+* NPCs belong to the server's map NPC placements; none are configured for
+  `shadowtest` yet.
+
+Fire (`replace.fire`): the 7 Flash flames (char 1373) become the Skeletal Fire
+Mage's `Animation/FX_Fire Med_wGlow/ps_fire med` effect (live AE bundle
+`npcs/46573_skeletalfiremage` v10, SHA-256 `199431e6…dbe762`): flame flipbook,
+glow, embers and fireball core. Particle settings are copied verbatim
+(`EditorUtility.CopySerialized`); materials are rebuilt on the same stock
+`Mobile/Particles/*` shaders with the bundle's textures (extracted by
+`build_map_prototype.py --effects-bundle`). The URP sprite-shader core maps to
+`Mobile/Particles/Alpha Blended` (identical unlit). Each fire keeps the
+orientation its parents give it in the monster, is turned so the plume rises
+straight up (all 7 within 7 degrees), and is scaled to 1.15x the height of the
+flame it replaces. Static bands now break at replaced depths, so each fire
+paints between the art below it and its own brazier, which Flash draws over the
+flame's base.
+
+Smoke (`smoke: true`): a new looping emitter with AE's `simpleSmoke2` texture.
+Soft puffs drift left to right at ~1.1 units/s across the floor band (60 px
+above the highest spawn pad to the stage bottom), prewarmed, faded in and out,
+on BGFront above the ground art and behind players and depth props. This is
+new presentation, not a source behaviour.
+
+The isolated project now enables `com.unity.modules.particlesystem`; without
+it, bundles silently drop every ParticleSystem (the first v6 build had 0).
+
+Validation: 18 Python tests; 22 art comparisons with effects excluded (worst
+mean 0.396/255, p99 9); 902 Animator checks; 7 depth checks; 62 effect checks
+(fire count, live, upright, fitted size; smoke live; all 30 particle systems
+keep material, shader and texture when loaded from the bundle); Android carries
+all 30, and ASTC pages hold to the source (worst mean 0.261). GPU atlas memory
+is 18.4 MiB on PC. Previews: `revisions/v6/unity_build/*-effects-unity.png`.
+Not yet observed in the installed client or on an Android device.
+
+* Windows SHA-256: `25d9bf47182c256e333c564155051ae2bddee3ac0aea6aa9cc71b84b36450b7a`; CRC `1382493032`.
+* Android SHA-256: `eebb39e438f2d40b0f79d4f0803d42dc3b540db9fb0aba5a43301235b12a99bc`; CRC `49459675`.
+* Backup: `/opt/infinity/backups/shadowtest-v6-20261104T143414Z`. Game PID preserved.
+
+```powershell
+$env:SWF2UNITY_CONFLATION_SCALE='4'
+python scripts/swf2unity/map_visuals.py outputs/map_converter_trial/shadowfall outputs/map_converter_trial/shadowfall/revisions/v6/visuals --layout scripts/swf2unity/map_configs/shadowfall-layout-v6.json --reuse outputs/map_converter_trial/shadowfall/revisions/v4/visuals --raster-scale 3
+python scripts/swf2unity/build_map_prototype.py outputs/map_converter_trial/shadowfall/revisions/v6 --project outputs/map_converter_trial/shadowfall/UnityProject --visuals outputs/map_converter_trial/shadowfall/revisions/v6/visuals --calibration scripts/swf2unity/map_configs/shadowfall-calibration-v4.json --gpu-compression --effects-bundle outputs/map_converter_trial/shadowfall/effect_sources/46573_skeletalfiremage_v10.unity3d --build
+python scripts/swf2unity/verify_map_prototype.py outputs/map_converter_trial/shadowfall/revisions/v6
+```
+
+The effect source bundle is the live one at
+`content.130-162-189-229.sslip.io/game/assetbundles/windows/npcs/46573_skeletalfiremage/10/`.
+
+## Historical version 5: sparse tiles and GPU compression
 
 November 3. After v4 the user called its 160 MiB of uncompressed atlas memory
 inefficient. Measurement: only 34% of the v4 atlas held visible art; static

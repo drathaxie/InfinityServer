@@ -19,9 +19,11 @@ public static class MapPrototypeBuilder
     [Serializable] public class FrameDef { public string name; public int page,x,y,w,h; public TileDef[] tiles; }
     [Serializable] public class AtlasDef { public string path; public int height; }
     [Serializable] public class VisualLayer { public string name,group; public int order,period,source_char; public int[] frames; public float x,y; }
-    [Serializable] public class VisualGroup { public string name,kind; public float speed,x,y; }
-    [Serializable] public class VisualCell { public string name; public VisualLayer[] layers; public VisualGroup[] groups; }
-    [Serializable] public class InputData { public float width,height,pixelsPerUnit,fps,cameraZoom,rasterScale; public string outputDir,atlas; public Cell[] cells; public bool layered,gpuCompression; public int atlasHeight; public AtlasDef[] visualAtlases; public FrameDef[] visualFrames; public VisualCell[] visualCells; public int[] sampleFrames; }
+    [Serializable] public class VisualGroup { public string name,kind; public float speed,x,y,phase; }
+    [Serializable] public class Effect { public string kind,group,after,mask; public int depth,order; public float x0,x1,y0,y1,x,y,size,density; }
+    [Serializable] public class EffectSource { public string name,path; }
+    [Serializable] public class VisualCell { public string name; public VisualLayer[] layers; public VisualGroup[] groups; public Effect[] effects; }
+    [Serializable] public class InputData { public float width,height,pixelsPerUnit,fps,cameraZoom,rasterScale; public string outputDir,atlas; public Cell[] cells; public bool layered,gpuCompression; public int atlasHeight; public AtlasDef[] visualAtlases; public FrameDef[] visualFrames; public VisualCell[] visualCells; public int[] sampleFrames; public string effectsBundle,effectArtDir,batSheet; public EffectSource[] effectSources; public int batCols,batRows,batFrames; }
     [Serializable] public class CheckRecord { public string cell,kind,target; public int samples; public bool passed; }
     [Serializable] public class Report { public string status,proofBoundary; public int cells; public CheckRecord[] checks; }
     static InputData input;
@@ -30,6 +32,13 @@ public static class MapPrototypeBuilder
     static Dictionary<string,List<VisualClock>> clocks=new Dictionary<string,List<VisualClock>>();
     static Sprite[] visualSprites;
     static Sprite[][] tileSprites;
+    // Native effects replacing Flash art: the Skeletal Fire Mage's torch-style fire (npcs/46573, live AE) and ground smoke.
+    const string FireSource="Animation/FX_Fire Med_wGlow/ps_fire med";
+    static Dictionary<string,AssetBundle> effectBundles=new Dictionary<string,AssetBundle>();
+    static Dictionary<string,List<(GameObject node,string kind)>> effectNodes=new Dictionary<string,List<(GameObject node,string kind)>>();
+    static Dictionary<string,Material> effectMaterials=new Dictionary<string,Material>();
+    static List<string> skippedEffectParts=new List<string>();
+    static Dictionary<string,(AnimationClip clip,int banners)> swayClips=new Dictionary<string,(AnimationClip clip,int banners)>();
     static Vector2 Pos(float x,float y) => new Vector2(x/input.pixelsPerUnit,-y/input.pixelsPerUnit);
 
     static GameObject Node(string name,Transform parent) { var go=new GameObject(name); go.transform.SetParent(parent,false); return go; }
@@ -49,11 +58,14 @@ public static class MapPrototypeBuilder
         layers.GetArrayElementAtIndex(10).stringValue="Level";
         tags.ApplyModifiedProperties();
         // IDs read from the installed client's globalgamemanagers TagManager.
-        var sorting=tags.FindProperty("m_SortingLayers");sorting.arraySize=2;
+        var sorting=tags.FindProperty("m_SortingLayers");sorting.arraySize=3;
         sorting.GetArrayElementAtIndex(0).FindPropertyRelative("name").stringValue="BGFront";
         sorting.GetArrayElementAtIndex(0).FindPropertyRelative("uniqueID").intValue=1256558175;
         sorting.GetArrayElementAtIndex(1).FindPropertyRelative("name").stringValue="Default";
         sorting.GetArrayElementAtIndex(1).FindPropertyRelative("uniqueID").intValue=0;
+        // FrontAll draws above players: foreground parallax planes. uniqueID is unsigned (intValue clamps it to 0).
+        sorting.GetArrayElementAtIndex(2).FindPropertyRelative("name").stringValue="FrontAll";
+        sorting.GetArrayElementAtIndex(2).FindPropertyRelative("uniqueID").uintValue=4201144777u;
         tags.ApplyModifiedProperties();
     }
     static void Capture(Camera camera,string name)
@@ -100,6 +112,7 @@ public static class MapPrototypeBuilder
                 var dragonArt=dragon.GetComponentsInChildren<SpriteRenderer>();
                 Check(dragon.GetComponent<ZOffset>()==null&&dragonArt.All(r=>r.sortingLayerName=="BGFront"),spec.name,"dragon_background_binding","DragonBackdrop");
                 int totalOverlap=0;
+                bool hasActors=spec.groups.Any(g=>g.kind=="actor");
                 foreach(var group in spec.groups.Where(g=>g.kind=="actor"))
                 {
                     var actor=props.Single(p=>p.name==group.name);var actorArt=actor.GetComponentsInChildren<SpriteRenderer>();
@@ -122,7 +135,7 @@ public static class MapPrototypeBuilder
                     File.WriteAllBytes(Path.Combine(input.outputDir,spec.name+"-"+group.name+"-dragon-composition.png"),combined.EncodeToPNG());
                     UnityEngine.Object.DestroyImmediate(mask);UnityEngine.Object.DestroyImmediate(dragonMask);UnityEngine.Object.DestroyImmediate(combined);
                 }
-                Check(totalOverlap>50,spec.name,"npc_dragon_overlap_exercised",totalOverlap.ToString());
+                if(hasActors)Check(totalOverlap>50,spec.name,"npc_dragon_overlap_exercised",totalOverlap.ToString());
                 for(int i=0;i<all.Length;i++)all[i].enabled=enabled[i];
                 camera.backgroundColor=Color.black;
                 int nativeOrder=0;foreach(var p in props.OrderByDescending(p=>p.transform.position.y-p.yOffset))p.sortingGroup.sortingOrder=(++nativeOrder)*500;
@@ -170,9 +183,12 @@ public static class MapPrototypeBuilder
             int order=0;foreach(var p in props.OrderByDescending(p=>p.transform.position.y-p.yOffset))p.sortingGroup.sortingOrder=(++order)*500;
             var initial=bg.levels.Select(l=>l.Layer.transform.position).ToArray();
             var confiner=cell.GetComponent<MapCell>().ConfinerCollider;
+            // Camera travel and parallax at a 16:9 screen. With the whole room height framed (Flash-stage framing,
+            // calibration v9) the view fits inside the room and still pans a little; v3-v8's crop panned >20 units.
+            float captureAspect=camera.aspect;camera.aspect=16f/9;
             float halfWidth=input.cameraZoom*camera.aspect;
             float left=confiner.bounds.min.x+halfWidth,right=confiner.bounds.max.x-halfWidth;
-            Check(right-left>20,spec.name,"camera_horizontal_travel",(right-left).ToString());
+            Check(right-left>1&&input.cameraZoom*2<=confiner.bounds.size.y+.01f,spec.name,"camera_horizontal_travel",(right-left).ToString());
             foreach(bool atRight in new[]{false,true})
             {
                 camera.orthographicSize=input.cameraZoom;
@@ -189,6 +205,7 @@ public static class MapPrototypeBuilder
                 Capture(camera,spec.name+"-camera-"+(atRight?"right":"left"));
             }
             for(int i=0;i<bg.levels.Length;i++)bg.levels[i].Layer.transform.position=initial[i];
+            camera.aspect=captureAspect;
             camera.orthographicSize=input.height/input.pixelsPerUnit/2;
             camera.transform.position=new Vector3(input.width/input.pixelsPerUnit/2,-input.height/input.pixelsPerUnit/2,-10);
         }
@@ -238,6 +255,8 @@ public static class MapPrototypeBuilder
         var folder=Node("SourceVisualLayers",parent);
         bool hasDepth=spec.groups!=null&&spec.groups.Length>0;
         var groups=new Dictionary<string,Transform>{{"Ground",folder.transform}};
+        var foreground=new HashSet<Transform>();
+        string LayerFor(Transform owner)=>foreground.Contains(owner)?"FrontAll":hasDepth&&owner.GetComponent<ZOffset>()==null?"BGFront":"Default";
         var renderers=new Dictionary<string,SpriteRenderer>();
         if(hasDepth)
         {
@@ -258,12 +277,13 @@ public static class MapPrototypeBuilder
                     sorting.sortingOrder=spec.layers.Where(l=>l.group==group.name).Min(l=>l.order);
                     var depth=node.AddComponent<ZOffset>();depth.rootTransform=node.transform;depth.sortingGroup=sorting;
                 }
-                else if(group.kind!="fixed")
+                else if(group.kind!="fixed")  // parallax, sway (banners ride their wall) and foreground (negative speed)
                 {
                     node.transform.localPosition=-center;
                     levels.Add(new BGParallax.ParallaxLayer{Speed=group.speed,Layer=node});
                 }
                 groups[group.name]=node.transform;
+                if(group.kind=="foreground")foreground.Add(node.transform);
             }
             bg.AddComponent<BGParallax>().levels=levels.ToArray();
         }
@@ -283,17 +303,22 @@ public static class MapPrototypeBuilder
                 {
                     var t=frame.tiles[k];var tile=Node(layer.name+"_t"+k,node.transform).AddComponent<SpriteRenderer>();
                     tile.sprite=tileSprites[layer.frames[0]][k];tile.sortingOrder=layer.order;
-                    tile.sortingLayerName=hasDepth&&owner.GetComponent<ZOffset>()==null?"BGFront":"Default";
+                    tile.sortingLayerName=LayerFor(owner);
                     tile.transform.localPosition=new Vector3((t.ox+t.w/2f-frame.w/2f)/ppu,-(t.oy+t.h/2f-frame.h/2f)/ppu,0);
                 }
                 continue;
             }
             var sr=Node(layer.name,owner).AddComponent<SpriteRenderer>();
             sr.sprite=visualSprites[layer.frames[0]];sr.sortingOrder=layer.order;
-            sr.sortingLayerName=hasDepth&&owner.GetComponent<ZOffset>()==null?"BGFront":"Default";
+            sr.sortingLayerName=LayerFor(owner);
             sr.transform.position=parent.TransformPoint(new Vector3(layer.x/input.pixelsPerUnit,-layer.y/input.pixelsPerUnit,5));
             renderers[layer.name]=sr;
         }
+        foreach(var plane in foreground)
+            Check(SortingLayer.NameToID("FrontAll")!=0&&plane.GetComponentsInChildren<SpriteRenderer>().All(r=>r.sortingLayerID==SortingLayer.NameToID("FrontAll")),
+                  cell.name,"foreground_frontall_layer",plane.name);
+        AddSway(spec,parent,groups);
+        AddEffects(spec,cell,parent,hasDepth?groups["Ground"]:folder.transform,groups);
         string controllerPath="Assets/Generated/Visuals/"+cell.name+"_Clocks.controller";
         var controller=AssetDatabase.LoadAssetAtPath<AnimatorController>(controllerPath)??AnimatorController.CreateAnimatorControllerAtPath(controllerPath);
         int layerIndex=0;
@@ -317,8 +342,344 @@ public static class MapPrototypeBuilder
             state.motion=clip;state.writeDefaultValues=false;machine.defaultState=state;
             clocks[cell.name].Add(new VisualClock{go=parent.gameObject,clip=clip,period=group.Key});layerIndex++;
         }
+        if(swayClips.TryGetValue(cell.name,out var sway))
+        {
+            if(layerIndex>=controller.layers.Length)controller.AddLayer("BannerSway");
+            var swayLayers=controller.layers;swayLayers[layerIndex].defaultWeight=1;controller.layers=swayLayers;
+            var swayMachine=controller.layers[layerIndex].stateMachine;
+            var swayState=swayMachine.states.Length==0?swayMachine.AddState("Sway"):swayMachine.states[0].state;
+            swayState.motion=sway.clip;swayState.writeDefaultValues=false;swayMachine.defaultState=swayState;layerIndex++;
+        }
         var animator=parent.gameObject.AddComponent<Animator>();animator.runtimeAnimatorController=controller;
         animator.cullingMode=AnimatorCullingMode.AlwaysAnimate;
+    }
+    static Material EffectMaterial(Material source,string sourceName)
+    {
+        if(effectMaterials.TryGetValue(sourceName+"/"+source.name,out var made))return made;
+        // Stock particle shaders ship with every Unity player. The URP sprite shader (fireball core) has no
+        // equivalent in this built-in project; unlit, it is the same texture x vertex colour alpha blend.
+        string name=source.shader.name;
+        // Custom AE shaders (Hovl center glow, Shader Graph erosion smoke) are not in this project either: additive
+        // glows map to the stock additive particle shader, everything else to stock alpha blending.
+        string stock=name.StartsWith("Mobile/Particles/")||name.StartsWith("Legacy Shaders/Particles/")?name
+            :name.Contains("Add")?"Mobile/Particles/Additive":"Mobile/Particles/Alpha Blended";
+        var shader=Shader.Find(stock);
+        if(shader==null)throw new Exception("Particle shader unavailable: "+name);
+        var material=new Material(shader){name=source.name};
+        if(source.mainTexture!=null)
+        {
+            var art=AssetDatabase.LoadAssetAtPath<Texture2D>(input.effectArtDir+"/"+sourceName+"/"+source.mainTexture.name+".png");
+            if(art==null)throw new Exception("Extracted effect texture missing: "+source.mainTexture.name);
+            material.mainTexture=art;material.mainTextureScale=source.mainTextureScale;material.mainTextureOffset=source.mainTextureOffset;
+        }
+        foreach(var property in new[]{"_TintColor","_Color"})
+            if(source.HasProperty(property)&&material.HasProperty(property))material.SetColor(property,source.GetColor(property));
+        Directory.CreateDirectory("Assets/Generated/Effects");
+        AssetDatabase.CreateAsset(material,"Assets/Generated/Effects/"+sourceName+"_"+string.Concat(source.name.Select(c=>char.IsLetterOrDigit(c)?c:'_'))+".mat");
+        effectMaterials[sourceName+"/"+source.name]=material;return material;
+    }
+    static GameObject PortParticles(GameObject source,Transform parent,string sourceName)
+    {
+        var node=Node(source.name,parent);
+        node.transform.localPosition=source.transform.localPosition;node.transform.localRotation=source.transform.localRotation;
+        node.transform.localScale=source.transform.localScale;
+        var system=source.GetComponent<ParticleSystem>();var renderer=source.GetComponent<ParticleSystemRenderer>();
+        if(system!=null&&renderer!=null&&renderer.sharedMaterial!=null)
+        {
+            var copy=node.AddComponent<ParticleSystem>();EditorUtility.CopySerialized(system,copy);
+            var copyRenderer=node.GetComponent<ParticleSystemRenderer>();EditorUtility.CopySerialized(renderer,copyRenderer);
+            copyRenderer.sharedMaterial=EffectMaterial(renderer.sharedMaterial,sourceName);copyRenderer.trailMaterial=null;
+            var main=copy.main;main.scalingMode=ParticleSystemScalingMode.Hierarchy;main.playOnAwake=true;main.prewarm=main.loop;
+        }
+        else if(system!=null)skippedEffectParts.Add(source.name);
+        foreach(Transform child in source.transform)PortParticles(child.gameObject,node.transform,sourceName);
+        return node;
+    }
+    static float PlumeAngle(ParticleSystem system,float seconds)
+    {
+        // Direction from the emitter to the particles' centroid, in degrees (90 = straight up).
+        system.Simulate(seconds,true,true);
+        var particles=new ParticleSystem.Particle[system.particleCount];int count=system.GetParticles(particles);
+        bool local=system.main.simulationSpace==ParticleSystemSimulationSpace.Local;Vector3 sum=Vector3.zero;
+        for(int i=0;i<count;i++)sum+=local?system.transform.TransformPoint(particles[i].position):particles[i].position;
+        system.Clear(true);
+        if(count==0)return 90;
+        var d=sum/count-system.transform.position;return Mathf.Atan2(d.y,d.x)*Mathf.Rad2Deg;
+    }
+    static Vector2 ParticleExtent(ParticleSystem system,float seconds)
+    {
+        // World width/height covered by this system's own particles (children such as the soft glow excluded).
+        system.Simulate(seconds,true,true);
+        var particles=new ParticleSystem.Particle[system.particleCount];int count=system.GetParticles(particles);
+        if(count==0)return Vector2.zero;
+        bool local=system.main.simulationSpace==ParticleSystemSimulationSpace.Local;
+        Vector2 low=Vector2.positiveInfinity,high=Vector2.negativeInfinity;
+        for(int i=0;i<count;i++)
+        {
+            Vector2 p=local?system.transform.TransformPoint(particles[i].position):particles[i].position;
+            float half=particles[i].GetCurrentSize(system)*system.transform.lossyScale.y/2;
+            low=Vector2.Min(low,p-Vector2.one*half);high=Vector2.Max(high,p+Vector2.one*half);
+        }
+        system.Clear(true);return high-low;
+    }
+    static GameObject SourceNode(string sourceName,string path)
+    {
+        // A node of a live AE bundle's prefab, by path below the prefab root or by (unique) name anywhere in it.
+        if(!effectBundles.TryGetValue(sourceName,out var bundle))
+        {
+            var source=input.effectSources.Single(e=>e.name==sourceName);
+            bundle=AssetBundle.LoadFromFile(source.path);
+            if(bundle==null)throw new Exception("Effect source failed to load: "+source.path);
+            effectBundles[sourceName]=bundle;
+        }
+        foreach(var root in bundle.LoadAllAssets<GameObject>())
+        {
+            var found=path.Contains("/")?root.transform.Find(path):root.GetComponentsInChildren<Transform>(true).FirstOrDefault(t=>t.name==path);
+            if(found!=null)return found.gameObject;
+        }
+        throw new Exception("Effect node missing from "+sourceName+": "+path);
+    }
+    static Material StockMaterial(string name,string shader,string sourceName,string texture)
+    {
+        if(effectMaterials.TryGetValue(name,out var material))return material;
+        var art=AssetDatabase.LoadAssetAtPath<Texture2D>(input.effectArtDir+"/"+sourceName+"/"+texture+".png");
+        if(art==null)throw new Exception("Extracted effect texture missing: "+sourceName+"/"+texture);
+        material=new Material(Shader.Find(shader)){name=name,mainTexture=art};Directory.CreateDirectory("Assets/Generated/Effects");
+        AssetDatabase.CreateAsset(material,"Assets/Generated/Effects/"+name+".mat");effectMaterials[name]=material;return material;
+    }
+    static ParticleSystem NewSystem(string name,Transform parent,Vector3 world,Material material,int max)
+    {
+        var node=Node(name,parent);node.transform.position=world;
+        var system=node.AddComponent<ParticleSystem>();system.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
+        var main=system.main;main.loop=true;main.prewarm=true;main.playOnAwake=true;main.maxParticles=max;main.startSpeed=0;
+        main.simulationSpace=ParticleSystemSimulationSpace.Local;main.scalingMode=ParticleSystemScalingMode.Hierarchy;
+        var shape=system.shape;shape.enabled=false;
+        var renderer=node.GetComponent<ParticleSystemRenderer>();renderer.sharedMaterial=material;renderer.renderMode=ParticleSystemRenderMode.Billboard;
+        return system;
+    }
+    static void Fade(ParticleSystem system,float inAt,float outAt)
+    {
+        var fade=system.colorOverLifetime;fade.enabled=true;var gradient=new Gradient();
+        gradient.SetKeys(new[]{new GradientColorKey(Color.white,0),new GradientColorKey(Color.white,1)},
+                         new[]{new GradientAlphaKey(0,0),new GradientAlphaKey(1,inAt),new GradientAlphaKey(1,outAt),new GradientAlphaKey(0,1)});
+        fade.color=gradient;
+    }
+    static GameObject FlickerGlow(string name,Transform parent,Vector3 world,float size,Color color,float rate)
+    {
+        // Overlapping short-lived soft glows of varying size: an uneven flame-light flicker (Fire Mage Glow1 art).
+        var system=NewSystem(name,parent,world,StockMaterial("FlameLight","Mobile/Particles/Additive","firemage","Glow1"),24);
+        var main=system.main;main.startLifetime=new ParticleSystem.MinMaxCurve(.35f,.8f);
+        main.startSize=new ParticleSystem.MinMaxCurve(size*.8f,size*1.15f);
+        main.startColor=new ParticleSystem.MinMaxGradient(color,new Color(color.r,color.g,color.b,color.a*.6f));
+        var emission=system.emission;emission.rateOverTime=rate;Fade(system,.3f,.6f);
+        return system.gameObject;
+    }
+    static void AddEffects(VisualCell spec,Cell cell,Transform parent,Transform ground,Dictionary<string,Transform> groups)
+    {
+        if(spec.effects==null||spec.effects.Length==0)return;
+        var root=Node("NativeEffects",ground);float ppu=input.pixelsPerUnit,width=input.width/ppu;
+        var made=new List<(GameObject node,string kind)>();effectNodes[spec.name]=made;
+        Vector3 At(float x,float y,float z=4)=>parent.TransformPoint(new Vector3(x/ppu,-y/ppu,z));
+        int index=0;
+        foreach(var effect in spec.effects)
+        {
+            index++;
+            var owner=!string.IsNullOrEmpty(effect.group)&&groups.TryGetValue(effect.group,out var grouped)?grouped:root.transform;
+            var nodes=new List<GameObject>();
+            if(effect.kind=="fire")
+            {
+                var fireSource=SourceNode("firemage",FireSource);
+                var node=PortParticles(fireSource,owner,"firemage");node.name="TorchFire_"+effect.depth;
+                // Keep the orientation it has inside the monster (its parents turn the emitter), then stand the
+                // plume upright over the brazier.
+                var sourceRoot=fireSource.transform.root;
+                node.transform.rotation=Quaternion.Inverse(sourceRoot.rotation)*fireSource.transform.rotation;
+                var system=node.GetComponent<ParticleSystem>();
+                float angle=PlumeAngle(system,2);
+                node.transform.rotation=Quaternion.AngleAxis(90-angle,Vector3.forward)*node.transform.rotation;
+                float upright=PlumeAngle(system,2);
+                Check(Mathf.Abs(upright-90)<15,spec.name,"effect_fire_upright",node.name+" plume="+upright);
+                // Torch-sized, not bonfire-sized: the monster's fire is far wider than the thin Flash flame, so fit
+                // both axes (v6's height-only 1.15x fit read as bonfires in-client). Base sits on the brazier lip.
+                node.transform.position=At((effect.x0+effect.x1)/2,effect.y1-(effect.y1-effect.y0)*.15f);
+                var target=new Vector2((effect.x1-effect.x0)/ppu*2.2f,(effect.y1-effect.y0)/ppu*.6f);
+                var measured=ParticleExtent(system,2);
+                Check(measured.y>0,spec.name,"effect_fire_emits",node.name);
+                node.transform.localScale*=Mathf.Min(target.x/Mathf.Max(measured.x,.001f),target.y/Mathf.Max(measured.y,.001f));
+                var fitted=ParticleExtent(system,2);
+                Check(fitted.x<=target.x*1.3f&&fitted.y<=target.y*1.3f&&fitted.y>=target.y*.4f,spec.name,"effect_fire_fit",
+                      node.name+" target="+target+" fitted="+fitted);
+                nodes.Add(node);made.Add((node,"fire"));
+                // The light it casts on the wall around it: behind the flame, in the same painter slot.
+                var light=FlickerGlow("TorchLight_"+effect.depth,owner,At((effect.x0+effect.x1)/2,effect.y0+(effect.y1-effect.y0)*.55f,4.5f),
+                                      fitted.y*2.6f,new Color(1,.55f,.22f,.30f),7);
+                nodes.Add(light);made.Add((light,"torch_light"));
+            }
+            else if(effect.kind=="smoke"){var node=GroundSmoke(cell,parent,owner);nodes.Add(node);made.Add((node,"smoke"));}
+            else if(effect.kind=="dracolich_eye")
+            {
+                // AE's dracolich eye glow (Dracolich_Bone), ported as-is. Its eye smoke is one 999 s particle that AE's
+                // erosion shader dissolves; on a stock shader it is a permanent streak, so the smoke is rebuilt as
+                // short red wisps from the same texture and colour, curling up out of the socket.
+                var node=Node("DracolichEye_"+index,owner);node.transform.position=At(effect.x,effect.y);
+                var glow=PortParticles(SourceNode("dracolich","-Artix- DragonEyeVFX-02-Right"),node.transform,"dracolich");
+                glow.transform.localPosition=Vector3.zero;glow.transform.localRotation=Quaternion.identity;
+                var extent=ParticleExtent(glow.GetComponent<ParticleSystem>(),2);
+                Check(extent.x>0,spec.name,"effect_eye_emits",node.name);
+                glow.transform.localScale*=effect.size*1.7f/ppu/Mathf.Max(extent.x,.001f);
+                // Seen only through the socket: a mask of the hole's own dark interior (build_map_prototype.socket_mask).
+                var importer=(TextureImporter)AssetImporter.GetAtPath(effect.mask);
+                importer.textureType=TextureImporterType.Sprite;importer.spriteImportMode=SpriteImportMode.Single;
+                importer.spritePixelsPerUnit=ppu*Mathf.Max(1,input.rasterScale);importer.mipmapEnabled=false;
+                importer.alphaIsTransparency=true;importer.filterMode=FilterMode.Bilinear;importer.SaveAndReimport();
+                var socket=Node("SocketMask",node.transform).AddComponent<SpriteMask>();
+                socket.sprite=AssetDatabase.LoadAssetAtPath<Sprite>(effect.mask);socket.alphaCutoff=.25f;
+                socket.transform.position=node.transform.position;
+                Check(socket.sprite!=null,spec.name,"effect_eye_socket_mask",effect.mask);
+                foreach(var r in glow.GetComponentsInChildren<ParticleSystemRenderer>())r.maskInteraction=SpriteMaskInteraction.VisibleInsideMask;
+                var wisps=NewSystem("EyeSmoke",node.transform,node.transform.position+new Vector3(0,0,-.1f),
+                                    StockMaterial("DracolichEyeSmoke","Mobile/Particles/Alpha Blended","dracolich","Smoke01ATex"),30);
+                var wmain=wisps.main;wmain.startLifetime=new ParticleSystem.MinMaxCurve(1.6f,2.8f);
+                float eye=effect.size/ppu;wmain.startSize=new ParticleSystem.MinMaxCurve(eye*.22f,eye*.4f);
+                wmain.startRotation=new ParticleSystem.MinMaxCurve(0,Mathf.PI*2);
+                wmain.startColor=new ParticleSystem.MinMaxGradient(new Color(1,.19f,.19f,.32f),new Color(.8f,.12f,.12f,.2f));
+                var wemission=wisps.emission;wemission.rateOverTime=3;
+                var wvelocity=wisps.velocityOverLifetime;wvelocity.enabled=true;wvelocity.space=ParticleSystemSimulationSpace.Local;
+                wvelocity.x=new ParticleSystem.MinMaxCurve(.05f,.35f);wvelocity.y=new ParticleSystem.MinMaxCurve(.35f,.75f);wvelocity.z=new ParticleSystem.MinMaxCurve(0,0);
+                var wsize=wisps.sizeOverLifetime;wsize.enabled=true;wsize.size=new ParticleSystem.MinMaxCurve(1,AnimationCurve.Linear(0,.6f,1,1.8f));
+                var wnoise=wisps.noise;wnoise.enabled=true;wnoise.strength=.25f;wnoise.frequency=.8f;
+                Fade(wisps,.4f,.6f);  // unseen as it leaves the socket, visible only once it has risen out
+                nodes.Add(node);made.Add((node,"dracolich_eye"));
+            }
+            else if(effect.kind=="lantern")
+            {
+                var node=FlickerGlow("LanternLight_"+index,owner,At(effect.x,effect.y),effect.size*3.2f/ppu,new Color(1,.78f,.45f,.40f),9);
+                nodes.Add(node);made.Add((node,"lantern"));
+            }
+            else if(effect.kind=="bats")
+            {
+                // AQW's skeletal Bat2 "Walk" flap loop (baked from its Flash vectors), crossing the night sky.
+                var material=StockMaterial("SkyBats","Mobile/Particles/Alpha Blended","bat","BatFlap");
+                float top=effect.y0/ppu,bottom=effect.y1/ppu,speed=3.2f,life=(width+8)/speed;
+                var system=NewSystem("SkyBats",owner,At(-40,(effect.y0+effect.y1)/2),material,14);
+                var main=system.main;main.duration=12;main.startLifetime=life;main.startSize=new ParticleSystem.MinMaxCurve(3.6f,6f);  // sheet cells pad the bat: ~25-35 source px of bat
+                main.startColor=new ParticleSystem.MinMaxGradient(new Color(.82f,.80f,.80f,1),new Color(.66f,.64f,.66f,1));
+                var shape=system.shape;shape.enabled=true;shape.shapeType=ParticleSystemShapeType.Box;shape.scale=new Vector3(.1f,bottom-top,.1f);
+                var emission=system.emission;emission.rateOverTime=0;
+                var burst=new ParticleSystem.Burst(0,1,3,0,12);burst.probability=.75f;emission.SetBursts(new[]{burst});
+                var velocity=system.velocityOverLifetime;velocity.enabled=true;velocity.space=ParticleSystemSimulationSpace.Local;
+                velocity.x=new ParticleSystem.MinMaxCurve(speed*.8f,speed*1.25f);velocity.y=new ParticleSystem.MinMaxCurve(-.25f,.25f);velocity.z=new ParticleSystem.MinMaxCurve(0,0);
+                var noise=system.noise;noise.enabled=true;noise.strength=.35f;noise.frequency=.25f;noise.scrollSpeed=.2f;
+                var sheet=system.textureSheetAnimation;sheet.enabled=true;sheet.numTilesX=input.batCols;sheet.numTilesY=input.batRows;
+                sheet.animation=ParticleSystemAnimationType.WholeSheet;
+                sheet.frameOverTime=new ParticleSystem.MinMaxCurve((float)input.batFrames/(input.batCols*input.batRows),AnimationCurve.Linear(0,0,1,1));
+                sheet.cycleCount=Mathf.Max(1,Mathf.RoundToInt(life*input.fps/input.batFrames));
+                Fade(system,.03f,.97f);
+                nodes.Add(system.gameObject);made.Add((system.gameObject,"bats"));
+            }
+            else if(effect.kind=="ash")
+            {
+                // Ash drifting down over the fallen fortress, carried by the same left-to-right air as the ground smoke.
+                var material=StockMaterial("FallingAsh","Mobile/Particles/Alpha Blended","firemage","simpleFlash");
+                var system=NewSystem("FallingAsh",owner,At(input.width/2,-30),material,220);
+                float fall=.75f,life=(input.height/ppu+6)/fall;
+                var main=system.main;main.duration=10;main.startLifetime=life;main.startSize=new ParticleSystem.MinMaxCurve(.22f,.5f);
+                main.startColor=new ParticleSystem.MinMaxGradient(new Color(.62f,.60f,.58f,.75f),new Color(.40f,.38f,.38f,.55f));
+                var shape=system.shape;shape.enabled=true;shape.shapeType=ParticleSystemShapeType.Box;shape.scale=new Vector3(width*1.3f,.1f,.1f);
+                var emission=system.emission;emission.rateOverTime=2.4f*Mathf.Max(.05f,effect.density);
+                var velocity=system.velocityOverLifetime;velocity.enabled=true;velocity.space=ParticleSystemSimulationSpace.Local;
+                velocity.x=new ParticleSystem.MinMaxCurve(.2f,.7f);velocity.y=new ParticleSystem.MinMaxCurve(-fall*1.25f,-fall*.8f);velocity.z=new ParticleSystem.MinMaxCurve(0,0);
+                var noise=system.noise;noise.enabled=true;noise.strength=.45f;noise.frequency=.35f;noise.scrollSpeed=.3f;
+                Fade(system,.04f,.92f);
+                nodes.Add(system.gameObject);made.Add((system.gameObject,"ash"));
+            }
+            else if(effect.kind=="cinders")
+            {
+                // A few cinders still rising from the crash rubble.
+                var material=StockMaterial("RisingCinders","Mobile/Particles/Additive","firemage","simpleFlash");
+                var system=NewSystem("RisingCinders",owner,At((effect.x0+effect.x1)/2,effect.y),material,40);
+                var main=system.main;main.duration=5;main.startLifetime=new ParticleSystem.MinMaxCurve(2.5f,4.5f);
+                main.startSize=new ParticleSystem.MinMaxCurve(.12f,.28f);
+                main.startColor=new ParticleSystem.MinMaxGradient(new Color(1,.62f,.22f,1),new Color(1,.35f,.12f,.85f));
+                var shape=system.shape;shape.enabled=true;shape.shapeType=ParticleSystemShapeType.Box;shape.scale=new Vector3((effect.x1-effect.x0)/ppu,.6f,.1f);
+                var emission=system.emission;emission.rateOverTime=2.2f;
+                var velocity=system.velocityOverLifetime;velocity.enabled=true;velocity.space=ParticleSystemSimulationSpace.Local;
+                velocity.x=new ParticleSystem.MinMaxCurve(.1f,.5f);velocity.y=new ParticleSystem.MinMaxCurve(.5f,1.2f);velocity.z=new ParticleSystem.MinMaxCurve(0,0);
+                var noise=system.noise;noise.enabled=true;noise.strength=.6f;noise.frequency=.6f;
+                Fade(system,.1f,.6f);
+                nodes.Add(system.gameObject);made.Add((system.gameObject,"cinders"));
+            }
+            else throw new Exception("Unknown map effect: "+effect.kind);
+            // Painter slot: anchored effects (replaced art, or 'after' a layer) sit just above the layer below them
+            // (same order, nearer z); free effects (smoke, ash, cinders) go above all the art.
+            bool anchored=effect.kind=="fire"||!string.IsNullOrEmpty(effect.after);
+            foreach(var node in nodes)foreach(var r in node.GetComponentsInChildren<ParticleSystemRenderer>())
+            {r.sortingLayerName="BGFront";r.sortingOrder=anchored?effect.order-1:effect.order;}
+        }
+    }
+    static void AddSway(VisualCell spec,Transform parent,Dictionary<string,Transform> groups)
+    {
+        // Banners hang from their top edge and sway gently; each rides its wall's parallax, so only a pivot turns.
+        var sway=(spec.groups??new VisualGroup[0]).Where(g=>g.kind=="sway"&&groups.ContainsKey(g.name)).ToArray();
+        if(sway.Length==0)return;
+        var clip=new AnimationClip{name=spec.name+"_BannerSway",frameRate=input.fps};const float period=3.6f,amplitude=1.4f;
+        foreach(var group in sway)
+        {
+            var node=groups[group.name];var art=node.GetComponentsInChildren<SpriteRenderer>();
+            var bounds=art[0].bounds;foreach(var r in art)bounds.Encapsulate(r.bounds);
+            var pivot=Node("SwayPivot",node);pivot.transform.position=new Vector3(bounds.center.x,bounds.max.y,node.position.z);
+            foreach(var child in node.Cast<Transform>().Where(t=>t!=pivot.transform).ToArray())child.SetParent(pivot.transform,true);
+            var keys=new Keyframe[9];
+            for(int k=0;k<9;k++)keys[k]=new Keyframe(k/8f*period,amplitude*Mathf.Sin(2*Mathf.PI*(k/8f+group.phase)));
+            var curve=new AnimationCurve(keys);for(int k=0;k<9;k++)curve.SmoothTangents(k,0);
+            clip.SetCurve(AnimationUtility.CalculateTransformPath(pivot.transform,parent),typeof(Transform),"localEulerAnglesRaw.z",curve);
+        }
+        var settings=AnimationUtility.GetAnimationClipSettings(clip);settings.loopTime=true;settings.stopTime=period;
+        AnimationUtility.SetAnimationClipSettings(clip,settings);
+        AssetDatabase.CreateAsset(clip,"Assets/Generated/Visuals/"+clip.name+".anim");
+        swayClips[spec.name]=(clip,sway.Length);
+    }
+    static GameObject GroundSmoke(Cell cell,Transform parent,Transform root)
+    {
+        // Low smoke rolling left to right across the walkable band of the room: new presentation, AE smoke texture.
+        float ppu=input.pixelsPerUnit,width=input.width/ppu;
+        // Flash walk areas cover the whole stage (blockers carve the floor), so the floor band runs from just
+        // above the highest spawn pad to the bottom of the stage.
+        float top=(cell.spawns.Min(p=>p.y)-60)/ppu,bottom=input.height/ppu,speed=1.1f;
+        var node=Node("GroundSmoke",root);node.transform.position=parent.TransformPoint(new Vector3(-4,-(top+bottom)/2,4));
+        var system=node.AddComponent<ParticleSystem>();system.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
+        var main=system.main;main.loop=true;main.prewarm=true;main.duration=10;main.playOnAwake=true;
+        main.startLifetime=(width+10)/speed;main.startSpeed=0;main.startSize=new ParticleSystem.MinMaxCurve(6,14);
+        main.startRotation=new ParticleSystem.MinMaxCurve(0,Mathf.PI*2);main.maxParticles=160;
+        main.startColor=new ParticleSystem.MinMaxGradient(new Color(.70f,.74f,.68f,.42f),new Color(.52f,.56f,.52f,.28f));
+        main.simulationSpace=ParticleSystemSimulationSpace.Local;main.scalingMode=ParticleSystemScalingMode.Hierarchy;
+        var emission=system.emission;emission.rateOverTime=48/main.startLifetime.constant;
+        var shape=system.shape;shape.shapeType=ParticleSystemShapeType.Box;shape.scale=new Vector3(.1f,Mathf.Max(2,bottom-top),.1f);
+        var velocity=system.velocityOverLifetime;velocity.enabled=true;velocity.space=ParticleSystemSimulationSpace.Local;
+        velocity.x=new ParticleSystem.MinMaxCurve(speed*.8f,speed*1.2f);velocity.y=new ParticleSystem.MinMaxCurve(-.06f,.06f);velocity.z=new ParticleSystem.MinMaxCurve(0,0);
+        var spin=system.rotationOverLifetime;spin.enabled=true;spin.z=new ParticleSystem.MinMaxCurve(-.12f,.12f);
+        var fade=system.colorOverLifetime;fade.enabled=true;var gradient=new Gradient();
+        gradient.SetKeys(new[]{new GradientColorKey(Color.white,0),new GradientColorKey(Color.white,1)},
+                         new[]{new GradientAlphaKey(0,0),new GradientAlphaKey(1,.12f),new GradientAlphaKey(1,.85f),new GradientAlphaKey(0,1)});
+        fade.color=gradient;
+        var shader=Shader.Find("Mobile/Particles/Alpha Blended");
+        var art=AssetDatabase.LoadAssetAtPath<Texture2D>(input.effectArtDir+"/firemage/simpleSmoke2.png")??AssetDatabase.LoadAssetAtPath<Texture2D>(input.effectArtDir+"/firemage/Smoke26.png");
+        if(art==null)throw new Exception("Extracted smoke texture missing");
+        if(!effectMaterials.TryGetValue("GroundSmoke",out var material))
+        {
+            material=new Material(shader){name="GroundSmoke",mainTexture=art};Directory.CreateDirectory("Assets/Generated/Effects");
+            AssetDatabase.CreateAsset(material,"Assets/Generated/Effects/GroundSmoke.mat");effectMaterials["GroundSmoke"]=material;
+        }
+        var renderer=node.GetComponent<ParticleSystemRenderer>();renderer.sharedMaterial=material;renderer.renderMode=ParticleSystemRenderMode.Billboard;
+        return node;
+    }
+    static void SimulateEffects(Transform cell,bool clear)
+    {
+        foreach(var system in cell.GetComponentsInChildren<ParticleSystem>().Where(s=>s.transform.parent.GetComponent<ParticleSystem>()==null))
+        {
+            if(clear)system.Clear(true);
+            else system.Simulate(Mathf.Clamp(system.main.startLifetime.constantMax*.8f,2,90),true,true);
+        }
     }
     public static void BuildAndroid()
     {
@@ -439,6 +800,27 @@ public static class MapPrototypeBuilder
                     foreach(var clock in clocks[spec.name]) clock.clip.SampleAnimation(clock.go,0);
                     foreach(var sg in sortingGroups)sg.enabled=true;
                     for(int i=0;i<sprites.Length;i++)sprites[i].sortingLayerID=layers[i];
+                    var effectSpec=input.visualCells.Single(c=>c.name==spec.name).effects??new Effect[0];
+                    if(effectSpec.Length>0)
+                    {
+                        // Art references above exclude effects (never simulated there); this preview shows them live.
+                        SimulateEffects(cellRoot,false);
+                        foreach(var made in effectNodes[spec.name])
+                            Check(made.node.GetComponentsInChildren<ParticleSystem>().Sum(ps=>ps.particleCount)>0,spec.name,"effect_"+made.kind+"_live",
+                                  made.node.name+" n="+made.node.GetComponentsInChildren<ParticleSystem>().Sum(ps=>ps.particleCount)
+                                  +" at="+string.Join(";",made.node.GetComponentsInChildren<ParticleSystemRenderer>().Select(r=>r.bounds.ToString("F1"))));
+                        if(swayClips.TryGetValue(spec.name,out var swayed))
+                            Check(AnimationUtility.GetCurveBindings(swayed.clip).Select(b=>b.path).Distinct().Count()==swayed.banners,spec.name,"effect_banner_sway_bound",swayed.banners.ToString());
+                        var fires=cellRoot.GetComponentsInChildren<ParticleSystem>().Where(ps=>ps.name.StartsWith("TorchFire_")).ToArray();
+                        Check(fires.Length==effectSpec.Count(e=>e.kind=="fire"),spec.name,"effect_fire_count",fires.Length.ToString());
+                        foreach(var fire in fires)Check(fire.particleCount>0,spec.name,"effect_fire_live",fire.name);
+                        var smoke=cellRoot.GetComponentsInChildren<ParticleSystem>().SingleOrDefault(ps=>ps.name=="GroundSmoke");
+                        if(effectSpec.Any(e=>e.kind=="smoke"))Check(smoke!=null&&smoke.particleCount>10,spec.name,"effect_smoke_live",smoke==null?"missing":smoke.particleCount.ToString());
+                        Capture(camera,spec.name+"-effects");
+                        var art=cellRoot.GetComponentsInChildren<SpriteRenderer>().Where(r=>r.enabled).ToArray();
+                        foreach(var r in art)r.enabled=false;Capture(camera,spec.name+"-effects-only");foreach(var r in art)r.enabled=true;
+                        SimulateEffects(cellRoot,true);
+                    }
                 }
                 else Capture(camera,spec.name);
                 marker.enabled=true;
@@ -467,6 +849,8 @@ public static class MapPrototypeBuilder
                 Check(probe.TryTransition()&&probe.currentCell==targetCell,expected,"transition",targetCell);
             }
             probe.Enter("Enter","Spawn");
+            foreach(var b in effectBundles.Values)b.Unload(true);effectBundles.Clear();
+            Check(skippedEffectParts.Count==0,"effects","source_parts_ported",string.Join(",",skippedEffectParts));
             Directory.CreateDirectory("Assets/Generated");
             PrefabUtility.SaveAsPrefabAsset(root,"Assets/Generated/map-shadowfall.prefab");
             EditorSceneManager.SaveScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene(),"Assets/Generated/ShadowfallPrototype.unity");
@@ -503,6 +887,8 @@ public static class MapPrototypeBuilder
                         }
                     }
                 }
+                foreach(var r in instance.GetComponentsInChildren<ParticleSystemRenderer>(true))
+                    Check(r.sharedMaterial!=null&&r.sharedMaterial.shader!=null&&r.sharedMaterial.mainTexture!=null,"bundle","effect_bundle_binding",r.name);
                 if(input.cameraZoom>0)VerifyDepthAndParallax(instance,camera);
                 UnityEngine.Object.DestroyImmediate(instance);
                 root.SetActive(true);

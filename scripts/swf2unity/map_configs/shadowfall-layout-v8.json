@@ -1,0 +1,280 @@
+{
+  "source_sha256": "6a2f4ae43ac1c718d897719b3e419e65f64165444066981f6defda3470b08570",
+  "cells": {
+    "Enter": {
+      "paths": {
+        "1/1": "Sky",
+        "1/4": "Sky",
+        "1/6": "Sky",
+        "1/8": "Sky",
+        "1/11": "DistantCastle",
+        "1/13": "DistantCastle",
+        "1/85": "DistantCastle",
+        "1/87": "DistantCastle",
+        "1/100": "DistantCastle",
+        "1/302": "DragonBackdrop",
+        "1/476": "Tree"
+      },
+      "groups": [
+        {
+          "name": "Sky",
+          "kind": "parallax",
+          "speed": 20,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "name": "DistantCastle",
+          "kind": "parallax",
+          "speed": 8,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "name": "Tree",
+          "kind": "depth",
+          "speed": 0,
+          "x": 85.13581110518426,
+          "y": 468.20966305434706,
+          "source_char": 1334,
+          "source_path": "1/476",
+          "anchor_reason": "Bottom of the original subtree bounds, including its authored ground contact/shadow."
+        },
+        {
+          "name": "DragonBackdrop",
+          "kind": "fixed",
+          "speed": 0,
+          "x": 0,
+          "y": 0,
+          "source_char": 1330,
+          "source_path": "1/302",
+          "anchor_reason": "Original painter order puts the entire dragon structure behind the NPCs; it must not become one player-sorted foreground group."
+        }
+      ],
+      "remove": [
+        498,
+        500,
+        598,
+        604,
+        642
+      ],
+      "replace": {
+        "fire": [
+          611,
+          625
+        ]
+      },
+      "smoke": true,
+      "effects": [
+        {
+          "kind": "dracolich_eye",
+          "x": 586,
+          "y": 248,
+          "size": 32,
+          "after": "1/302",
+          "group": "DragonBackdrop"
+        },
+        {
+          "kind": "lantern",
+          "x": 193,
+          "y": 322,
+          "size": 14,
+          "after": "1/11",
+          "group": "DistantCastle"
+        },
+        {
+          "kind": "lantern",
+          "x": 259,
+          "y": 322,
+          "size": 14,
+          "after": "1/11",
+          "group": "DistantCastle"
+        },
+        {
+          "kind": "bats",
+          "y0": 20,
+          "y1": 190,
+          "after": "1/1",
+          "group": "Sky"
+        },
+        {
+          "kind": "ash",
+          "density": 1.0
+        },
+        {
+          "kind": "cinders",
+          "x0": 300,
+          "x1": 920,
+          "y": 430
+        }
+      ]
+    },
+    "Garden1": {
+      "paths": {
+        "1/21": "CastleWall",
+        "1/376": "CastleWall",
+        "1/384": "CastleWall",
+        "1/392": "CastleWall",
+        "1/400": "Banner400",
+        "1/403": "Banner403",
+        "1/406": "CastleWall",
+        "1/414": "CastleWall",
+        "1/424": "Banner424",
+        "1/429": "Banner429",
+        "1/546": "Banner546",
+        "1/571": "Banner571",
+        "1/573": "CastleWall",
+        "1/583": "CastleWall",
+        "1/681": "Banner681",
+        "1/116": "RightHorn",
+        "1/144": "CentralSkulls",
+        "1/434": "DoorSkulls",
+        "1/595": "LeftHorn",
+        "1/597": "LeftSkulls",
+        "1/706": "FarHorn"
+      },
+      "groups": [
+        {
+          "name": "CastleWall",
+          "kind": "parallax",
+          "speed": 8,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "name": "RightHorn",
+          "kind": "depth",
+          "speed": 0,
+          "x": 753.425,
+          "y": 348.75,
+          "source_char": 1398,
+          "source_path": "1/116",
+          "anchor_reason": "Bottom of the original subtree bounds, including its authored ground contact/shadow."
+        },
+        {
+          "name": "CentralSkulls",
+          "kind": "depth",
+          "speed": 0,
+          "x": 381.03946614793966,
+          "y": 349.78881128146315,
+          "source_char": 1405,
+          "source_path": "1/144",
+          "anchor_reason": "Bottom of the original subtree bounds, including its authored ground contact/shadow."
+        },
+        {
+          "name": "DoorSkulls",
+          "kind": "depth",
+          "speed": 0,
+          "x": 677.4312972286159,
+          "y": 325.030789354079,
+          "source_char": 1405,
+          "source_path": "1/434",
+          "anchor_reason": "Bottom of the original subtree bounds, including its authored ground contact/shadow."
+        },
+        {
+          "name": "LeftHorn",
+          "kind": "depth",
+          "speed": 0,
+          "x": 135.975,
+          "y": 356.1,
+          "source_char": 1398,
+          "source_path": "1/595",
+          "anchor_reason": "Bottom of the original subtree bounds, including its authored ground contact/shadow."
+        },
+        {
+          "name": "LeftSkulls",
+          "kind": "depth",
+          "speed": 0,
+          "x": 17.489466147939673,
+          "y": 353.28881128146315,
+          "source_char": 1405,
+          "source_path": "1/597",
+          "anchor_reason": "Bottom of the original subtree bounds, including its authored ground contact/shadow."
+        },
+        {
+          "name": "FarHorn",
+          "kind": "depth",
+          "speed": 0,
+          "x": 856.375,
+          "y": 358.1,
+          "source_char": 1398,
+          "source_path": "1/706",
+          "anchor_reason": "Bottom of the original subtree bounds, including its authored ground contact/shadow."
+        },
+        {
+          "name": "Banner400",
+          "kind": "sway",
+          "speed": 8,
+          "phase": 0.0
+        },
+        {
+          "name": "Banner403",
+          "kind": "sway",
+          "speed": 8,
+          "phase": 0.37
+        },
+        {
+          "name": "Banner424",
+          "kind": "sway",
+          "speed": 8,
+          "phase": 0.74
+        },
+        {
+          "name": "Banner429",
+          "kind": "sway",
+          "speed": 8,
+          "phase": 0.11
+        },
+        {
+          "name": "Banner546",
+          "kind": "sway",
+          "speed": 8,
+          "phase": 0.48
+        },
+        {
+          "name": "Banner571",
+          "kind": "sway",
+          "speed": 8,
+          "phase": 0.85
+        },
+        {
+          "name": "Banner681",
+          "kind": "sway",
+          "speed": 8,
+          "phase": 0.22
+        }
+      ],
+      "remove": [
+        752,
+        850,
+        878,
+        914,
+        950,
+        986,
+        1022,
+        1058,
+        1096,
+        1098,
+        1100,
+        1102
+      ],
+      "replace": {
+        "fire": [
+          780,
+          794,
+          808,
+          822,
+          836
+        ]
+      },
+      "smoke": true,
+      "effects": [
+        {
+          "kind": "ash",
+          "density": 0.45
+        }
+      ]
+    }
+  },
+  "reason": "v8: lore effects for the fallen dracolich fortress: smouldering dracolich eyes (AE Dracolich_Bone VFX), skeletal bats crossing the moon (AQW Bat2 flap loop), torch light pools, wall-lantern flicker, falling ash and cinders, swaying Shadowscythe banners. No green window glow (clashes with the red palette)."
+}

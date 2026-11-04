@@ -79,3 +79,13 @@ def test_sparse_tiles_drop_empty_space_keep_true_borders_and_align_to_compressio
     assert np.array_equal(around[1:-1,1:-1],np.asarray(small))
     ring=np.ones(around.shape[:2],bool);ring[1:-1,1:-1]=False
     assert not around[...,3][ring].any()
+
+
+def test_removed_root_placements_are_skipped_and_static_bands_break_at_replaced_art():
+    shape=sp.Character(1,'shape',2,bounds=(0,20,0,20))
+    root=[sp.Frame(places=[sp.Place(d,char=1,matrix=(1,0,0,1,d*20,0)) for d in (1,2,3,4,5)])]
+    movie=sp.Movie(10,(0,1000,0,1000),24,1,{1:shape},root,{},[])
+    # depth 2 is an NPC to drop; depth 4 is a flame replaced by a native effect.
+    layers=visual.split_cell(movie,{'source_frame':1},set(),{},removed={2,4},breaks=[4])
+    assert [[i['matrix'][4] for i in l['items']] for l in layers]==[[20,60],[100]]
+    assert [l['source_path'] for l in layers]==['1','5']

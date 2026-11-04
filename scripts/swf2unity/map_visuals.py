@@ -171,8 +171,10 @@ def period(movie,cid,cache,stack=()):
     return value
 
 
-def split_cell(movie,cell,hidden,groups=None):
-    draws=[]; cache={};geometry=render.Geometry(movie)
+def split_cell(movie,cell,hidden,groups=None,removed=(),breaks=()):
+    # breaks: root depths of replaced art. Static bands never merge across one, so a native effect can be
+    # painted at exactly the replaced art's place (behind the brazier drawn over it).
+    draws=[]; cache={};geometry=render.Geometry(movie);segment=[0]
     groups=groups or {}
     def walk(cid,matrix,cx,blend,filters,path,group='Ground'):
         group=groups.get(path,group)
@@ -198,19 +200,31 @@ def split_cell(movie,cell,hidden,groups=None):
         else:
             if blend not in (None,0,1,2):raise ValueError('Backdrop-dependent map blend requires compositor')
             item=dict(char=cid,matrix=matrix,cxform=cx,blend=blend,filters_raw=filters)
-            if clock==1 and draws and draws[-1]['period']==1 and draws[-1].get('group')==group:
+            if clock==1 and draws and draws[-1]['period']==1 and draws[-1].get('group')==group and draws[-1]['segment']==segment[0]:
                 draws[-1]['items'].append(item)
-            else:draws.append(dict(period=clock,items=[item],source_path=path,char=cid,group=group))
+            else:draws.append(dict(period=clock,items=[item],source_path=path,char=cid,group=group,segment=segment[0]))
     for depth,state in sorted(sp.display_lists(movie.root)[cell['source_frame']-1].items()):
+        if depth in removed:continue
+        segment[0]=sum(b<depth for b in breaks)
         if state.get('clip'):raise ValueError('Root map mask requires scoped compilation')
         walk(state['char'],state['matrix'],state['cxform'],state['blend'],state['filters_raw'],str(depth))
     return draws
 
 
-def reference(movie,cell,hidden,out,samples,raster_scale=1):
+def root_effects(movie,cell,replace):
+    """Source-pixel bounds of root placements replaced by native effects, e.g. {'fire': [611, 625]}."""
+    geometry=render.Geometry(movie);states=sp.display_lists(movie.root)[cell['source_frame']-1];effects=[]
+    for kind,depths in replace.items():
+        for depth in depths:
+            state=states[depth];x0,x1,y0,y1=render.transform_bounds(state['matrix'],geometry.timeline_bounds(state['char']))
+            effects.append(dict(kind=kind,depth=depth,source_char=state['char'],x0=x0/20,x1=x1/20,y0=y0/20,y1=y1/20))
+    return effects
+
+
+def reference(movie,cell,hidden,out,samples,raster_scale=1,removed=()):
     controls=bytearray()
     for depth,state in sorted(sp.display_lists(movie.root)[cell['source_frame']-1].items()):
-        if state['char'] in hidden:continue
+        if state['char'] in hidden or depth in removed:continue
         controls+=sp.encode_place(sp.Place(depth=depth,char=state['char'],matrix=state['matrix'],cxform=state['cxform'],
             clip_depth=state['clip'],blend=state['blend'],ratio=state['ratio'],filters_raw=state['filters_raw']))
     controls+=sp.tag(1,b'')*(max(samples)+1)+sp.tag(0,b'')
@@ -241,7 +255,12 @@ def convert(source,out,layout=None,reuse=None,raster_scale=1):
     rendered=[]; plans=[]; unique=[]; seen={};render_cache={};cell_jobs=[];jobs_by_key={}
     for cell in cells:
         config=layout.get('cells',{}).get(cell['name'],{})
-        draws=split_cell(movie,cell,hidden,config.get('paths',{}))
+        # Root placements the native map serves some other way: NPCs and quest popups come from the server,
+        # collectibles and their markers are gameplay, and replaced art (torch flames) becomes a native effect.
+        removed=set(config.get('remove',[]))|{d for depths in config.get('replace',{}).values() for d in depths}
+        effects=root_effects(movie,cell,config.get('replace',{}))
+        if config.get('smoke'):effects.append(dict(kind='smoke',depth=None))
+        draws=split_cell(movie,cell,hidden,config.get('paths',{}),removed,[e['depth'] for e in effects if e['depth'] is not None])
         jobs=[dict(items=d['items'],frames=d['period'],group=i) for i,d in enumerate(draws)]
         # Keep each clock's raster stage bounded by its own artwork. A torch
         # must not pay for a room-sized canvas on every frame.
@@ -265,7 +284,7 @@ def convert(source,out,layout=None,reuse=None,raster_scale=1):
                     f=previous['frames'][fid];images.append(old_atlases[f.get('page',0)].crop((f['x'],f['y'],f['x']+f['w'],f['y']+f['h'])))
                 w,h=images[0].size;origin=((old['x']-w/(2*raster_scale))*20-anchor[0],(old['y']-h/(2*raster_scale))*20-anchor[1])
                 render_cache[key]=dict(images=images,origin=origin,origins=[origin]*len(images))
-        cell_jobs.append((cell,draws,keys,anchors))
+        cell_jobs.append((cell,draws,keys,anchors,removed,effects))
     bins={};rs=render.RenderSwf(movie,{})
     for key,job in jobs_by_key.items():
         if key in render_cache:continue
@@ -280,7 +299,7 @@ def convert(source,out,layout=None,reuse=None,raster_scale=1):
         print('Render bucket',size,'jobs',len(keys),'frames',sum(jobs_by_key[k]['frames'] for k in keys),flush=True)
         results=render.render_jobs(movie,{},[jobs_by_key[k] for k in keys],raster_scale,str(out/'work/bins'/('_'.join(map(str,size)))),name='visual',bucket=False)
         render_cache.update(zip(keys,results))
-    for cell,draws,keys,anchors in cell_jobs:
+    for cell,draws,keys,anchors,removed,effects in cell_jobs:
         results=[]
         for key,anchor in zip(keys,anchors):
             result=dict(render_cache[key])
@@ -301,8 +320,21 @@ def convert(source,out,layout=None,reuse=None,raster_scale=1):
             ox,oy=result['origin'];w,h=result['images'][0].size
             layers.append(dict(name='Visual_'+str(order),order=order,period=draw['period'],frames=ids,
                 x=ox/20+w/(2*raster_scale),y=oy/20+h/(2*raster_scale),source_path=draw['source_path'],source_char=draw['char'],group=draw['group']))
-        plans.append(dict(name=cell['name'],layers=layers,groups=layout.get('cells',{}).get(cell['name'],{}).get('groups',[])))
-        reference(movie,cell,hidden,out,SAMPLES,raster_scale)
+        for effect in effects:
+            # Paint between the layers it replaced: after every layer from a lower root depth (smoke goes on top).
+            effect['order']=len(layers) if effect['depth'] is None else sum(int(l['source_path'].split('/')[0])<effect['depth'] for l in layers)
+        for placed in layout.get('cells',{}).get(cell['name'],{}).get('effects',[]):
+            # Positioned native effects (source px). 'after' paints just above that source layer; otherwise on top.
+            effect=dict(placed,depth=None)
+            if 'after' in placed:
+                above=[l for l in layers if l['source_path']==placed['after']]
+                if len(above)!=1:raise ValueError('Effect anchor layer not found: '+placed['after'])
+                effect['order']=above[0]['order']+1
+            else:effect['order']=len(layers)
+            effects.append(effect)
+        plans.append(dict(name=cell['name'],layers=layers,groups=layout.get('cells',{}).get(cell['name'],{}).get('groups',[]),
+                          effects=effects,removed_root_depths=sorted(removed)))
+        reference(movie,cell,hidden,out,SAMPLES,raster_scale,removed)
     animated={fid for c in plans for l in c['layers'] if l['period']>1 for fid in l['frames']}
     pages,frames,tiling=pack_pages(unique,set(range(len(unique)))-animated)
     atlases=[]
