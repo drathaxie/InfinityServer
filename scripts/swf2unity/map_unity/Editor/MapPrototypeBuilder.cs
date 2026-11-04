@@ -58,11 +58,14 @@ public static class MapPrototypeBuilder
         layers.GetArrayElementAtIndex(10).stringValue="Level";
         tags.ApplyModifiedProperties();
         // IDs read from the installed client's globalgamemanagers TagManager.
-        var sorting=tags.FindProperty("m_SortingLayers");sorting.arraySize=2;
+        var sorting=tags.FindProperty("m_SortingLayers");sorting.arraySize=3;
         sorting.GetArrayElementAtIndex(0).FindPropertyRelative("name").stringValue="BGFront";
         sorting.GetArrayElementAtIndex(0).FindPropertyRelative("uniqueID").intValue=1256558175;
         sorting.GetArrayElementAtIndex(1).FindPropertyRelative("name").stringValue="Default";
         sorting.GetArrayElementAtIndex(1).FindPropertyRelative("uniqueID").intValue=0;
+        // FrontAll draws above players: foreground parallax planes. uniqueID is unsigned (intValue clamps it to 0).
+        sorting.GetArrayElementAtIndex(2).FindPropertyRelative("name").stringValue="FrontAll";
+        sorting.GetArrayElementAtIndex(2).FindPropertyRelative("uniqueID").uintValue=4201144777u;
         tags.ApplyModifiedProperties();
     }
     static void Capture(Camera camera,string name)
@@ -252,6 +255,8 @@ public static class MapPrototypeBuilder
         var folder=Node("SourceVisualLayers",parent);
         bool hasDepth=spec.groups!=null&&spec.groups.Length>0;
         var groups=new Dictionary<string,Transform>{{"Ground",folder.transform}};
+        var foreground=new HashSet<Transform>();
+        string LayerFor(Transform owner)=>foreground.Contains(owner)?"FrontAll":hasDepth&&owner.GetComponent<ZOffset>()==null?"BGFront":"Default";
         var renderers=new Dictionary<string,SpriteRenderer>();
         if(hasDepth)
         {
@@ -272,12 +277,13 @@ public static class MapPrototypeBuilder
                     sorting.sortingOrder=spec.layers.Where(l=>l.group==group.name).Min(l=>l.order);
                     var depth=node.AddComponent<ZOffset>();depth.rootTransform=node.transform;depth.sortingGroup=sorting;
                 }
-                else if(group.kind!="fixed")  // parallax and sway (banners ride their wall's parallax speed)
+                else if(group.kind!="fixed")  // parallax, sway (banners ride their wall) and foreground (negative speed)
                 {
                     node.transform.localPosition=-center;
                     levels.Add(new BGParallax.ParallaxLayer{Speed=group.speed,Layer=node});
                 }
                 groups[group.name]=node.transform;
+                if(group.kind=="foreground")foreground.Add(node.transform);
             }
             bg.AddComponent<BGParallax>().levels=levels.ToArray();
         }
@@ -297,17 +303,20 @@ public static class MapPrototypeBuilder
                 {
                     var t=frame.tiles[k];var tile=Node(layer.name+"_t"+k,node.transform).AddComponent<SpriteRenderer>();
                     tile.sprite=tileSprites[layer.frames[0]][k];tile.sortingOrder=layer.order;
-                    tile.sortingLayerName=hasDepth&&owner.GetComponent<ZOffset>()==null?"BGFront":"Default";
+                    tile.sortingLayerName=LayerFor(owner);
                     tile.transform.localPosition=new Vector3((t.ox+t.w/2f-frame.w/2f)/ppu,-(t.oy+t.h/2f-frame.h/2f)/ppu,0);
                 }
                 continue;
             }
             var sr=Node(layer.name,owner).AddComponent<SpriteRenderer>();
             sr.sprite=visualSprites[layer.frames[0]];sr.sortingOrder=layer.order;
-            sr.sortingLayerName=hasDepth&&owner.GetComponent<ZOffset>()==null?"BGFront":"Default";
+            sr.sortingLayerName=LayerFor(owner);
             sr.transform.position=parent.TransformPoint(new Vector3(layer.x/input.pixelsPerUnit,-layer.y/input.pixelsPerUnit,5));
             renderers[layer.name]=sr;
         }
+        foreach(var plane in foreground)
+            Check(SortingLayer.NameToID("FrontAll")!=0&&plane.GetComponentsInChildren<SpriteRenderer>().All(r=>r.sortingLayerID==SortingLayer.NameToID("FrontAll")),
+                  cell.name,"foreground_frontall_layer",plane.name);
         AddSway(spec,parent,groups);
         AddEffects(spec,cell,parent,hasDepth?groups["Ground"]:folder.transform,groups);
         string controllerPath="Assets/Generated/Visuals/"+cell.name+"_Clocks.controller";

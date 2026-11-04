@@ -3,6 +3,43 @@
 November 2, 2026. The selected conversion pilot is Shadowfall, replacing the
 earlier Greenguard proposal. Native map inspection remains reference material.
 
+## Version 11: depth planes (2.5D parallax)
+
+November 4. Community feedback ("the parallaxing is kinda unrealistic ... but
+interiors") was right: each plane must sit at one distance, but v3-v10 lumped
+the near courtyard wall with the far castle, and Garden1's whole back wall
+(speed 14) slid ~28 px against the floor it stands on.
+
+The client's own `BGParallax.LateUpdate` (decompiled from the installed
+Assembly-CSharp) moves each non-ground layer by camera delta x Speed/100,
+following the camera in x and opposing it in y, so a negative Speed is a
+native foreground plane. Layout v11 assigns subtrees by actual depth:
+
+| Plane | Enter subtrees | Speed |
+|---|---|---|
+| Moon | `1/4`, `1/6` | 48 |
+| Sky | `1/1`, `1/8` | 40 |
+| Castle (towers, keep, window glow) | `1/11`, `1/87`, `1/174` | 16 |
+| Far rampart + doorway | `1/13`, `1/85` | 8 |
+| Courtyard wall + lanterns | `1/100`, `1/206`, `1/208`, `1/300` | 4 |
+| Walking plane (floor, dragon, cliff, torches) | | 0 |
+| Foreground rock pillar (`FrontAll`, above players) | `1/476` | -12 |
+
+Garden1 is an enclosed courtyard: its back wall (`1/21`, one subtree) and the
+banners drop to 3, so the wall base drifts ~6 px against the floor over the
+full pan. Edge budgets: moon/sky vertical drift <=16 px against a 24 px top
+margin; the foreground rock shifts <=12 px against its 48 px overscan.
+
+The builder registers the client's `FrontAll` sorting layer (ID 4201144777).
+The serialized field is unsigned: an `intValue` write silently stored 0, which
+collided with Default (the first build had no FrontAll renderers). A new
+`foreground_frontall_layer` check now guards it; the bundle carries 52 FrontAll
+renderers. Limit: the floor is one flat painting, so its far edge cannot recede
+at a different rate without stretching the art. Planes give 2.5D, not true 3D.
+
+* Windows SHA-256: `a214932bf233b3c2ad0b09ac5b8d49c232440a4648526a0713ed41b02eab3c3f`; CRC `3198678418`.
+* Android SHA-256: `c64a1bc88efeb19ef526e2affe0425a33a342074469af114d25a3a48ce47c280`; CRC `489893779`.
+
 ## Version 10 published: window glow and lanterns ride their wall; avatar size restored
 
 November 4. In-client v9 showed the castle-window glow sliding off the windows
