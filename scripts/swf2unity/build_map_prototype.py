@@ -44,7 +44,7 @@ STUBS = {
 }
 
 
-def stage(source, project, cells, visuals=None, calibration=None, gpu_compression=False):
+def stage(source, project, cells, visuals=None, calibration=None, gpu_compression=False, effects_bundle=None):
     source, project = source.resolve(), project.resolve()
     manifest = json.loads((source / 'map_source.json').read_text(encoding='utf-8'))
     marker = project / 'map-prototype-owner.json'
@@ -74,6 +74,7 @@ def stage(source, project, cells, visuals=None, calibration=None, gpu_compressio
         'com.unity.modules.physics2d': '1.0.0', 'com.unity.modules.physics': '1.0.0',
         'com.unity.modules.imageconversion': '1.0.0', 'com.unity.modules.jsonserialize': '1.0.0',
         'com.unity.modules.animation': '1.0.0',
+        'com.unity.modules.particlesystem': '1.0.0',  # native map effects; without it bundles drop ParticleSystems
         'com.unity.modules.imgui': '1.0.0', 'com.unity.modules.assetbundle': '1.0.0'}}, indent=2))
     visual_data=None
     if visuals:
@@ -82,6 +83,14 @@ def stage(source, project, cells, visuals=None, calibration=None, gpu_compressio
         pages=visual_data.get('atlases',[dict(file='atlas.png',height=visual_data['atlas_height'])])
         for i,page in enumerate(pages):
             shutil.copyfile(visuals/page['file'],assets/'MapArt'/('layered_atlas'+('' if i==0 else '_'+str(i))+'.png'))
+    if effects_bundle:
+        # Native effect art comes from a live client bundle; its textures are extracted so the map's own
+        # materials own them (a bundle cannot reference another bundle's assets).
+        import UnityPy
+        art=assets/'EffectArt';art.mkdir(exist_ok=True)
+        for obj in UnityPy.load(str(effects_bundle)).objects:
+            if obj.type.name=='Texture2D':
+                texture=obj.read();texture.image.save(art/(texture.m_Name+'.png'))
     scale=json.loads(calibration.read_text()) if calibration else None
     inputs = []
     for cell in manifest['cells']:
@@ -117,6 +126,8 @@ def stage(source, project, cells, visuals=None, calibration=None, gpu_compressio
                     visualFrames=visual_data['frames'],visualCells=visual_data['cells'],fps=visual_data['fps'],
                     sampleFrames=visual_data['samples'],rasterScale=visual_data.get('raster_scale',1),
                     visualAtlases=[dict(path='Assets/MapArt/layered_atlas'+('' if i==0 else '_'+str(i))+'.png',height=page['height']) for i,page in enumerate(pages)])
+    if effects_bundle:
+        spec.update(effectsBundle=str(effects_bundle.resolve()),effectArtDir='Assets/EffectArt')
     if scale:
         (source/'calibration.json').write_text(json.dumps(scale,indent=2))
     spec_path = project / 'map_input.json'
@@ -160,8 +171,9 @@ def main():
     parser.add_argument('--visuals',type=Path)
     parser.add_argument('--calibration',type=Path)
     parser.add_argument('--gpu-compression',action='store_true',help='BC7 (Standalone) / ASTC 6x6 (Android) atlas pages')
+    parser.add_argument('--effects-bundle',type=Path,help='Live client bundle supplying native effects (Skeletal Fire Mage)')
     args = parser.parse_args()
-    spec = stage(args.source, args.project, args.cells.split(','),args.visuals,args.calibration,args.gpu_compression)
+    spec = stage(args.source, args.project, args.cells.split(','),args.visuals,args.calibration,args.gpu_compression,args.effects_bundle)
     print('Isolated project:', args.project.resolve(), flush=True)
     if args.build or args.android_only:
         log = args.project.resolve() / ('android-build.log' if args.android_only else 'build.log')

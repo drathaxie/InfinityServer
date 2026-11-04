@@ -36,7 +36,11 @@ def prepare():
         assert len([c for c in proof['presentation_checks'] if c['kind']=='depth_front_behind'])==expected_depth
     if VERSION>=4:
         assert proof['raster_quality']['source_raster_scale']==3
-        assert len([c for c in proof['presentation_checks'] if c['kind']=='npc_dragon_overlap_exercised'])==1
+        if VERSION<=5:assert len([c for c in proof['presentation_checks'] if c['kind']=='npc_dragon_overlap_exercised'])==1
+    if VERSION>=6:
+        kinds={c['kind'] for c in proof['effect_checks']}
+        assert {'effect_fire_count','effect_fire_live','effect_fire_fit','effect_smoke_live','effect_bundle_binding'}<=kinds
+        assert all(c['passed'] for c in proof['effect_checks'])
     if VERSION>=5:
         assert proof['raster_quality']['tiling']['unique_tiles']>0
         assert {t['format'] for t in proof['raster_quality']['textures']}=={'BC7'}
@@ -91,7 +95,7 @@ def run(mode):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode',choices=('preflight','prepare','stage','dry-run','apply','verify'))
-    parser.add_argument('--revision',type=int,choices=(2,3,4,5),default=2)
+    parser.add_argument('--revision',type=int,choices=(2,3,4,5,6),default=2)
     args=parser.parse_args();VERSION=args.revision
     SOURCE=ROOT/('outputs/map_converter_trial/shadowfall/revisions/v'+str(VERSION))
     OUT=SOURCE/'live_shadowtest';REMOTE='/tmp/infinity-shadowtest-v'+str(VERSION)+'-20261102'

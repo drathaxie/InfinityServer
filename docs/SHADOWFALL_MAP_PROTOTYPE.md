@@ -3,7 +3,70 @@
 November 2, 2026. The selected conversion pilot is Shadowfall, replacing the
 earlier Greenguard proposal. Native map inspection remains reference material.
 
-## Version 5 published: sparse tiles and GPU compression
+## Version 6 published: baked gameplay art removed, native fire and smoke
+
+November 4. The user asked to drop art that a native Infinity map doesn't bake
+in, and to upgrade the old Flash torch flames (suggesting the fire-mage
+monster's), plus smoke rolling across the crashed-dragon courtyard.
+
+Removed by exact root placement (`remove` in
+`map_configs/shadowfall-layout-v6.json`), never by symbol: char 367 (the
+skeleton guard) is reused by skeleton NPCs in other rooms.
+
+* Enter: NSoD (598), Doomy (604), the armored guard + its "!" popup (498/500),
+  and the Flash "Set Background" UI button (642).
+* Garden1: both skeleton spear guards (752/850) and the "!" popup (1102), the
+  six collectible dogs (878-1058) and their three blue markers (1096-1100).
+  The gold ground arrows are base art and stay.
+* NPCs belong to the server's map NPC placements; none are configured for
+  `shadowtest` yet.
+
+Fire (`replace.fire`): the 7 Flash flames (char 1373) become the Skeletal Fire
+Mage's `Animation/FX_Fire Med_wGlow/ps_fire med` effect (live AE bundle
+`npcs/46573_skeletalfiremage` v10, SHA-256 `199431e6…dbe762`): flame flipbook,
+glow, embers and fireball core. Particle settings are copied verbatim
+(`EditorUtility.CopySerialized`); materials are rebuilt on the same stock
+`Mobile/Particles/*` shaders with the bundle's textures (extracted by
+`build_map_prototype.py --effects-bundle`). The URP sprite-shader core maps to
+`Mobile/Particles/Alpha Blended` (identical unlit). Each fire keeps the
+orientation its parents give it in the monster, is turned so the plume rises
+straight up (all 7 within 7 degrees), and is scaled to 1.15x the height of the
+flame it replaces. Static bands now break at replaced depths, so each fire
+paints between the art below it and its own brazier, which Flash draws over the
+flame's base.
+
+Smoke (`smoke: true`): a new looping emitter with AE's `simpleSmoke2` texture.
+Soft puffs drift left to right at ~1.1 units/s across the floor band (60 px
+above the highest spawn pad to the stage bottom), prewarmed, faded in and out,
+on BGFront above the ground art and behind players and depth props. This is
+new presentation, not a source behaviour.
+
+The isolated project now enables `com.unity.modules.particlesystem`; without
+it, bundles silently drop every ParticleSystem (the first v6 build had 0).
+
+Validation: 18 Python tests; 22 art comparisons with effects excluded (worst
+mean 0.396/255, p99 9); 902 Animator checks; 7 depth checks; 62 effect checks
+(fire count, live, upright, fitted size; smoke live; all 30 particle systems
+keep material, shader and texture when loaded from the bundle); Android carries
+all 30, and ASTC pages hold to the source (worst mean 0.261). GPU atlas memory
+is 18.4 MiB on PC. Previews: `revisions/v6/unity_build/*-effects-unity.png`.
+Not yet observed in the installed client or on an Android device.
+
+* Windows SHA-256: `25d9bf47182c256e333c564155051ae2bddee3ac0aea6aa9cc71b84b36450b7a`; CRC `1382493032`.
+* Android SHA-256: `eebb39e438f2d40b0f79d4f0803d42dc3b540db9fb0aba5a43301235b12a99bc`; CRC `49459675`.
+* Backup: `/opt/infinity/backups/shadowtest-v6-20261104T143414Z`. Game PID preserved.
+
+```powershell
+$env:SWF2UNITY_CONFLATION_SCALE='4'
+python scripts/swf2unity/map_visuals.py outputs/map_converter_trial/shadowfall outputs/map_converter_trial/shadowfall/revisions/v6/visuals --layout scripts/swf2unity/map_configs/shadowfall-layout-v6.json --reuse outputs/map_converter_trial/shadowfall/revisions/v4/visuals --raster-scale 3
+python scripts/swf2unity/build_map_prototype.py outputs/map_converter_trial/shadowfall/revisions/v6 --project outputs/map_converter_trial/shadowfall/UnityProject --visuals outputs/map_converter_trial/shadowfall/revisions/v6/visuals --calibration scripts/swf2unity/map_configs/shadowfall-calibration-v4.json --gpu-compression --effects-bundle outputs/map_converter_trial/shadowfall/effect_sources/46573_skeletalfiremage_v10.unity3d --build
+python scripts/swf2unity/verify_map_prototype.py outputs/map_converter_trial/shadowfall/revisions/v6
+```
+
+The effect source bundle is the live one at
+`content.130-162-189-229.sslip.io/game/assetbundles/windows/npcs/46573_skeletalfiremage/10/`.
+
+## Historical version 5: sparse tiles and GPU compression
 
 November 3. After v4 the user called its 160 MiB of uncompressed atlas memory
 inefficient. Measurement: only 34% of the v4 atlas held visible art; static

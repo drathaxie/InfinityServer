@@ -20,8 +20,9 @@ public static class MapPrototypeBuilder
     [Serializable] public class AtlasDef { public string path; public int height; }
     [Serializable] public class VisualLayer { public string name,group; public int order,period,source_char; public int[] frames; public float x,y; }
     [Serializable] public class VisualGroup { public string name,kind; public float speed,x,y; }
-    [Serializable] public class VisualCell { public string name; public VisualLayer[] layers; public VisualGroup[] groups; }
-    [Serializable] public class InputData { public float width,height,pixelsPerUnit,fps,cameraZoom,rasterScale; public string outputDir,atlas; public Cell[] cells; public bool layered,gpuCompression; public int atlasHeight; public AtlasDef[] visualAtlases; public FrameDef[] visualFrames; public VisualCell[] visualCells; public int[] sampleFrames; }
+    [Serializable] public class Effect { public string kind; public int depth,order; public float x0,x1,y0,y1; }
+    [Serializable] public class VisualCell { public string name; public VisualLayer[] layers; public VisualGroup[] groups; public Effect[] effects; }
+    [Serializable] public class InputData { public float width,height,pixelsPerUnit,fps,cameraZoom,rasterScale; public string outputDir,atlas; public Cell[] cells; public bool layered,gpuCompression; public int atlasHeight; public AtlasDef[] visualAtlases; public FrameDef[] visualFrames; public VisualCell[] visualCells; public int[] sampleFrames; public string effectsBundle,effectArtDir; }
     [Serializable] public class CheckRecord { public string cell,kind,target; public int samples; public bool passed; }
     [Serializable] public class Report { public string status,proofBoundary; public int cells; public CheckRecord[] checks; }
     static InputData input;
@@ -30,6 +31,12 @@ public static class MapPrototypeBuilder
     static Dictionary<string,List<VisualClock>> clocks=new Dictionary<string,List<VisualClock>>();
     static Sprite[] visualSprites;
     static Sprite[][] tileSprites;
+    // Native effects replacing Flash art: the Skeletal Fire Mage's torch-style fire (npcs/46573, live AE) and ground smoke.
+    const string FireSource="Animation/FX_Fire Med_wGlow/ps_fire med";
+    static AssetBundle effectBundle;
+    static GameObject fireSource;
+    static Dictionary<string,Material> effectMaterials=new Dictionary<string,Material>();
+    static List<string> skippedEffectParts=new List<string>();
     static Vector2 Pos(float x,float y) => new Vector2(x/input.pixelsPerUnit,-y/input.pixelsPerUnit);
 
     static GameObject Node(string name,Transform parent) { var go=new GameObject(name); go.transform.SetParent(parent,false); return go; }
@@ -100,6 +107,7 @@ public static class MapPrototypeBuilder
                 var dragonArt=dragon.GetComponentsInChildren<SpriteRenderer>();
                 Check(dragon.GetComponent<ZOffset>()==null&&dragonArt.All(r=>r.sortingLayerName=="BGFront"),spec.name,"dragon_background_binding","DragonBackdrop");
                 int totalOverlap=0;
+                bool hasActors=spec.groups.Any(g=>g.kind=="actor");
                 foreach(var group in spec.groups.Where(g=>g.kind=="actor"))
                 {
                     var actor=props.Single(p=>p.name==group.name);var actorArt=actor.GetComponentsInChildren<SpriteRenderer>();
@@ -122,7 +130,7 @@ public static class MapPrototypeBuilder
                     File.WriteAllBytes(Path.Combine(input.outputDir,spec.name+"-"+group.name+"-dragon-composition.png"),combined.EncodeToPNG());
                     UnityEngine.Object.DestroyImmediate(mask);UnityEngine.Object.DestroyImmediate(dragonMask);UnityEngine.Object.DestroyImmediate(combined);
                 }
-                Check(totalOverlap>50,spec.name,"npc_dragon_overlap_exercised",totalOverlap.ToString());
+                if(hasActors)Check(totalOverlap>50,spec.name,"npc_dragon_overlap_exercised",totalOverlap.ToString());
                 for(int i=0;i<all.Length;i++)all[i].enabled=enabled[i];
                 camera.backgroundColor=Color.black;
                 int nativeOrder=0;foreach(var p in props.OrderByDescending(p=>p.transform.position.y-p.yOffset))p.sortingGroup.sortingOrder=(++nativeOrder)*500;
@@ -294,6 +302,7 @@ public static class MapPrototypeBuilder
             sr.transform.position=parent.TransformPoint(new Vector3(layer.x/input.pixelsPerUnit,-layer.y/input.pixelsPerUnit,5));
             renderers[layer.name]=sr;
         }
+        AddEffects(spec,cell,parent,hasDepth?groups["Ground"]:folder.transform);
         string controllerPath="Assets/Generated/Visuals/"+cell.name+"_Clocks.controller";
         var controller=AssetDatabase.LoadAssetAtPath<AnimatorController>(controllerPath)??AnimatorController.CreateAnimatorControllerAtPath(controllerPath);
         int layerIndex=0;
@@ -319,6 +328,151 @@ public static class MapPrototypeBuilder
         }
         var animator=parent.gameObject.AddComponent<Animator>();animator.runtimeAnimatorController=controller;
         animator.cullingMode=AnimatorCullingMode.AlwaysAnimate;
+    }
+    static Material EffectMaterial(Material source)
+    {
+        if(effectMaterials.TryGetValue(source.name,out var made))return made;
+        // Stock particle shaders ship with every Unity player. The URP sprite shader (fireball core) has no
+        // equivalent in this built-in project; unlit, it is the same texture x vertex colour alpha blend.
+        string name=source.shader.name;
+        var shader=Shader.Find(name.StartsWith("Universal Render Pipeline/2D/Sprite")?"Mobile/Particles/Alpha Blended":name);
+        if(shader==null)throw new Exception("Particle shader unavailable: "+name);
+        var material=new Material(shader){name=source.name};
+        if(source.mainTexture!=null)
+        {
+            var art=AssetDatabase.LoadAssetAtPath<Texture2D>(input.effectArtDir+"/"+source.mainTexture.name+".png");
+            if(art==null)throw new Exception("Extracted effect texture missing: "+source.mainTexture.name);
+            material.mainTexture=art;material.mainTextureScale=source.mainTextureScale;material.mainTextureOffset=source.mainTextureOffset;
+        }
+        foreach(var property in new[]{"_TintColor","_Color"})
+            if(source.HasProperty(property)&&material.HasProperty(property))material.SetColor(property,source.GetColor(property));
+        Directory.CreateDirectory("Assets/Generated/Effects");
+        AssetDatabase.CreateAsset(material,"Assets/Generated/Effects/"+string.Concat(source.name.Select(c=>char.IsLetterOrDigit(c)?c:'_'))+".mat");
+        effectMaterials[source.name]=material;return material;
+    }
+    static GameObject PortParticles(GameObject source,Transform parent)
+    {
+        var node=Node(source.name,parent);
+        node.transform.localPosition=source.transform.localPosition;node.transform.localRotation=source.transform.localRotation;
+        node.transform.localScale=source.transform.localScale;
+        var system=source.GetComponent<ParticleSystem>();var renderer=source.GetComponent<ParticleSystemRenderer>();
+        if(system!=null&&renderer!=null&&renderer.sharedMaterial!=null)
+        {
+            var copy=node.AddComponent<ParticleSystem>();EditorUtility.CopySerialized(system,copy);
+            var copyRenderer=node.GetComponent<ParticleSystemRenderer>();EditorUtility.CopySerialized(renderer,copyRenderer);
+            copyRenderer.sharedMaterial=EffectMaterial(renderer.sharedMaterial);copyRenderer.trailMaterial=null;
+            var main=copy.main;main.scalingMode=ParticleSystemScalingMode.Hierarchy;main.playOnAwake=true;main.prewarm=main.loop;
+        }
+        else if(system!=null)skippedEffectParts.Add(source.name);
+        foreach(Transform child in source.transform)PortParticles(child.gameObject,node.transform);
+        return node;
+    }
+    static float PlumeAngle(ParticleSystem system,float seconds)
+    {
+        // Direction from the emitter to the particles' centroid, in degrees (90 = straight up).
+        system.Simulate(seconds,true,true);
+        var particles=new ParticleSystem.Particle[system.particleCount];int count=system.GetParticles(particles);
+        bool local=system.main.simulationSpace==ParticleSystemSimulationSpace.Local;Vector3 sum=Vector3.zero;
+        for(int i=0;i<count;i++)sum+=local?system.transform.TransformPoint(particles[i].position):particles[i].position;
+        system.Clear(true);
+        if(count==0)return 90;
+        var d=sum/count-system.transform.position;return Mathf.Atan2(d.y,d.x)*Mathf.Rad2Deg;
+    }
+    static float ParticleHeight(ParticleSystem system,float seconds)
+    {
+        system.Simulate(seconds,true,true);
+        var particles=new ParticleSystem.Particle[system.particleCount];int count=system.GetParticles(particles);
+        if(count==0)return 0;
+        bool local=system.main.simulationSpace==ParticleSystemSimulationSpace.Local;float low=float.MaxValue,high=float.MinValue;
+        for(int i=0;i<count;i++)
+        {
+            var p=local?system.transform.TransformPoint(particles[i].position):particles[i].position;
+            float half=particles[i].GetCurrentSize(system)*system.transform.lossyScale.y/2;
+            low=Mathf.Min(low,p.y-half);high=Mathf.Max(high,p.y+half);
+        }
+        system.Clear(true);return high-low;
+    }
+    static void AddEffects(VisualCell spec,Cell cell,Transform parent,Transform ground)
+    {
+        if(spec.effects==null||spec.effects.Length==0)return;
+        var root=Node("NativeEffects",ground);float ppu=input.pixelsPerUnit;
+        foreach(var effect in spec.effects)
+        {
+            GameObject node;
+            if(effect.kind=="fire")
+            {
+                if(fireSource==null)
+                {
+                    effectBundle=AssetBundle.LoadFromFile(input.effectsBundle);
+                    var mage=effectBundle.LoadAllAssets<GameObject>().Single(g=>g.name.ToLowerInvariant()=="skeletalfiremage");
+                    fireSource=mage.transform.Find(FireSource)?.gameObject??throw new Exception("Fire effect missing from source: "+FireSource);
+                }
+                node=PortParticles(fireSource,root.transform);node.name="TorchFire_"+effect.depth;
+                // Keep the orientation it has inside the monster (its parents turn the emitter), then stand the
+                // plume upright over the brazier.
+                var sourceRoot=fireSource.transform.root;
+                node.transform.rotation=Quaternion.Inverse(sourceRoot.rotation)*fireSource.transform.rotation;
+                var system=node.GetComponent<ParticleSystem>();
+                float angle=PlumeAngle(system,2);
+                node.transform.rotation=Quaternion.AngleAxis(90-angle,Vector3.forward)*node.transform.rotation;
+                float upright=PlumeAngle(system,2);
+                Check(Mathf.Abs(upright-90)<15,spec.name,"effect_fire_upright",node.name+" plume="+upright);
+                // Base of the replaced Flash flame (the brazier lip); size the flame to the one it replaces.
+                node.transform.position=parent.TransformPoint(new Vector3((effect.x0+effect.x1)/2/ppu,-(effect.y1-(effect.y1-effect.y0)*.15f)/ppu,4));
+                float target=(effect.y1-effect.y0)/ppu*1.15f,measured=ParticleHeight(node.GetComponent<ParticleSystem>(),2);
+                Check(measured>0,spec.name,"effect_fire_emits",node.name);
+                node.transform.localScale*=target/Mathf.Max(measured,.001f);
+                float fitted=ParticleHeight(node.GetComponent<ParticleSystem>(),2);
+                Check(Mathf.Abs(fitted/target-1)<.3f,spec.name,"effect_fire_fit",node.name+" target="+target+" fitted="+fitted);
+            }
+            else if(effect.kind=="smoke")node=GroundSmoke(cell,parent,root.transform);
+            else throw new Exception("Unknown map effect: "+effect.kind);
+            // Painter slot of the replaced art: after the layer below it, before the next (same order, nearer z).
+            foreach(var r in node.GetComponentsInChildren<ParticleSystemRenderer>())
+            {r.sortingLayerName="BGFront";r.sortingOrder=effect.kind=="smoke"?effect.order:effect.order-1;}
+        }
+    }
+    static GameObject GroundSmoke(Cell cell,Transform parent,Transform root)
+    {
+        // Low smoke rolling left to right across the walkable band of the room: new presentation, AE smoke texture.
+        float ppu=input.pixelsPerUnit,width=input.width/ppu;
+        // Flash walk areas cover the whole stage (blockers carve the floor), so the floor band runs from just
+        // above the highest spawn pad to the bottom of the stage.
+        float top=(cell.spawns.Min(p=>p.y)-60)/ppu,bottom=input.height/ppu,speed=1.1f;
+        var node=Node("GroundSmoke",root);node.transform.position=parent.TransformPoint(new Vector3(-4,-(top+bottom)/2,4));
+        var system=node.AddComponent<ParticleSystem>();system.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
+        var main=system.main;main.loop=true;main.prewarm=true;main.duration=10;main.playOnAwake=true;
+        main.startLifetime=(width+10)/speed;main.startSpeed=0;main.startSize=new ParticleSystem.MinMaxCurve(6,14);
+        main.startRotation=new ParticleSystem.MinMaxCurve(0,Mathf.PI*2);main.maxParticles=160;
+        main.startColor=new ParticleSystem.MinMaxGradient(new Color(.70f,.74f,.68f,.42f),new Color(.52f,.56f,.52f,.28f));
+        main.simulationSpace=ParticleSystemSimulationSpace.Local;main.scalingMode=ParticleSystemScalingMode.Hierarchy;
+        var emission=system.emission;emission.rateOverTime=48/main.startLifetime.constant;
+        var shape=system.shape;shape.shapeType=ParticleSystemShapeType.Box;shape.scale=new Vector3(.1f,Mathf.Max(2,bottom-top),.1f);
+        var velocity=system.velocityOverLifetime;velocity.enabled=true;velocity.space=ParticleSystemSimulationSpace.Local;
+        velocity.x=new ParticleSystem.MinMaxCurve(speed*.8f,speed*1.2f);velocity.y=new ParticleSystem.MinMaxCurve(-.06f,.06f);velocity.z=new ParticleSystem.MinMaxCurve(0,0);
+        var spin=system.rotationOverLifetime;spin.enabled=true;spin.z=new ParticleSystem.MinMaxCurve(-.12f,.12f);
+        var fade=system.colorOverLifetime;fade.enabled=true;var gradient=new Gradient();
+        gradient.SetKeys(new[]{new GradientColorKey(Color.white,0),new GradientColorKey(Color.white,1)},
+                         new[]{new GradientAlphaKey(0,0),new GradientAlphaKey(1,.12f),new GradientAlphaKey(1,.85f),new GradientAlphaKey(0,1)});
+        fade.color=gradient;
+        var shader=Shader.Find("Mobile/Particles/Alpha Blended");
+        var art=AssetDatabase.LoadAssetAtPath<Texture2D>(input.effectArtDir+"/simpleSmoke2.png")??AssetDatabase.LoadAssetAtPath<Texture2D>(input.effectArtDir+"/Smoke26.png");
+        if(art==null)throw new Exception("Extracted smoke texture missing");
+        if(!effectMaterials.TryGetValue("GroundSmoke",out var material))
+        {
+            material=new Material(shader){name="GroundSmoke",mainTexture=art};Directory.CreateDirectory("Assets/Generated/Effects");
+            AssetDatabase.CreateAsset(material,"Assets/Generated/Effects/GroundSmoke.mat");effectMaterials["GroundSmoke"]=material;
+        }
+        var renderer=node.GetComponent<ParticleSystemRenderer>();renderer.sharedMaterial=material;renderer.renderMode=ParticleSystemRenderMode.Billboard;
+        return node;
+    }
+    static void SimulateEffects(Transform cell,bool clear)
+    {
+        foreach(var system in cell.GetComponentsInChildren<ParticleSystem>().Where(s=>s.transform.parent.GetComponent<ParticleSystem>()==null))
+        {
+            if(clear)system.Clear(true);
+            else system.Simulate(system.name=="GroundSmoke"?system.main.startLifetime.constant*.8f:2,true,true);
+        }
     }
     public static void BuildAndroid()
     {
@@ -439,6 +593,19 @@ public static class MapPrototypeBuilder
                     foreach(var clock in clocks[spec.name]) clock.clip.SampleAnimation(clock.go,0);
                     foreach(var sg in sortingGroups)sg.enabled=true;
                     for(int i=0;i<sprites.Length;i++)sprites[i].sortingLayerID=layers[i];
+                    var effectSpec=input.visualCells.Single(c=>c.name==spec.name).effects??new Effect[0];
+                    if(effectSpec.Length>0)
+                    {
+                        // Art references above exclude effects (never simulated there); this preview shows them live.
+                        SimulateEffects(cellRoot,false);
+                        var fires=cellRoot.GetComponentsInChildren<ParticleSystem>().Where(ps=>ps.name.StartsWith("TorchFire_")).ToArray();
+                        Check(fires.Length==effectSpec.Count(e=>e.kind=="fire"),spec.name,"effect_fire_count",fires.Length.ToString());
+                        foreach(var fire in fires)Check(fire.particleCount>0,spec.name,"effect_fire_live",fire.name);
+                        var smoke=cellRoot.GetComponentsInChildren<ParticleSystem>().SingleOrDefault(ps=>ps.name=="GroundSmoke");
+                        if(effectSpec.Any(e=>e.kind=="smoke"))Check(smoke!=null&&smoke.particleCount>10,spec.name,"effect_smoke_live",smoke==null?"missing":smoke.particleCount.ToString());
+                        Capture(camera,spec.name+"-effects");
+                        SimulateEffects(cellRoot,true);
+                    }
                 }
                 else Capture(camera,spec.name);
                 marker.enabled=true;
@@ -467,6 +634,8 @@ public static class MapPrototypeBuilder
                 Check(probe.TryTransition()&&probe.currentCell==targetCell,expected,"transition",targetCell);
             }
             probe.Enter("Enter","Spawn");
+            if(effectBundle!=null){effectBundle.Unload(true);effectBundle=null;}
+            Check(skippedEffectParts.Count==0,"effects","source_parts_ported",string.Join(",",skippedEffectParts));
             Directory.CreateDirectory("Assets/Generated");
             PrefabUtility.SaveAsPrefabAsset(root,"Assets/Generated/map-shadowfall.prefab");
             EditorSceneManager.SaveScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene(),"Assets/Generated/ShadowfallPrototype.unity");
@@ -503,6 +672,8 @@ public static class MapPrototypeBuilder
                         }
                     }
                 }
+                foreach(var r in instance.GetComponentsInChildren<ParticleSystemRenderer>(true))
+                    Check(r.sharedMaterial!=null&&r.sharedMaterial.shader!=null&&r.sharedMaterial.mainTexture!=null,"bundle","effect_bundle_binding",r.name);
                 if(input.cameraZoom>0)VerifyDepthAndParallax(instance,camera);
                 UnityEngine.Object.DestroyImmediate(instance);
                 root.SetActive(true);

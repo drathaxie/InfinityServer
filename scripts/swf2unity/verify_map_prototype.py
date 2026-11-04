@@ -108,6 +108,8 @@ def verify(source, cells=('Enter', 'Garden1')):
     if calibration:report['calibration']=calibration
     animation_checks=[c for c in physics['checks'] if c['kind']=='loaded_animator_frame']
     if animation_checks:report['loaded_animator_checks']=dict(passed=len(animation_checks),failed=0)
+    effects=[c for c in physics['checks'] if c['kind'].startswith('effect_')]
+    if effects:report['effect_checks']=effects
     presentation=[c for c in physics['checks'] if c['kind'] in ('depth_front_behind','camera_horizontal_travel','parallax_relative_motion','parallax_ground_fixed','dragon_background_binding','npc_depth_binding','npc_dragon_opaque_pixels','npc_dragon_overlap_exercised')]
     if presentation:report['presentation_checks']=presentation
     visual=json.loads((source/'visuals/visuals.json').read_text()) if (source/'visuals/visuals.json').exists() else {}
@@ -117,6 +119,7 @@ def verify(source, cells=('Enter', 'Garden1')):
         for obj in UnityPy.load(str(bundle)).objects:
             if obj.type.name!='Texture2D':continue
             tree=obj.read_typetree()
+            if not tree['m_Name'].startswith('layered_atlas'):continue  # native effect art is checked by the Unity build
             assert tree['m_TextureSettings']['m_FilterMode']==1 and not tree['m_IsReadable']
             texture_checks.append(dict(name=tree['m_Name'],width=tree['m_Width'],height=tree['m_Height'],filter='Bilinear',cpu_copy_retained=False,
                                        format=UnityPy.enums.TextureFormat(tree['m_TextureFormat']).name,gpu_bytes=len(tree['image data']) or tree['m_CompleteImageSize']))
@@ -196,7 +199,9 @@ def verify_android(source):
             if obj.type.name=='AnimationClip':
                 tree=obj.read_typetree();clips[tree['m_Name']]=normalize(tree)
             elif obj.type.name=='Texture2D':
-                texture=obj.read();im=texture.image.convert('RGBA')
+                texture=obj.read()
+                if not texture.m_Name.startswith('layered_atlas'):continue
+                im=texture.image.convert('RGBA')
                 textures[texture.m_Name]=dict(size=im.size,format=UnityPy.enums.TextureFormat(texture.m_TextureFormat).name,
                                               sha256=hashlib.sha256(im.tobytes()).hexdigest(),**atlas_error(source,texture.m_Name,im))
         signatures.append(dict(clips=clips,textures=textures))
