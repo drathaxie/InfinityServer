@@ -25,7 +25,7 @@ def preflight():
         shared=plain(dict(c.execute('SELECT * FROM inf_asset_bundles WHERE bundle_id=?',(2100000,)).fetchone()))
         bundle=json.loads(REGISTRY.read_text())['2100000']
         assert row['str_map_name']=='shadowtest' and bundle['Name']=='shadowtest'
-        assert bundle['VersionLive']==shared['version_live'] and bundle['VersionLive'] in (1,2,3,4,5,6,7)
+        assert bundle['VersionLive']==shared['version_live'] and bundle['VersionLive'] in (1,2,3,4,5,6,7,8)
         assert json.loads(row['doc'])==json.loads((ROOT/'data/maps/shadowtest.json').read_text())
         return dict(map=row,shared_bundle=shared,bundle=bundle,registry_sha256=sha(REGISTRY),
                     map_file_sha256=sha(ROOT/'data/maps/shadowtest.json'),services=services(),
@@ -34,7 +34,7 @@ def preflight():
 
 
 def plan(payload_path):
-    p=json.loads(payload_path.read_text());assert p['map_id']==p['bundle_id']==2100000 and p['version'] in (2,3,4,5,6,7,8)
+    p=json.loads(payload_path.read_text());assert p['map_id']==p['bundle_id']==2100000 and p['version'] in (2,3,4,5,6,7,8,9)
     version=p['version']
     assert p['bundle']['FileName']=='maps/custom/2100000_map-shadowtest.unity3d'
     assert p['bundle']['VersionLive']==p['bundle']['VersionStage']==p['bundle']['VersionContent']==version

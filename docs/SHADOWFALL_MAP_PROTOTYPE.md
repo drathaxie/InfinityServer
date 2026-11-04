@@ -3,6 +3,30 @@
 November 2, 2026. The selected conversion pilot is Shadowfall, replacing the
 earlier Greenguard proposal. Native map inspection remains reference material.
 
+## Version 9 published: wider framing, parallax kept, source-proportion avatars
+
+November 4. In-client, v3-v8's camera (orthographic size 16) showed only 65% of
+the 49.4-unit room height, losing much of the scenery. Full-height framing
+(24.7) would leave ~8 units of pan at 16:9 and almost no parallax, which the
+user called out as a real-map feature to keep. v9 uses orthographic size 21.4:
+87% of the height and ~20 units of pan at 16:9. Parallax speeds are raised 1.7x
+(Sky 34, DistantCastle 14, CastleWall and banners 14) to keep v3-v8's depth
+shift over the shorter travel; layers follow the camera, so they reveal less
+past their art edges, and the ±3.3-unit vertical drift moves the sky at most
+11 px against its 24 px top margin.
+
+Avatars are sized to the source art's own baked humanoid NPCs (Enter NSoD/Doomy
+117-132 px, Garden1 skeleton guards 109 px), using an in-client measurement of
+~75 source px per unit scale: Enter 1.6, Garden1 1.4. entitySpeed is divided by
+the same factor, so world walking speed (entityScale x entitySpeed: 14 / 20.8)
+is unchanged. Settings: `map_configs/shadowfall-calibration-v9.json`,
+`shadowfall-layout-v9.json`. The camera-travel check now runs at 16:9 and
+requires the view to fit inside the room and pan more than 1 unit.
+
+* Windows SHA-256: `61105f902f6dedec53972f3d11c24026666074873c6cc76434153a2c5f9a6690`; CRC `3971002114`.
+* Android SHA-256: `94398e77b8441c39c33682be5afad61b1973b2a386682e0eb37028dc36bc4750`; CRC `277555315`.
+* Backup: `/opt/infinity/backups/shadowtest-v9-20261104T152508Z`. Game PID preserved.
+
 ## Version 8 published: lore effects for the fallen dracolich fortress
 
 November 4. Lore anchor: Shadowfall is the seat of the Shadowscythe (Sepulchure's

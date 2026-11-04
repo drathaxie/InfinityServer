@@ -180,9 +180,12 @@ public static class MapPrototypeBuilder
             int order=0;foreach(var p in props.OrderByDescending(p=>p.transform.position.y-p.yOffset))p.sortingGroup.sortingOrder=(++order)*500;
             var initial=bg.levels.Select(l=>l.Layer.transform.position).ToArray();
             var confiner=cell.GetComponent<MapCell>().ConfinerCollider;
+            // Camera travel and parallax at a 16:9 screen. With the whole room height framed (Flash-stage framing,
+            // calibration v9) the view fits inside the room and still pans a little; v3-v8's crop panned >20 units.
+            float captureAspect=camera.aspect;camera.aspect=16f/9;
             float halfWidth=input.cameraZoom*camera.aspect;
             float left=confiner.bounds.min.x+halfWidth,right=confiner.bounds.max.x-halfWidth;
-            Check(right-left>20,spec.name,"camera_horizontal_travel",(right-left).ToString());
+            Check(right-left>1&&input.cameraZoom*2<=confiner.bounds.size.y+.01f,spec.name,"camera_horizontal_travel",(right-left).ToString());
             foreach(bool atRight in new[]{false,true})
             {
                 camera.orthographicSize=input.cameraZoom;
@@ -199,6 +202,7 @@ public static class MapPrototypeBuilder
                 Capture(camera,spec.name+"-camera-"+(atRight?"right":"left"));
             }
             for(int i=0;i<bg.levels.Length;i++)bg.levels[i].Layer.transform.position=initial[i];
+            camera.aspect=captureAspect;
             camera.orthographicSize=input.height/input.pixelsPerUnit/2;
             camera.transform.position=new Vector3(input.width/input.pixelsPerUnit/2,-input.height/input.pixelsPerUnit/2,-10);
         }
