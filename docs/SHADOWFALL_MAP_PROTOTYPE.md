@@ -3,7 +3,7 @@
 November 2, 2026. The selected conversion pilot is Shadowfall, replacing the
 earlier Greenguard proposal. Native map inspection remains reference material.
 
-## Version 11: depth planes (2.5D parallax)
+## Version 11 published: depth planes (2.5D parallax)
 
 November 4. Community feedback ("the parallaxing is kinda unrealistic ... but
 interiors") was right: each plane must sit at one distance, but v3-v10 lumped
@@ -39,6 +39,7 @@ at a different rate without stretching the art. Planes give 2.5D, not true 3D.
 
 * Windows SHA-256: `a214932bf233b3c2ad0b09ac5b8d49c232440a4648526a0713ed41b02eab3c3f`; CRC `3198678418`.
 * Android SHA-256: `c64a1bc88efeb19ef526e2affe0425a33a342074469af114d25a3a48ce47c280`; CRC `489893779`.
+* Published; backup `/opt/infinity/backups/shadowtest-v11-20261104T195802Z`. Game PID preserved.
 
 ## Version 10 published: window glow and lanterns ride their wall; avatar size restored
 
