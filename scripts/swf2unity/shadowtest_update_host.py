@@ -41,6 +41,10 @@ def prepare():
         kinds={c['kind'] for c in proof['effect_checks']}
         assert {'effect_fire_count','effect_fire_live','effect_fire_fit','effect_smoke_live','effect_bundle_binding'}<=kinds
         assert all(c['passed'] for c in proof['effect_checks'])
+    if VERSION>=8:
+        kinds={c['kind'] for c in proof['effect_checks']}
+        assert {'effect_dracolich_eye_live','effect_lantern_live','effect_bats_live','effect_ash_live','effect_cinders_live',
+                'effect_torch_light_live','effect_banner_sway_bound'}<=kinds
     if VERSION>=5:
         assert proof['raster_quality']['tiling']['unique_tiles']>0
         assert {t['format'] for t in proof['raster_quality']['textures']}=={'BC7'}
@@ -95,7 +99,7 @@ def run(mode):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode',choices=('preflight','prepare','stage','dry-run','apply','verify'))
-    parser.add_argument('--revision',type=int,choices=(2,3,4,5,6,7),default=2)
+    parser.add_argument('--revision',type=int,choices=(2,3,4,5,6,7,8),default=2)
     args=parser.parse_args();VERSION=args.revision
     SOURCE=ROOT/('outputs/map_converter_trial/shadowfall/revisions/v'+str(VERSION))
     OUT=SOURCE/'live_shadowtest';REMOTE='/tmp/infinity-shadowtest-v'+str(VERSION)+'-20261102'

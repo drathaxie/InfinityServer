@@ -93,7 +93,7 @@ def verify(source, cells=('Enter', 'Garden1')):
                     assert not component['fields']['IsStatic'] and component['fields']['yModifier']==500
                     assert component['fields']['rootTransform']['m_PathID'] and component['fields']['sortingGroup']['m_PathID']
                 bg=native['components']['BGParallax'];assert len(bg)==1
-                assert [l['Speed'] for l in bg[0]['fields']['levels']]==[0]+[g['speed'] for g in groups if g['kind']=='parallax']
+                assert [l['Speed'] for l in bg[0]['fields']['levels']]==[0]+[g['speed'] for g in groups if g['kind'] in ('parallax','sway')]  # banners sway on their wall's parallax
                 assert all(l['Layer']['m_PathID'] for l in bg[0]['fields']['levels'])
     if (source/'visuals/visuals.json').exists():
         renders=verify_layered_renders(source,cells)

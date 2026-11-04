@@ -3,6 +3,55 @@
 November 2, 2026. The selected conversion pilot is Shadowfall, replacing the
 earlier Greenguard proposal. Native map inspection remains reference material.
 
+## Version 8 published: lore effects for the fallen dracolich fortress
+
+November 4. Lore anchor: Shadowfall is the seat of the Shadowscythe (Sepulchure's
+undead army), now ruled by Gravelyn; the skeleton crashed into the entrance is
+Sepulchure's fallen flying dracolich fortress. Effects are positioned in
+`map_configs/shadowfall-layout-v8.json` (`effects`, source px, optional `after`
+layer and parallax `group`); banners are `sway` groups.
+
+* **Dracolich eye** (Enter): AE `npcs/78866_dracolich_bone` v2 eye glow, ported,
+  visible only through a `SpriteMask` cut from the socket's own dark interior
+  (`build_map_prototype.socket_mask`), so it comes from inside the skull. AE's eye
+  smoke is one 999 s particle dissolved by a custom erosion shader, a permanent
+  streak on stock shaders, so it is rebuilt as faint red wisps (same texture and
+  colour) that appear only once they rise out. One eye: the second dark hole
+  is the nostril (user correction).
+* **Bats** (Enter sky): AQW Flash `mon/Bat2` (skeletal, red eyes), its "Walk" flap
+  loop (sprite 54, frames 17-29) baked from vectors by `bake_flipbook.py` into a
+  4x4 sheet; occasional groups of 1-3 cross in the Sky parallax layer, behind
+  the castle.
+* **Torch light**: a flickering warm glow (Fire Mage `Glow1`) behind each flame.
+* **Lanterns** (Enter): flicker glow on the two wall lamps, riding the
+  DistantCastle parallax.
+* **Ash + cinders**: grey ash drifting down across both rooms (lighter in
+  Garden1); cinders rising from the Enter rubble.
+* **Banners** (Garden1): all 7 Shadowscythe banners are split into their own
+  layers and sway +/-1.4 degrees from their top edge (3.6 s, phased), still on
+  the CastleWall parallax speed.
+* Deliberately not done: a green window glow (clashes with the red palette).
+
+Validation: 104 effect checks (16 kinds: live, fit, upright, socket mask,
+sway bindings, bundle bindings), 22 art comparisons (worst mean 0.396/255),
+902 Animator checks; 46 particle systems and the socket mask present on both
+platforms. Previews `revisions/v8/unity_build/*-effects*.png`.
+
+* Windows SHA-256: `e9a34a7d6fc8986b53e2f4b4e9bccff077cd1d3bcedeab2dfb9bebfd24d25723`; CRC `2202065946`.
+* Android SHA-256: `4b75ca897575f058452c5391cf1f30119ac1059aadae6c2a32fca2b5954efb5c`; CRC `875256300`.
+* Backup: `/opt/infinity/backups/shadowtest-v8-20261104T151731Z`. Game PID preserved.
+
+```powershell
+$env:SWF2UNITY_CONFLATION_SCALE='4'
+$E='outputs/map_converter_trial/shadowfall/effect_sources'
+python scripts/swf2unity/bake_flipbook.py "$E/Bat2.swf" 54 17 29 "$E/BatFlap.png" --zoom 0.6
+python scripts/swf2unity/map_visuals.py outputs/map_converter_trial/shadowfall outputs/map_converter_trial/shadowfall/revisions/v8/visuals --layout scripts/swf2unity/map_configs/shadowfall-layout-v8.json --reuse outputs/map_converter_trial/shadowfall/revisions/v4/visuals --raster-scale 3
+python scripts/swf2unity/build_map_prototype.py outputs/map_converter_trial/shadowfall/revisions/v8 --project outputs/map_converter_trial/shadowfall/UnityProject --visuals outputs/map_converter_trial/shadowfall/revisions/v8/visuals --calibration scripts/swf2unity/map_configs/shadowfall-calibration-v4.json --gpu-compression --effects-bundle "$E/46573_skeletalfiremage_v10.unity3d" --effect-source "dracolich=$E/78866_dracolich_bone_v2.unity3d" --bat-sheet "$E/BatFlap.png" --build
+```
+
+`Bat2.swf` is `aqw_rig_dataset/monsters/mon_Bat2_3fe0b59532/original.swf` from the
+XAMPP preservation dataset (SHA-256 `3fe0b595…`).
+
 ## Version 7 published: torch-sized flames
 
 November 4. In-client, the user found v6's flames "a liiiil too big": torches,

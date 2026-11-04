@@ -44,7 +44,41 @@ STUBS = {
 }
 
 
-def stage(source, project, cells, visuals=None, calibration=None, gpu_compression=False, effects_bundle=None):
+def layer_pixels(visual_data, visuals, layer, box):
+    """RGBA pixels (raster density) of one exported layer inside a source-px box (x0, y0, x1, y1)."""
+    rs=visual_data['raster_scale'];frame=visual_data['frames'][layer['frames'][0]]
+    pages=[np.asarray(Image.open(visuals/p['file']).convert('RGBA')) for p in visual_data['atlases']]
+    left=round((box[0]-layer['x'])*rs+frame['w']/2);top=round((box[1]-layer['y'])*rs+frame['h']/2)
+    w,h=round((box[2]-box[0])*rs),round((box[3]-box[1])*rs);out=np.zeros((h,w,4),np.uint8)
+    pieces=frame.get('tiles') or [dict(page=frame['page'],x=frame['x'],y=frame['y'],w=frame['w'],h=frame['h'],ox=0,oy=0)]
+    for t in pieces:
+        x0,y0=max(left,t['ox']),max(top,t['oy']);x1,y1=min(left+w,t['ox']+t['w']),min(top+h,t['oy']+t['h'])
+        if x1>x0 and y1>y0:
+            out[y0-top:y1-top,x0-left:x1-left]=pages[t['page']][t['y']+y0-t['oy']:t['y']+y1-t['oy'],t['x']+x0-t['ox']:t['x']+x1-t['ox']]
+    return out
+
+
+def socket_mask(visual_data, visuals, cell, effect, out_png):
+    """The eye socket's own dark interior in the art below the effect, pulled in from the rim: a sprite mask
+    so the glow shows only through the hole, as if it came from inside the skull."""
+    from scipy import ndimage
+    layer=next(l for l in cell['layers'] if l['source_path']==effect['after'])
+    r=effect['size'];box=(effect['x']-r,effect['y']-r,effect['x']+r,effect['y']+r)
+    pixels=layer_pixels(visual_data,visuals,layer,box);rs=visual_data['raster_scale']
+    dark=(pixels[...,:3].max(2)<20)&(pixels[...,3]>200)
+    labels,_=ndimage.label(dark);cy,cx=pixels.shape[0]//2,pixels.shape[1]//2
+    ys,xs=np.nonzero(labels)
+    if not len(ys):raise ValueError('No dark socket under effect at '+str((effect['x'],effect['y'])))
+    nearest=np.argmin((ys-cy)**2+(xs-cx)**2);hole=labels==labels[ys[nearest],xs[nearest]]
+    hole=ndimage.binary_erosion(hole,iterations=max(1,round(rs)))
+    alpha=ndimage.gaussian_filter(hole.astype(float),rs*.6)
+    image=np.zeros(pixels.shape,np.uint8);image[...,:3]=255;image[...,3]=np.clip(alpha*255*1.4,0,255).astype(np.uint8)
+    Image.fromarray(image).save(out_png)
+    return dict(mask_px=int(hole.sum()),box=box)
+
+
+def stage(source, project, cells, visuals=None, calibration=None, gpu_compression=False, effects_bundle=None,
+          effect_sources=(), bat_sheet=None):
     source, project = source.resolve(), project.resolve()
     manifest = json.loads((source / 'map_source.json').read_text(encoding='utf-8'))
     marker = project / 'map-prototype-owner.json'
@@ -83,14 +117,21 @@ def stage(source, project, cells, visuals=None, calibration=None, gpu_compressio
         pages=visual_data.get('atlases',[dict(file='atlas.png',height=visual_data['atlas_height'])])
         for i,page in enumerate(pages):
             shutil.copyfile(visuals/page['file'],assets/'MapArt'/('layered_atlas'+('' if i==0 else '_'+str(i))+'.png'))
-    if effects_bundle:
-        # Native effect art comes from a live client bundle; its textures are extracted so the map's own
-        # materials own them (a bundle cannot reference another bundle's assets).
+    sources=([('firemage',Path(effects_bundle))] if effects_bundle else [])+[(n,Path(p)) for n,p in effect_sources]
+    if sources:
+        # Native effect art comes from live client bundles; their textures are extracted (one folder per source)
+        # so the map's own materials own them: a bundle cannot reference another bundle's assets.
         import UnityPy
-        art=assets/'EffectArt';art.mkdir(exist_ok=True)
-        for obj in UnityPy.load(str(effects_bundle)).objects:
-            if obj.type.name=='Texture2D':
-                texture=obj.read();texture.image.save(art/(texture.m_Name+'.png'))
+        for name,path in sources:
+            art=assets/'EffectArt'/name;art.mkdir(parents=True,exist_ok=True)
+            for obj in UnityPy.load(str(path)).objects:
+                if obj.type.name=='Texture2D':
+                    texture=obj.read();texture.image.save(art/(texture.m_Name+'.png'))
+    bat=None
+    if bat_sheet:
+        bat=json.loads(Path(bat_sheet).with_suffix('.json').read_text())
+        (assets/'EffectArt'/'bat').mkdir(parents=True,exist_ok=True)
+        shutil.copyfile(bat_sheet,assets/'EffectArt'/'bat'/'BatFlap.png')
     scale=json.loads(calibration.read_text()) if calibration else None
     inputs = []
     for cell in manifest['cells']:
@@ -126,8 +167,18 @@ def stage(source, project, cells, visuals=None, calibration=None, gpu_compressio
                     visualFrames=visual_data['frames'],visualCells=visual_data['cells'],fps=visual_data['fps'],
                     sampleFrames=visual_data['samples'],rasterScale=visual_data.get('raster_scale',1),
                     visualAtlases=[dict(path='Assets/MapArt/layered_atlas'+('' if i==0 else '_'+str(i))+'.png',height=page['height']) for i,page in enumerate(pages)])
-    if effects_bundle:
-        spec.update(effectsBundle=str(effects_bundle.resolve()),effectArtDir='Assets/EffectArt')
+    if sources:
+        spec.update(effectSources=[dict(name=n,path=str(p.resolve())) for n,p in sources],effectArtDir='Assets/EffectArt')
+    if bat:
+        spec.update(batCols=bat['cols'],batRows=bat['rows'],batFrames=bat['frames'])
+    if visual_data:
+        masks=assets/'EffectArt'/'masks';masks.mkdir(parents=True,exist_ok=True)
+        for cell in visual_data['cells']:
+            for i,effect in enumerate(cell.get('effects',[])):
+                if effect['kind']=='dracolich_eye':
+                    name=cell['name']+'_eye_'+str(i)+'.png';info=socket_mask(visual_data,visuals,cell,effect,masks/name)
+                    if info['mask_px']<20:raise ValueError('Eye socket mask too small: '+str(info))
+                    effect['mask']='Assets/EffectArt/masks/'+name
     if scale:
         (source/'calibration.json').write_text(json.dumps(scale,indent=2))
     spec_path = project / 'map_input.json'
@@ -172,8 +223,11 @@ def main():
     parser.add_argument('--calibration',type=Path)
     parser.add_argument('--gpu-compression',action='store_true',help='BC7 (Standalone) / ASTC 6x6 (Android) atlas pages')
     parser.add_argument('--effects-bundle',type=Path,help='Live client bundle supplying native effects (Skeletal Fire Mage)')
+    parser.add_argument('--effect-source',action='append',default=[],metavar='NAME=BUNDLE',help='Extra effect bundle, e.g. dracolich=...')
+    parser.add_argument('--bat-sheet',type=Path,help='bake_flipbook.py sheet for the sky bats (with its .json)')
     args = parser.parse_args()
-    spec = stage(args.source, args.project, args.cells.split(','),args.visuals,args.calibration,args.gpu_compression,args.effects_bundle)
+    spec = stage(args.source, args.project, args.cells.split(','),args.visuals,args.calibration,args.gpu_compression,args.effects_bundle,
+                 [tuple(v.split('=',1)) for v in args.effect_source],args.bat_sheet)
     print('Isolated project:', args.project.resolve(), flush=True)
     if args.build or args.android_only:
         log = args.project.resolve() / ('android-build.log' if args.android_only else 'build.log')

@@ -323,6 +323,15 @@ def convert(source,out,layout=None,reuse=None,raster_scale=1):
         for effect in effects:
             # Paint between the layers it replaced: after every layer from a lower root depth (smoke goes on top).
             effect['order']=len(layers) if effect['depth'] is None else sum(int(l['source_path'].split('/')[0])<effect['depth'] for l in layers)
+        for placed in layout.get('cells',{}).get(cell['name'],{}).get('effects',[]):
+            # Positioned native effects (source px). 'after' paints just above that source layer; otherwise on top.
+            effect=dict(placed,depth=None)
+            if 'after' in placed:
+                above=[l for l in layers if l['source_path']==placed['after']]
+                if len(above)!=1:raise ValueError('Effect anchor layer not found: '+placed['after'])
+                effect['order']=above[0]['order']+1
+            else:effect['order']=len(layers)
+            effects.append(effect)
         plans.append(dict(name=cell['name'],layers=layers,groups=layout.get('cells',{}).get(cell['name'],{}).get('groups',[]),
                           effects=effects,removed_root_depths=sorted(removed)))
         reference(movie,cell,hidden,out,SAMPLES,raster_scale,removed)
