@@ -378,17 +378,19 @@ public static class MapPrototypeBuilder
         if(count==0)return 90;
         var d=sum/count-system.transform.position;return Mathf.Atan2(d.y,d.x)*Mathf.Rad2Deg;
     }
-    static float ParticleHeight(ParticleSystem system,float seconds)
+    static Vector2 ParticleExtent(ParticleSystem system,float seconds)
     {
+        // World width/height covered by this system's own particles (children such as the soft glow excluded).
         system.Simulate(seconds,true,true);
         var particles=new ParticleSystem.Particle[system.particleCount];int count=system.GetParticles(particles);
-        if(count==0)return 0;
-        bool local=system.main.simulationSpace==ParticleSystemSimulationSpace.Local;float low=float.MaxValue,high=float.MinValue;
+        if(count==0)return Vector2.zero;
+        bool local=system.main.simulationSpace==ParticleSystemSimulationSpace.Local;
+        Vector2 low=Vector2.positiveInfinity,high=Vector2.negativeInfinity;
         for(int i=0;i<count;i++)
         {
-            var p=local?system.transform.TransformPoint(particles[i].position):particles[i].position;
+            Vector2 p=local?system.transform.TransformPoint(particles[i].position):particles[i].position;
             float half=particles[i].GetCurrentSize(system)*system.transform.lossyScale.y/2;
-            low=Mathf.Min(low,p.y-half);high=Mathf.Max(high,p.y+half);
+            low=Vector2.Min(low,p-Vector2.one*half);high=Vector2.Max(high,p+Vector2.one*half);
         }
         system.Clear(true);return high-low;
     }
@@ -417,13 +419,16 @@ public static class MapPrototypeBuilder
                 node.transform.rotation=Quaternion.AngleAxis(90-angle,Vector3.forward)*node.transform.rotation;
                 float upright=PlumeAngle(system,2);
                 Check(Mathf.Abs(upright-90)<15,spec.name,"effect_fire_upright",node.name+" plume="+upright);
-                // Base of the replaced Flash flame (the brazier lip); size the flame to the one it replaces.
+                // Torch-sized, not bonfire-sized: the monster's fire is far wider than the thin Flash flame, so fit
+                // both axes (v6's height-only 1.15x fit read as bonfires in-client). Base sits on the brazier lip.
                 node.transform.position=parent.TransformPoint(new Vector3((effect.x0+effect.x1)/2/ppu,-(effect.y1-(effect.y1-effect.y0)*.15f)/ppu,4));
-                float target=(effect.y1-effect.y0)/ppu*1.15f,measured=ParticleHeight(node.GetComponent<ParticleSystem>(),2);
-                Check(measured>0,spec.name,"effect_fire_emits",node.name);
-                node.transform.localScale*=target/Mathf.Max(measured,.001f);
-                float fitted=ParticleHeight(node.GetComponent<ParticleSystem>(),2);
-                Check(Mathf.Abs(fitted/target-1)<.3f,spec.name,"effect_fire_fit",node.name+" target="+target+" fitted="+fitted);
+                var target=new Vector2((effect.x1-effect.x0)/ppu*2.2f,(effect.y1-effect.y0)/ppu*.6f);
+                var measured=ParticleExtent(system,2);
+                Check(measured.y>0,spec.name,"effect_fire_emits",node.name);
+                node.transform.localScale*=Mathf.Min(target.x/Mathf.Max(measured.x,.001f),target.y/Mathf.Max(measured.y,.001f));
+                var fitted=ParticleExtent(system,2);
+                Check(fitted.x<=target.x*1.3f&&fitted.y<=target.y*1.3f&&fitted.y>=target.y*.4f,spec.name,"effect_fire_fit",
+                      node.name+" target="+target+" fitted="+fitted);
             }
             else if(effect.kind=="smoke")node=GroundSmoke(cell,parent,root.transform);
             else throw new Exception("Unknown map effect: "+effect.kind);

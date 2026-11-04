@@ -3,6 +3,19 @@
 November 2, 2026. The selected conversion pilot is Shadowfall, replacing the
 earlier Greenguard proposal. Native map inspection remains reference material.
 
+## Version 7 published: torch-sized flames
+
+November 4. In-client, the user found v6's flames "a liiiil too big": torches,
+not bonfires. v6 fit only height (1.15x the Flash flame), but the monster's
+fire is far wider than the thin Flash flame. v7 fits both axes of the main
+flame's own particles (soft glow excluded): at most 0.6x the Flash flame's
+height and 2.2x its width, whichever binds. Entrance flames are now ~1.9 x 2.5
+units, Garden1 ~3 x 4. Everything else is v6 (visuals copied unchanged).
+
+* Windows SHA-256: `72bbe1a6977882a441dcc1eb5a7aac383a35b379d76e7ea317b9b08a286582e1`; CRC `326660873`.
+* Android SHA-256: `bf0eedd72e2be0ceecb37b9a2ad232caf5c761b0a5681c5f292f0efe474701fb`; CRC `893794832`.
+* Backup: `/opt/infinity/backups/shadowtest-v7-20261104T144208Z`. Game PID preserved.
+
 ## Version 6 published: baked gameplay art removed, native fire and smoke
 
 November 4. The user asked to drop art that a native Infinity map doesn't bake
